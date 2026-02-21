@@ -668,7 +668,8 @@ class measureMacro:
             s.get("ro_quality_params", s.get("ro_quality_metrics", {}))
         )
 
-        cls._drive_frequency   = s.get("drive_frequency", None)
+        _df = s.get("drive_frequency", None)
+        cls._drive_frequency   = None if _df is None else float(_df)
         cls._post_select_config = PostSelectionConfig.from_dict(s.get("post_select_config", None))
 
 
@@ -1204,7 +1205,7 @@ class measureMacro:
         freq : int | float | None
             If None, clears the drive frequency.
         """
-        cls._drive_frequency = None if freq is None else int(freq)
+        cls._drive_frequency = None if freq is None else float(freq)
 
     @classmethod
     def get_drive_frequency(cls):

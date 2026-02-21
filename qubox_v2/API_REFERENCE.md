@@ -313,41 +313,115 @@ JSON-backed typed calibration persistence with snapshot history.
 
 #### `calibration.CalibrationStore`
 
+Typed, versioned calibration data with JSON persistence and snapshot history.
+
 ```python
 from qubox_v2.calibration import CalibrationStore
 
-store = CalibrationStore("./calibration_data")
+store = CalibrationStore("./calibration.json", auto_save=False)
 
-# Store typed calibration values
-store.set("qubit_freq", 5.55e9)
-store.set("readout_fidelity", 0.97)
-store.set("T1", 25e-6)
+# Readout discrimination
+store.set_discrimination("resonator", threshold=0.003, angle=1.23,
+                         mu_g=[0.0, 0.0], mu_e=[0.01, 0.0],
+                         sigma_g=0.001, sigma_e=0.001, fidelity=0.97)
+disc = store.get_discrimination("resonator")  # -> DiscriminationParams
 
-# Retrieve with type safety
-freq = store.get("qubit_freq")           # Returns float
-all_data = store.snapshot()              # Full state dict
+# Readout quality (butterfly measurement)
+store.set_readout_quality("resonator", F=0.95, Q=0.98, V=0.90)
+rq = store.get_readout_quality("resonator")   # -> ReadoutQuality
 
-# History / snapshots
-store.save_snapshot("after_cooldown")
-store.list_snapshots()
-store.restore_snapshot("after_cooldown")
+# Element frequencies
+store.set_frequencies("qubit", lo_freq=5.5e9, if_freq=50e6,
+                      qubit_freq=5.55e9, chi=-1.5e6)
+freqs = store.get_frequencies("qubit")        # -> ElementFrequencies
+
+# Coherence times
+store.set_coherence("qubit", T1=25e-6, T2_ramsey=12e-6, T2_echo=30e-6)
+coh = store.get_coherence("qubit")            # -> CoherenceParams
+
+# Pulse calibrations
+store.set_pulse_calibration("x180", amplitude=0.45, element="qubit",
+                            drag_coeff=0.3)
+pcal = store.get_pulse_calibration("x180")    # -> PulseCalibration
+
+# Pulse-train error analysis
+store.set_pulse_train_result("qubit", pt_result)
+pt = store.get_pulse_train_result("qubit")    # -> PulseTrainResult
+
+# Fock SQR calibrations
+store.set_fock_sqr_calibrations("qubit", [cal_n0, cal_n1])
+sqr = store.get_fock_sqr_calibrations("qubit")# -> list[FockSQRCalibration]
+
+# Multi-state affine correction
+store.set_multi_state_calibration("resonator", ms_cal)
+ms = store.get_multi_state_calibration("resonator") # -> MultiStateCalibration
+
+# Fit history
+from qubox_v2.calibration import FitRecord
+store.store_fit(FitRecord(experiment="T1", model_name="T1_relaxation_model",
+                          params={"A": 0.5, "T1": 25e-6, "offset": 0.01}))
+last = store.get_latest_fit("T1")             # -> FitRecord | None
+hist = store.get_fit_history("T1")            # -> list[FitRecord]
+
+# Persistence & snapshots
+store.save()                                  # Write to JSON
+snap = store.snapshot("pre_optimization")     # Timestamped backup
+store.reload()                                # Reload from disk
 ```
 
 #### `calibration.models` — Pydantic v2 Calibration Models
 
-```python
-from qubox_v2.calibration.models import QubitCalibration, ReadoutCalibration
+| Model | Fields | Description |
+|-------|--------|-------------|
+| `DiscriminationParams` | `threshold`, `angle`, `mu_g`, `mu_e`, `sigma_g`, `sigma_e`, `fidelity`, `confusion_matrix` | Single-shot readout state discrimination |
+| `ReadoutQuality` | `F`, `Q`, `V`, `alpha`, `beta`, `confusion_matrix`, `affine_n` | Butterfly measurement metrics |
+| `ElementFrequencies` | `lo_freq`, `if_freq`, `qubit_freq`, `anharmonicity`, `fock_freqs`, `chi`, `chi2`, `chi3`, `kappa`, `kerr` | Calibrated element frequencies |
+| `CoherenceParams` | `T1`, `T2_ramsey`, `T2_echo`, `timestamp` | Coherence time measurements |
+| `PulseCalibration` | `pulse_name`, `element`, `amplitude`, `length`, `sigma`, `drag_coeff`, `detuning` | Calibrated pulse parameters |
+| `FitRecord` | `experiment`, `model_name`, `params`, `uncertainties`, `reduced_chi2`, `metadata` | Generic fit result with history |
+| `PulseTrainResult` | `element`, `amp_err`, `phase_err`, `delta`, `zeta`, `rotation_pulse`, `N_values` | Pulse-train tomography errors |
+| `FockSQRCalibration` | `fock_number`, `model_type`, `params`, `fidelity` | Per-Fock SQR gate calibration |
+| `MultiStateCalibration` | `element`, `alpha_values`, `affine_matrix`, `offset_vector`, `state_labels` | Multi-state affine IQ correction |
+| `CalibrationData` | (root container) | Aggregates all models, keyed by element |
 
-qubit_cal = QubitCalibration(
-    frequency=5.55e9,
-    anharmonicity=-220e6,
-    T1=25e-6,
-    T2_ramsey=12e-6,
-    pi_amplitude=0.45,
-    pi_length=40,
-)
-qubit_cal.save_json("qubit_cal.json")
+```python
+from qubox_v2.calibration.models import PulseTrainResult, FockSQRCalibration
+
+pt = PulseTrainResult(element="qubit", amp_err=0.01, phase_err=-0.003)
+sqr = FockSQRCalibration(fock_number=1, model_type="power_rabi",
+                          params={"g_pi": 0.45})
 ```
+
+#### `calibration.algorithms` (NEW in v3)
+
+Calibration analysis routines that accept experimental data, perform fitting,
+and return typed models ready for storage.
+
+```python
+from qubox_v2.calibration import (
+    fit_pulse_train,
+    compute_corrected_knobs,
+    fit_multi_alpha_affine,
+    apply_affine_correction,
+    fit_number_splitting,
+    fit_chi_ramsey,
+    fit_fock_sqr,
+    optimize_fock_sqr_iterative,
+    optimize_fock_sqr_spsa,
+)
+```
+
+| Function | Input | Returns | Description |
+|----------|-------|---------|-------------|
+| `fit_pulse_train` | `N_values`, `I_data`, `Q_data` | `PulseTrainResult` | Fit pulse-train tomography → amp_err, phase_err, delta |
+| `compute_corrected_knobs` | `PulseTrainResult`, `amplitude` | `dict` | Compute corrected amplitude/phase from pulse-train fit |
+| `fit_multi_alpha_affine` | `S_measured`, `S_ideal` dicts | `MultiStateCalibration` | Fit affine IQ correction from multi-state calibration |
+| `apply_affine_correction` | `S`, `MultiStateCalibration` | `ndarray` | Apply fitted affine correction to raw IQ data |
+| `fit_number_splitting` | `peak_frequencies` | `dict` | Extract chi, chi2, chi3 from number-split peak positions |
+| `fit_chi_ramsey` | `times`, `signal` | `dict` | Fit chi-Ramsey collapse-and-revival data |
+| `fit_fock_sqr` | `gains`, `signal`, `fock_number` | `FockSQRCalibration` | Fit single Fock-resolved SQR power Rabi curve |
+| `optimize_fock_sqr_iterative` | `gains`, `signals_per_fock` | `list[FockSQRCalibration]` | Iteratively fit SQR calibrations for each Fock number |
+| `optimize_fock_sqr_spsa` | `cost_function`, `x0` | `FockSQRCalibration` | SPSA optimizer for noisy experimental cost functions |
 
 #### `calibration.history`
 
@@ -649,16 +723,129 @@ from qubox_v2.experiments.result import RunResult, AnalysisResult, FitResult
 analysis = AnalysisResult.from_run(run_result, fit=fit_result, metrics={"fidelity": 0.99})
 ```
 
+#### Experiment `analyze()` / `plot()` Protocol
+
+All experiment classes implement the unified three-step protocol:
+
+```python
+exp = ExperimentClass(session)
+result = exp.run(...)                                    # Execute on hardware
+analysis = exp.analyze(result, update_calibration=True)  # Fit + extract metrics
+exp.plot(analysis)                                       # Visualize
+```
+
+**`analyze(result, *, update_calibration=False, **kw) -> AnalysisResult`**
+- Extracts data from `result.output` (e.g., `S`, `frequencies`, `delays`)
+- Fits physics models via `fit_and_wrap()` where applicable
+- Returns `AnalysisResult` with `.fit`, `.metrics`, `.data`
+- If `update_calibration=True`, persists results to `CalibrationStore`
+
+**`plot(analysis, *, ax=None, **kwargs) -> fig`**
+- Accepts optional `ax` kwarg for embedding in multi-panel figures
+- Returns `matplotlib.figure.Figure`
+- Shows data points, fit curves, and key metrics in legend/title
+
+**`AnalysisResult` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data` | `dict` | Raw data from the experiment output |
+| `fit` | `FitResult \| None` | Primary fit result |
+| `fits` | `dict[str, FitResult]` | Named fit results (e.g., per-Fock) |
+| `metrics` | `dict[str, Any]` | Extracted parameters (f0, T1, chi, ...) |
+
+**`FitResult` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `model_name` | `str` | Name of the fitted model |
+| `params` | `dict[str, float]` | Best-fit parameters (keys match model arg names) |
+| `uncertainties` | `dict[str, float]` | Parameter uncertainties |
+| `r_squared` | `float` | Goodness of fit |
+| `residuals` | `np.ndarray` | Fit residuals |
+| `metadata` | `dict[str, Any]` | Extra metadata (e.g., `{"equation": "..."}`) |
+
+#### `analysis.fitting.fit_and_wrap()` (NEW in v3)
+
+Bridge between `generalized_fit()` and the typed `FitResult`:
+
+```python
+from qubox_v2.analysis.fitting import fit_and_wrap
+
+fit = fit_and_wrap(x_data, y_data, model_function, p0, model_name="T1")
+# fit.params = {"A": ..., "T1": ..., "offset": ...}
+# Keys extracted from model function signature
+```
+
+#### `analysis.fitting.build_fit_legend()` (NEW in v3)
+
+Generates a multi-line legend string with the model equation and fitted parameter values.
+Used by all `plot()` methods for consistent equation display on figures.
+
+```python
+from qubox_v2.analysis.fitting import build_fit_legend
+
+legend_text = build_fit_legend(fit_result)
+# Returns e.g.:
+# "$y = \text{offset} + A\,e^{-t/T_1}$"
+# "A = 0.5123"
+# "T1 = 2.531e+04"
+# "offset = 0.01234"
+
+# Used in plot methods:
+ax.plot(x_fit, y_fit, "r-", label=build_fit_legend(analysis.fit))
+ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=10)
+```
+
+#### Unit conventions for auto_p0
+
+All `analyze()` methods construct automatic initial guesses (`auto_p0`) using the
+native units of the data. Since delays are stored in **nanoseconds** (ns) via
+`delay_clks * 4`, frequency parameters must be in **1/ns = GHz**:
+
+| Parameter | Unit | Example |
+|-----------|------|---------|
+| `delays`, `T1`, `T2` | ns | 10000 (= 10 us) |
+| `f_det`, `chi` | 1/ns (GHz) | 0.0002 (= 200 kHz) |
+| `gains`, `A`, `offset` | (unitless) | 0.5 |
+
+Users can override auto_p0 by passing explicit `p0=` to `analyze()`.
+
+**Per-experiment metrics reference:**
+
+| Experiment | Model | Key metrics |
+|------------|-------|-------------|
+| `ResonatorSpectroscopy` | `resonator_spec_model` | `f0`, `kappa` |
+| `QubitSpectroscopy` | `qubit_spec_model` | `f0`, `gamma` |
+| `PowerRabi` | `power_rabi_model` | `g_pi` |
+| `TemporalRabi` | `temporal_rabi_model` | `f_Rabi`, `T_decay`, `pi_length` |
+| `T1Relaxation` | `T1_relaxation_model` | `T1` |
+| `T2Ramsey` | `T2_ramsey_model` | `T2`, `f_det` |
+| `T2Echo` | `T2_echo_model` | `T2_echo` |
+| `AllXY` | (ideal pattern) | `gate_error` |
+| `DRAGCalibration` | (zero-crossing) | `optimal_alpha` |
+| `RandomizedBenchmarking` | `rb_survival_model` | `p`, `avg_gate_fidelity`, `error_per_gate` |
+| `IQBlob` | `two_state_discriminator` | `fidelity`, `angle`, `threshold` |
+| `ReadoutButterflyMeasurement` | `butterfly_metrics` | `F`, `Q`, `V` |
+| `StorageSpectroscopy` | `resonator_spec_model` | `f_storage`, `kappa` |
+| `StorageChiRamsey` | `chi_ramsey_model` | `chi`, `nbar`, `T2_eff` |
+| `FockResolvedT1` | `T1_relaxation_model` (per-Fock) | `T1_fock_0`, `T1_fock_1`, ... |
+| `FockResolvedPowerRabi` | `power_rabi_model` (per-Fock) | `g_pi_fock_0`, `g_pi_fock_1`, ... |
+| `QubitStateTomography` | (Bloch vector) | `sx`, `sy`, `sz`, `purity` |
+| `StorageWignerTomography` | (parity -> W) | `W_min`, `W_max`, `negativity` |
+| `SPAFluxOptimization` | (peak search) | `best_dc`, `best_freq` |
+| `SPAPumpFrequencyOptimization` | (argmax) | `best_pump_power`, `best_pump_detuning`, `best_metric` |
+
 #### Experiment class hierarchy (NEW in v3)
 
 | Subdirectory | Classes |
 |--------------|---------|
-| `spectroscopy/` | `ResonatorSpectroscopy`, `ResonatorPowerSpectroscopy`, `QubitSpectroscopy`, `QubitSpectroscopyEF` |
-| `time_domain/` | `TemporalRabi`, `PowerRabi`, `RabiChevron`, `RamseyChevron`, `T1Relaxation`, `T2Ramsey`, `T2Echo` |
-| `calibration/` | `AllXY`, `DRAGCalibration`, `RandomizedBenchmarking`, `ReadoutDiscrimination`, `ReadoutButterfly`, `WeightsOptimization`, `ActiveReset`, `LeakageBenchmarking` |
-| `cavity/` | `StorageSpectroscopy`, `NumSplitting`, `ChiRamsey`, `FockResolvedSpectroscopy`, `FockResolvedRamsey` |
-| `tomography/` | `QubitStateTomography`, `FockStateTomography`, `WignerTomography`, `SNAPOptimization` |
-| `spa/` | `SPAFluxOptimization`, `SPAPumpFreqOptimization` |
+| `spectroscopy/` | `ResonatorSpectroscopy`, `ResonatorPowerSpectroscopy`, `ResonatorSpectroscopyX180`, `ReadoutTrace`, `ReadoutFrequencyOptimization`, `QubitSpectroscopy`, `QubitSpectroscopyCoarse`, `QubitSpectroscopyEF` |
+| `time_domain/` | `TemporalRabi`, `PowerRabi`, `T1Relaxation`, `T2Ramsey`, `T2Echo`, `ResidualPhotonRamsey` |
+| `calibration/` | `AllXY`, `DRAGCalibration`, `QubitPulseTrain`, `QubitPulseTrainLegacy`, `RandomizedBenchmarking`, `IQBlob`, `ReadoutGERawTrace`, `ReadoutGEIntegratedTrace`, `ReadoutGEDiscrimination`, `ReadoutWeightsOptimization`, `ReadoutButterflyMeasurement`, `CalibrateReadoutFull`, `ReadoutAmpLenOpt` |
+| `cavity/` | `StorageSpectroscopy`, `StorageSpectroscopyCoarse`, `NumSplittingSpectroscopy`, `StorageRamsey`, `StorageChiRamsey`, `StoragePhaseEvolution`, `FockResolvedSpectroscopy`, `FockResolvedT1`, `FockResolvedRamsey`, `FockResolvedPowerRabi` |
+| `tomography/` | `QubitStateTomography`, `FockResolvedStateTomography`, `StorageWignerTomography`, `SNAPOptimization` |
+| `spa/` | `SPAFluxOptimization`, `SPAFluxOptimization2`, `SPAPumpFrequencyOptimization` |
 
 #### `experiments.ExperimentRunner`
 
@@ -689,7 +876,7 @@ Data analysis, fitting, models, and visualisation.
 | Module | Key Exports |
 |--------|-------------|
 | `output.py` | `Output` — dict-like data container |
-| `fitting.py` | Lorentzian, Rabi, T1, T2, exponential fits |
+| `fitting.py` | `generalized_fit`, `fit_and_wrap`, `build_fit_legend` — curve fitting with typed results |
 | `algorithms.py` | `PeakObjective`, `lock_to_peak_3pt`, `scout_windows`, `refine_around` |
 | `analysis_tools.py` | `two_state_discriminator`, `apply_norm_IQ`, `compute_probabilities` |
 | `cQED_attributes.py` | `cQED_attributes` — typed experiment parameters |

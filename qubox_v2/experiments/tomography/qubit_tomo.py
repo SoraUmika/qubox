@@ -3,8 +3,13 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+import numpy as np
+import matplotlib.pyplot as plt
+
 from ..experiment_base import ExperimentBase
+from ..result import AnalysisResult
 from ...analysis import post_process as pp
+from ...analysis.cQED_plottings import plot_bloch_states
 from ...hardware.program_runner import RunResult
 from ...programs import cQED_programs
 from ...programs.macros.measure import measureMacro
@@ -63,3 +68,35 @@ class QubitStateTomography(ExperimentBase):
             result.output["n_preps"] = n_preps
 
         return result
+
+    def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        sx = result.output.extract("sx")
+        sy = result.output.extract("sy")
+        sz = result.output.extract("sz")
+        metrics: dict[str, Any] = {}
+
+        if sx is not None and sy is not None and sz is not None:
+            sx_val = float(np.mean(sx))
+            sy_val = float(np.mean(sy))
+            sz_val = float(np.mean(sz))
+            metrics["sx"] = sx_val
+            metrics["sy"] = sy_val
+            metrics["sz"] = sz_val
+            metrics["purity"] = float(sx_val**2 + sy_val**2 + sz_val**2)
+
+        return AnalysisResult.from_run(result, metrics=metrics)
+
+    def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
+        sx = analysis.metrics.get("sx")
+        sy = analysis.metrics.get("sy")
+        sz = analysis.metrics.get("sz")
+        if sx is None or sy is None or sz is None:
+            return None
+
+        states = [np.array([sx, sy, sz])]
+        labels = kwargs.get("labels", None)
+        fig, _ = plot_bloch_states(states, labels=labels)
+        purity = analysis.metrics.get("purity", 0)
+        plt.suptitle(f"Qubit State Tomography  |  Purity = {purity:.3f}")
+        plt.show()
+        return fig

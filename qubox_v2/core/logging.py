@@ -54,7 +54,16 @@ def get_logger(name: str) -> logging.Logger:
     Example:
         logger = get_logger(__name__)  # returns 'qubox.hardware.controller', etc.
     """
-    if name.startswith(QUBOX_LOGGER_NAME):
+    # Handle qubox_v2.* names by mapping them under the 'qubox' namespace
+    # so they inherit the configured log level from configure_global_logging().
+    if name.startswith("qubox_v2."):
+        suffix = name[len("qubox_v2."):]
+        return logging.getLogger(f"{QUBOX_LOGGER_NAME}.{suffix}")
+    if name == "qubox_v2":
+        return logging.getLogger(QUBOX_LOGGER_NAME)
+    if name.startswith(QUBOX_LOGGER_NAME + "."):
+        return logging.getLogger(name)
+    if name == QUBOX_LOGGER_NAME:
         return logging.getLogger(name)
     return logging.getLogger(f"{QUBOX_LOGGER_NAME}.{name}")
 

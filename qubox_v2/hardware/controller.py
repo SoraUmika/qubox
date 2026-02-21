@@ -233,8 +233,8 @@ class HardwareController:
         self._require_qm()
         self._check_el(el)
         if_freq = self.calculate_el_if_fq(el, freq)
-        self.qm.set_intermediate_frequency(el, if_freq)
-        self.elements[el]["IF"] = if_freq
+        self.qm.set_intermediate_frequency(el, float(if_freq))
+        self.elements[el]["IF"] = float(if_freq)
         _logger.info("Set '%s' to freq %.3f MHz → IF %.3f MHz", el, freq * 1e-6, if_freq * 1e-6)
 
     def set_octave_output(self, el: str, mode: RFOutputMode) -> None:

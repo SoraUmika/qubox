@@ -4,9 +4,12 @@ from __future__ import annotations
 from typing import Any, Callable
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase
+from ..result import AnalysisResult
 from ...analysis import post_process as pp
+from ...analysis.cQED_plottings import display_fock_populations
 from ...hardware.program_runner import RunResult
 from ...programs import cQED_programs
 
@@ -50,3 +53,48 @@ class FockResolvedStateTomography(ExperimentBase):
         )
         self.save_output(result.output, "fockResolvedTomography")
         return result
+
+    def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        S = result.output.extract("S")
+        metrics: dict[str, Any] = {}
+
+        if S is not None:
+            mag = np.abs(S)
+            if mag.ndim == 2:
+                n_fock = mag.shape[0]
+                fock_pops = np.mean(mag, axis=1)
+                metrics["n_fock"] = n_fock
+                metrics["fock_pops"] = fock_pops.tolist()
+            else:
+                metrics["n_points"] = int(len(mag))
+
+        return AnalysisResult.from_run(result, metrics=metrics)
+
+    def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
+        S = analysis.data.get("S")
+        if S is None:
+            return None
+
+        mag = np.abs(S)
+        if mag.ndim == 2:
+            n_fock = mag.shape[0]
+            fock_states = list(range(n_fock))
+            fock_pops = np.mean(mag, axis=1)
+            display_fock_populations(
+                fock_states, fock_pops,
+                title="Fock-Resolved State Tomography",
+            )
+            return plt.gcf()
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 5))
+        else:
+            fig = ax.figure
+        ax.bar(range(len(mag)), mag)
+        ax.set_xlabel("Fock State")
+        ax.set_ylabel("Population")
+        ax.set_title("Fock-Resolved State Tomography")
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+        return fig

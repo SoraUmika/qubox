@@ -159,6 +159,11 @@ class ExperimentBase:
     """
 
     def __init__(self, ctx: Any) -> None:
+        if ctx is None:
+            raise ValueError(
+                "Experiment context is not set. Pass a SessionManager or "
+                "ExperimentRunner instance when creating an experiment."
+            )
         self._ctx = ctx
 
     @property
@@ -170,18 +175,36 @@ class ExperimentBase:
     # ------------------------------------------------------------------
     @property
     def attr(self) -> cQED_attributes:
-        return self._ctx.attributes
+        a = getattr(self._ctx, "attributes", None)
+        if a is None:
+            raise RuntimeError(
+                "Experiment context has no 'attributes'. Ensure cqed_params.json "
+                "exists in your experiment directory and was loaded successfully."
+            )
+        return a
 
     @property
     def pulse_mgr(self) -> PulseOperationManager:
-        return getattr(self._ctx, "pulseOpMngr",
-                       getattr(self._ctx, "pulse_mgr", None))
+        pm = getattr(self._ctx, "pulseOpMngr",
+                     getattr(self._ctx, "pulse_mgr", None))
+        if pm is None:
+            raise RuntimeError(
+                "Experiment context has no pulse manager. Check that "
+                "SessionManager or ExperimentRunner initialised correctly."
+            )
+        return pm
 
     @property
     def hw(self):
         """Hardware controller (QuaProgramManager or HardwareController)."""
-        return getattr(self._ctx, "quaProgMngr",
-                       getattr(self._ctx, "hw", None))
+        h = getattr(self._ctx, "quaProgMngr",
+                    getattr(self._ctx, "hw", None))
+        if h is None:
+            raise RuntimeError(
+                "Experiment context has no hardware controller. Check that "
+                "SessionManager or ExperimentRunner initialised correctly."
+            )
+        return h
 
     @property
     def device_manager(self) -> DeviceManager | None:
@@ -212,7 +235,16 @@ class ExperimentBase:
         self, prog, *, n_total: int, processors: list | None = None,
         process_in_sim: bool = False, **kw,
     ) -> RunResult:
-        """Run a QUA program via the hardware controller."""
+        """Run a QUA program via the ProgramRunner (or legacy QuaProgramManager)."""
+        # New path: SessionManager / ExperimentRunner expose a ProgramRunner
+        runner = getattr(self._ctx, "runner", None)
+        if runner is not None:
+            return runner.run_program(
+                prog, n_total=n_total,
+                processors=processors or [pp.proc_default],
+                process_in_sim=process_in_sim, **kw,
+            )
+        # Legacy path: QuaProgramManager has run_program directly
         return self.hw.run_program(
             prog, n_total=n_total,
             processors=processors or [pp.proc_default],
@@ -240,3 +272,47 @@ class ExperimentBase:
     def process(self, raw_output: Any, **params: Any) -> Any:
         """Post-process raw output. Default: return as-is."""
         return raw_output
+
+    def analyze(self, result: RunResult, *, update_calibration: bool = False, **params: Any) -> Any:
+        """Analyze experiment results. Override in subclasses.
+
+        Parameters
+        ----------
+        result : RunResult
+            The raw experiment result from :meth:`run`.
+        update_calibration : bool
+            If ``True``, write derived parameters into the
+            :pyattr:`calibration_store` (when available).
+
+        Returns
+        -------
+        AnalysisResult
+            A container with fitted parameters, metrics, and data.
+        """
+        raise NotImplementedError(
+            f"{self.name}.analyze() not implemented"
+        )
+
+    def plot(self, analysis, *, ax=None, **kwargs: Any) -> Any:
+        """Plot experiment results. Override in subclasses.
+
+        Parameters
+        ----------
+        analysis : AnalysisResult
+            The analysis result from :meth:`analyze`.
+        ax : matplotlib.axes.Axes, optional
+            If provided, draw into this axes instead of creating a new
+            figure.  Useful for subplot layouts.
+
+        Returns
+        -------
+        matplotlib.figure.Figure or None
+        """
+        raise NotImplementedError(
+            f"{self.name}.plot() not implemented"
+        )
+
+    @property
+    def calibration_store(self):
+        """Access the CalibrationStore from the context, if available."""
+        return getattr(self._ctx, "calibration", None)

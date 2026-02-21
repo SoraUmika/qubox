@@ -298,3 +298,129 @@ def generalized_fit(
         plt.show()
 
     return popt, pcov
+
+
+def fit_and_wrap(
+    xdata,
+    ydata,
+    model,
+    p0,
+    *,
+    model_name: str | None = None,
+    bounds=(-np.inf, np.inf),
+    plotting: bool = False,
+    **kwargs,
+):
+    """Call ``generalized_fit`` and wrap the result in a ``FitResult``.
+
+    Parameters
+    ----------
+    xdata, ydata, model, p0, bounds, plotting, **kwargs
+        Forwarded to :func:`generalized_fit`.
+    model_name : str, optional
+        Human-readable name stored in ``FitResult.model_name``.
+        Defaults to ``model.__name__``.
+
+    Returns
+    -------
+    FitResult
+        A typed result container with fitted parameters, uncertainties,
+        R-squared, and residuals.  On fit failure the ``params`` dict is
+        empty and ``metadata["failed"]`` is ``True``.
+    """
+    from ..experiments.result import FitResult
+
+    popt, pcov = generalized_fit(
+        xdata, ydata, model, p0, bounds=bounds, plotting=plotting, **kwargs,
+    )
+
+    name = model_name or getattr(model, "__name__", "model")
+
+    if popt is None:
+        return FitResult(model_name=name, params={}, metadata={"failed": True})
+
+    # Extract parameter names from model signature
+    sig = inspect.signature(model)
+    param_names = list(sig.parameters.keys())[1:]  # skip x
+    if len(param_names) != len(popt):
+        param_names = [f"p{i}" for i in range(len(popt))]
+
+    params = dict(zip(param_names, popt.tolist()))
+
+    # Uncertainties from covariance diagonal
+    uncertainties = {}
+    if pcov is not None:
+        try:
+            perr = np.sqrt(np.diag(pcov))
+            uncertainties = dict(zip(param_names, perr.tolist()))
+        except Exception:
+            pass
+
+    # R-squared
+    r_squared = None
+    try:
+        y_pred = model(np.asarray(xdata), *popt)
+        ss_res = np.sum((np.asarray(ydata) - y_pred) ** 2)
+        ss_tot = np.sum((np.asarray(ydata) - np.mean(ydata)) ** 2)
+        if ss_tot > 0:
+            r_squared = 1.0 - ss_res / ss_tot
+    except Exception:
+        pass
+
+    # Residuals
+    residuals = None
+    try:
+        residuals = np.asarray(ydata) - model(np.asarray(xdata), *popt)
+    except Exception:
+        pass
+
+    # Store the model equation string in metadata for use in plot legends
+    eq_str = ""
+    if hasattr(model, "equation"):
+        eq_str = model.equation
+    elif model.__doc__:
+        doc_lines = [line.strip() for line in model.__doc__.splitlines() if line.strip()]
+        eq_candidates = [line for line in doc_lines if '=' in line]
+        eq_str = eq_candidates[0] if eq_candidates else ""
+
+    return FitResult(
+        model_name=name,
+        params=params,
+        uncertainties=uncertainties,
+        r_squared=r_squared,
+        residuals=residuals,
+        metadata={"equation": eq_str} if eq_str else {},
+    )
+
+
+def build_fit_legend(fit, *, param_format="{:.4g}"):
+    """Build a legend string with the model equation and fitted parameter values.
+
+    Mirrors the legend text that ``generalized_fit`` produces when
+    ``plotting=True``, but works from a :class:`FitResult` object so it
+    can be used in experiment ``plot()`` methods.
+
+    Parameters
+    ----------
+    fit : FitResult
+        Fit result (from ``fit_and_wrap``).
+    param_format : str
+        Format string for parameter values (default ``"{:.4g}"``).
+
+    Returns
+    -------
+    str
+        Multi-line string: equation on line 1, one ``name = value`` per
+        subsequent line.  Returns empty string if *fit* has no params.
+    """
+    if not fit or not fit.params:
+        return ""
+
+    eq_str = fit.metadata.get("equation", "") if fit.metadata else ""
+    param_str = "\n".join(
+        f"{name} = {param_format.format(val)}"
+        for name, val in fit.params.items()
+    )
+    if eq_str:
+        return f"{eq_str}\n{param_str}"
+    return param_str

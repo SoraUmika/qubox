@@ -643,15 +643,22 @@ def resonator_spectroscopy_x180(qb_el, if_frequencies, r180, qb_therm_clks, n_av
             with for_(*from_array(ro_if, if_frequencies)):
                 # -------- Ground state measurement --------
                 update_frequency(measureMacro.active_element(), ro_if)
-                play(r180, qb_el)   
+                align()
+                measureMacro.measure(targets=[I, Q])
+                wait(int(qb_therm_clks), measureMacro.active_element())
+                save(I, I_st); save(Q, Q_st)
+
+                # -------- Excited state measurement --------
+                update_frequency(measureMacro.active_element(), ro_if)
+                play(r180, qb_el)
                 align()
                 measureMacro.measure(targets=[I, Q])
                 wait(int(qb_therm_clks), measureMacro.active_element())
                 save(I, I_st); save(Q, Q_st)
             save(n, n_st)
         with stream_processing():
-            I_st.buffer(len(if_frequencies)).average().save("I")
-            Q_st.buffer(len(if_frequencies)).average().save("Q")
+            I_st.buffer(2 * len(if_frequencies)).average().save("I")
+            Q_st.buffer(2 * len(if_frequencies)).average().save("Q")
             n_st.save("iteration")
 
     return pulsed_ro_program

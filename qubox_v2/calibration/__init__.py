@@ -8,17 +8,50 @@ with snapshot/history support.
 from .store import CalibrationStore
 from .models import (
     CalibrationData,
+    CoherenceParams,
     DiscriminationParams,
     ElementFrequencies,
-    ReadoutQuality,
     FitRecord,
+    FockSQRCalibration,
+    MultiStateCalibration,
+    PulseCalibration,
+    PulseTrainResult,
+    ReadoutQuality,
+)
+from .algorithms import (
+    apply_affine_correction,
+    compute_corrected_knobs,
+    fit_chi_ramsey,
+    fit_fock_sqr,
+    fit_multi_alpha_affine,
+    fit_number_splitting,
+    fit_pulse_train,
+    optimize_fock_sqr_iterative,
+    optimize_fock_sqr_spsa,
 )
 
 __all__ = [
+    # Store
     "CalibrationStore",
+    # Models
     "CalibrationData",
+    "CoherenceParams",
     "DiscriminationParams",
     "ElementFrequencies",
-    "ReadoutQuality",
     "FitRecord",
+    "FockSQRCalibration",
+    "MultiStateCalibration",
+    "PulseCalibration",
+    "PulseTrainResult",
+    "ReadoutQuality",
+    # Algorithms
+    "apply_affine_correction",
+    "compute_corrected_knobs",
+    "fit_chi_ramsey",
+    "fit_fock_sqr",
+    "fit_multi_alpha_affine",
+    "fit_number_splitting",
+    "fit_pulse_train",
+    "optimize_fock_sqr_iterative",
+    "optimize_fock_sqr_spsa",
 ]

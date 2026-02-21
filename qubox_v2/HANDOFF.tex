@@ -136,6 +136,23 @@ qubox_v2/
 \texttt{programs/cavity.py}                  &  34 & Re-export facade for cavity programs \\
 \texttt{programs/tomography.py}              &  20 & Re-export facade for tomography programs \\
 \texttt{MIGRATION.md}                        & $\sim$180 & v2$\rightarrow$v3 migration guide \\
+\midrule
+\multicolumn{3}{l}{\textbf{Sessions 10+ additions (analyze/plot, calibration, notebooks)}} \\
+\midrule
+\texttt{calibration/algorithms.py}           & $\sim$520 & Calibration algorithms: pulse-train, affine, chi, SPSA \\
+\texttt{analysis/fitting.py}                 & (extended) & Added \texttt{fit\_and\_wrap()} bridge to FitResult \\
+\texttt{experiments/experiment\_base.py}     & (extended) & Added \texttt{analyze()}/\texttt{plot()} protocol stubs \\
+\texttt{hardware/program\_runner.py}         & (extended) & Fixed progress bar visibility \\
+\texttt{experiments/spectroscopy/*.py}       & (extended) & analyze/plot for 8 spectroscopy classes \\
+\texttt{experiments/time\_domain/*.py}       & (extended) & analyze/plot for 5 time-domain classes \\
+\texttt{experiments/calibration/*.py}        & (extended) & analyze/plot for 13 calibration classes \\
+\texttt{experiments/cavity/*.py}             & (extended) & analyze/plot for 10 cavity classes \\
+\texttt{experiments/tomography/*.py}         & (extended) & analyze/plot for 4 tomography classes \\
+\texttt{experiments/spa/*.py}                & (extended) & analyze/plot for 3 SPA classes \\
+\texttt{calibration/models.py}               & (extended) & PulseTrainResult, FockSQRCalibration, MultiStateCalibration \\
+\texttt{calibration/store.py}                & (extended) & Typed getters/setters for all calibration models \\
+\texttt{notebooks/post\_cavity\_experiment.ipynb} & $\sim$72 cells & Full experiment notebook (v3 API) \\
+\texttt{notebooks/post\_cavity\_calibrations.ipynb} & $\sim$27 cells & Calibration workflows notebook (v3 API) \\
 \bottomrule
 \end{longtable}
 
@@ -199,6 +216,9 @@ All of:
         experiment class hierarchy table, updated directory layout,
         updated migration guide with v3 SessionManager workflow,
         new quick-start example, updated design principles.
+        \textbf{Sessions 10+:} Extended calibration section with typed CalibrationStore API,
+        10 model reference table, 9-function algorithm table, analyze/plot protocol docs,
+        per-experiment metrics reference table (20 experiments).
 
   \item \label{R8} \textbf{\texttt{MIGRATION.md}}
         --- \textcolor{green!60!black}{DONE}.
@@ -208,6 +228,25 @@ All of:
 
   \item \label{R9} \textbf{Optional: \texttt{Lab} facade class}
         --- NOT IMPLEMENTED (optional). Deferred for future work if needed.
+
+  \item \label{R10} \textbf{Experiment analyze/plot protocol}
+        --- \textcolor{green!60!black}{DONE}.
+        All 43+ experiment classes now implement \texttt{analyze()} and \texttt{plot()}.
+        \texttt{fit\_and\_wrap()} bridge in \texttt{analysis/fitting.py}.
+        Typed \texttt{AnalysisResult}/\texttt{FitResult} containers.
+
+  \item \label{R11} \textbf{Calibration infrastructure}
+        --- \textcolor{green!60!black}{DONE}.
+        Extended \texttt{CalibrationData} with PulseTrainResult, FockSQRCalibration,
+        MultiStateCalibration models. Extended \texttt{CalibrationStore} with typed
+        getters/setters for all 9 data categories. Created \texttt{calibration/algorithms.py}
+        with 9 analysis functions.
+
+  \item \label{R12} \textbf{Reference notebooks}
+        --- \textcolor{green!60!black}{DONE}.
+        \texttt{notebooks/post\_cavity\_experiment.ipynb}: 72-cell comprehensive experiment notebook.
+        \texttt{notebooks/post\_cavity\_calibrations.ipynb}: 27-cell calibration workflow notebook.
+        Both use unified \texttt{run() -> analyze() -> plot()} protocol.
 \end{enumerate}
 
 % ============================================================
@@ -223,6 +262,44 @@ class QubitSpectroscopy(ExperimentBase):
     def plot(self, result, **kw): ...
 \end{lstlisting}
 
+\subsection{Unified three-step protocol}
+All 43+ experiment classes follow:
+\begin{lstlisting}[language=Python]
+exp = ExperimentClass(session)
+result = exp.run(...)                              # Execute on hardware
+analysis = exp.analyze(result, update_calibration=True)  # Fit + metrics
+exp.plot(analysis)                                 # Visualize
+print(analysis.metrics)                            # Inspect results
+\end{lstlisting}
+
+\textbf{Key components:}
+\begin{itemize}
+  \item \texttt{analyze()} extracts data from \texttt{result.output}, fits physics models via
+        \texttt{fit\_and\_wrap()}, returns \texttt{AnalysisResult} with \texttt{.fit}, \texttt{.fits},
+        \texttt{.metrics}, \texttt{.data}
+  \item If \texttt{update\_calibration=True}, persists results to \texttt{CalibrationStore}
+  \item \texttt{plot()} accepts optional \texttt{ax} kwarg for multi-panel figures, returns \texttt{fig}
+  \item \texttt{fit\_and\_wrap(x, y, model\_func, p0, model\_name)} inspects model function
+        signature to extract parameter names $\rightarrow$ \texttt{FitResult.params} dict keys match
+        model argument names exactly
+\end{itemize}
+
+\subsection{Calibration persistence pipeline}
+\begin{lstlisting}[language=Python]
+# Experiment -> analyze(update_calibration=True) -> CalibrationStore
+#
+# CalibrationStore data categories:
+#   discrimination, readout_quality, frequencies, coherence,
+#   pulse_calibrations, fit_history, pulse_train_results,
+#   fock_sqr_calibrations, multi_state_calibration
+#
+# Calibration algorithms (calibration/algorithms.py):
+#   fit_pulse_train, compute_corrected_knobs,
+#   fit_multi_alpha_affine, apply_affine_correction,
+#   fit_number_splitting, fit_chi_ramsey,
+#   fit_fock_sqr, optimize_fock_sqr_iterative, optimize_fock_sqr_spsa
+\end{lstlisting}
+
 \subsection{SessionManager usage}
 \begin{lstlisting}[language=Python]
 with SessionManager("./cooldown_2025", qop_ip="10.0.0.1") as session:
@@ -231,6 +308,36 @@ with SessionManager("./cooldown_2025", qop_ip="10.0.0.1") as session:
     analysis = spec.analyze(result)
     spec.plot(analysis)
 \end{lstlisting}
+
+\subsection{Per-experiment metrics reference}
+
+\begin{longtable}{llp{5cm}}
+\toprule
+\textbf{Experiment} & \textbf{Model} & \textbf{Key Metrics} \\
+\midrule
+\endhead
+ResonatorSpectroscopy   & resonator\_spec\_model  & f0, kappa \\
+QubitSpectroscopy       & qubit\_spec\_model      & f0, gamma \\
+PowerRabi               & power\_rabi\_model      & g\_pi \\
+TemporalRabi            & temporal\_rabi\_model   & f\_Rabi, T\_decay, pi\_length \\
+T1Relaxation            & T1\_relaxation\_model   & T1 \\
+T2Ramsey                & T2\_ramsey\_model       & T2, f\_det \\
+T2Echo                  & T2\_echo\_model         & T2\_echo \\
+AllXY                   & (ideal pattern)         & gate\_error \\
+DRAGCalibration         & (zero-crossing)         & optimal\_alpha \\
+RandomizedBenchmarking  & rb\_survival\_model     & p, avg\_gate\_fidelity, error\_per\_gate \\
+IQBlob                  & two\_state\_discriminator & fidelity, angle, threshold \\
+ReadoutButterfly        & butterfly\_metrics      & F, Q, V \\
+StorageSpectroscopy     & resonator\_spec\_model  & f\_storage, kappa \\
+StorageChiRamsey        & chi\_ramsey\_model      & chi, nbar, T2\_eff \\
+FockResolvedT1          & T1 (per-Fock)           & T1\_fock\_0, T1\_fock\_1, \ldots \\
+FockResolvedPowerRabi   & power\_rabi (per-Fock)  & g\_pi\_fock\_0, g\_pi\_fock\_1, \ldots \\
+QubitStateTomography    & (Bloch vector)          & sx, sy, sz, purity \\
+StorageWignerTomography & (parity $\rightarrow$ W)& W\_min, W\_max, negativity \\
+SPAFluxOptimization     & (peak search)           & best\_dc, best\_freq \\
+SPAPumpFreqOptimization & (argmax)                & best\_pump\_power, best\_pump\_detuning \\
+\bottomrule
+\end{longtable}
 
 % ============================================================
 \section{File Statistics}
@@ -278,6 +385,40 @@ with SessionManager("./cooldown_2025", qop_ip="10.0.0.1") as session:
         Notebook generation (\texttt{notebooks/qubox\_v2\_usage.ipynb}).
         Migrated \texttt{seq\_1\_device/} data and validated end-to-end flow.
         Comprehensive codebase-wide fixes detailed in Section~\ref{sec:api-modernization}.
+
+  \item[Sessions 10+] \textbf{Experiment analyze/plot \& Calibration Infrastructure.}
+        Implemented full \texttt{analyze()}/\texttt{plot()} protocol across all 43+ experiment classes.
+        Created \texttt{fit\_and\_wrap()} bridge in \texttt{analysis/fitting.py}.
+        Fixed progress bar visibility in \texttt{hardware/program\_runner.py}.
+        Extended \texttt{calibration/models.py} with PulseTrainResult, FockSQRCalibration,
+        MultiStateCalibration.
+        Extended \texttt{calibration/store.py} with typed getters/setters for 9 data categories.
+        Created \texttt{calibration/algorithms.py} ($\sim$520 lines, 9 analysis functions).
+        Updated \texttt{calibration/\_\_init\_\_.py} exports.
+        Created \texttt{notebooks/post\_cavity\_experiment.ipynb} (72 cells, full experiment reference).
+        Created \texttt{notebooks/post\_cavity\_calibrations.ipynb} (27 cells, calibration workflows).
+        Updated \texttt{API\_REFERENCE.md} with protocol docs, model tables, algorithm reference.
+        Updated \texttt{HANDOFF.tex} with final status.
+        \textbf{All R1--R12 items COMPLETE (R9 deferred as optional).}
+
+  \item[Sessions 12+] \textbf{Plot equation display, unit fixes, documentation.}
+        Added \texttt{build\_fit\_legend()} function to \texttt{analysis/fitting.py} --- generates
+        multi-line legend string with model equation and fitted parameter values for
+        consistent figure annotations.
+        Added \texttt{.equation} attribute to all physics models in \texttt{cQED\_models.py};
+        stored in \texttt{FitResult.metadata["equation"]} by \texttt{fit\_and\_wrap()}.
+        Updated all \texttt{plot()} methods across 9 experiment files (20+ methods) to use
+        \texttt{build\_fit\_legend()} with outside-plot legend placement
+        (\texttt{bbox\_to\_anchor=(1.05, 1)}).
+        Fixed auto\_p0 unit mismatch bugs:
+        \texttt{T2Ramsey.analyze()}: \texttt{f\_det\_guess = qb\_detune / 1e9} (Hz $\rightarrow$ GHz = 1/ns);
+        \texttt{StorageChiRamsey.analyze()}: FFT-based chi estimate replacing arbitrary \texttt{1e6}.
+        Added \texttt{analyze()}/\texttt{plot()} to \texttt{ReadoutWeightsOptimization}.
+        Updated \texttt{post\_cavity\_experiment.ipynb} with explicit p0 values converted
+        from legacy $\mu$s/MHz convention to ns/GHz convention.
+        Updated \texttt{API\_REFERENCE.md} with \texttt{build\_fit\_legend()}, \texttt{FitResult.metadata},
+        unit convention table, corrected experiment class hierarchy (48 classes total).
+        Updated this \texttt{HANDOFF.tex}.
 \end{description}
 
 % ============================================================

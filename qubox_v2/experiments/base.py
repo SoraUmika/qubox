@@ -87,18 +87,28 @@ class ExperimentRunner:
         )
 
         # ---- 2. Hardware controller (connection) ----
-        self.hw = HardwareController(
-            config_engine=self.config_engine,
-            qop_ip=qop_ip,
+        from qm import QuantumMachinesManager
+        host = qop_ip or self.config_engine.hardware_extras.get("qop_ip", "localhost")
+        cal_db = str(oct_cal_path) if oct_cal_path else str(self.experiment_path)
+        self._qmm = QuantumMachinesManager(
+            host=host,
             cluster_name=cluster_name,
-            oct_cal_path=oct_cal_path,
+            octave_calibration_db_path=cal_db,
+        )
+        self.hw = HardwareController(
+            qmm=self._qmm,
+            config_engine=self.config_engine,
             **{k: v for k, v in kwargs.items()
-               if k in ("default_output_mode", "override_octave_json_mode")},
+               if k in ("default_output_mode",)},
         )
 
         # ---- 3. Program runner + queue ----
-        self.runner = ProgramRunner(controller=self.hw)
-        self.queue = QueueManager(controller=self.hw)
+        self.runner = ProgramRunner(
+            qmm=self._qmm,
+            controller=self.hw,
+            config_engine=self.config_engine,
+        )
+        self.queue = QueueManager(runner=self.runner)
 
         # ---- 4. Pulse operations ----
         self.pulse_mgr = PulseOperationManager(self.config_engine)
@@ -139,11 +149,11 @@ class ExperimentRunner:
 
     def _load_attributes(self) -> cQED_attributes:
         """Load or create experiment attributes."""
-        p = self.experiment_path / "config" / "cqed_params.json"
-        if p.exists():
-            return cQED_attributes.from_json(p)
-        _logger.info("No cqed_params.json — using defaults")
-        return cQED_attributes()
+        try:
+            return cQED_attributes.load(self.experiment_path)
+        except FileNotFoundError:
+            _logger.info("No cqed_params.json found — using defaults")
+            return cQED_attributes()
 
     # ------------------------------------------------------------------
     # Pulse helpers

@@ -134,6 +134,54 @@ class CalibrationData(BaseModel):
     # Fit history (keyed by experiment name)
     fit_history: dict[str, list[FitRecord]] = {}
 
+    # Advanced calibration data
+    pulse_train_results: dict[str, "PulseTrainResult"] = {}
+    fock_sqr_calibrations: dict[str, list["FockSQRCalibration"]] = {}
+    multi_state_calibration: dict[str, "MultiStateCalibration"] = {}
+
     # Timestamps
     created: str | None = None
     last_modified: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Pulse train tomography result
+# ---------------------------------------------------------------------------
+class PulseTrainResult(BaseModel):
+    """Stores amp_err, phase_err, delta, zeta from pulse-train tomography."""
+
+    element: str
+    amp_err: float
+    phase_err: float
+    delta: float = 0.0
+    zeta: float = 0.0
+    rotation_pulse: str = "x180"
+    N_values: list[int] = []
+    timestamp: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Fock-resolved SQR gate calibration
+# ---------------------------------------------------------------------------
+class FockSQRCalibration(BaseModel):
+    """Per-Fock SQR gate calibration."""
+
+    fock_number: int
+    model_type: str = ""
+    params: dict[str, float] = {}
+    fidelity: float | None = None
+    timestamp: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Multi-state affine calibration
+# ---------------------------------------------------------------------------
+class MultiStateCalibration(BaseModel):
+    """Multi-alpha 6-state affine calibration maps."""
+
+    element: str
+    alpha_values: list[float] = []
+    affine_matrix: list[list[float]] = []
+    offset_vector: list[float] = []
+    state_labels: list[str] = []
+    timestamp: str | None = None

@@ -86,7 +86,12 @@ class SessionManager:
         # --- 2. QM connection ---
         from qm import QuantumMachinesManager
         host = qop_ip or self.config_engine.hardware_extras.get("qop_ip", "localhost")
-        self._qmm = QuantumMachinesManager(host=host, cluster_name=cluster_name)
+        cal_db = str(oct_cal_path) if oct_cal_path else str(self.experiment_path)
+        self._qmm = QuantumMachinesManager(
+            host=host,
+            cluster_name=cluster_name,
+            octave_calibration_db_path=cal_db,
+        )
 
         self.hardware = HardwareController(
             qmm=self._qmm,
@@ -168,13 +173,18 @@ class SessionManager:
             )
         return None
 
+    @property
+    def device_manager(self) -> DeviceManager:
+        """Alias so ExperimentBase can access ``ctx.device_manager``."""
+        return self.devices
+
     def _load_attributes(self) -> cQED_attributes:
         """Load or create cQED experiment attributes."""
-        p = self.experiment_path / "config" / "cqed_params.json"
-        if p.exists():
-            return cQED_attributes.from_json(p)
-        _logger.info("No cqed_params.json — using default attributes")
-        return cQED_attributes()
+        try:
+            return cQED_attributes.load(self.experiment_path)
+        except FileNotFoundError:
+            _logger.info("No cqed_params.json found — using default attributes")
+            return cQED_attributes()
 
     # ------------------------------------------------------------------
     # Pulse helpers
@@ -230,10 +240,24 @@ class SessionManager:
     # ------------------------------------------------------------------
     def open(self) -> "SessionManager":
         """Open the QM connection and initialise hardware elements."""
-        cfg = self.config_engine.build_qm_config()
-        self.hardware.qm = self._qmm.open_qm(cfg)
-        _logger.info("QM connection opened.")
+        self.config_engine.merge_pulses(self.pulse_mgr)
+        self.hardware.open_qm()
+        self._load_measure_config()
         return self
+
+    def _load_measure_config(self) -> None:
+        """Load measureMacro state from measureConfig.json if it exists."""
+        from ..programs.macros.measure import measureMacro
+
+        path = self._resolve_path("measureConfig.json", required=False)
+        if path is not None:
+            measureMacro.load_json(str(path))
+            _logger.info("Loaded measureMacro state from %s", path)
+        else:
+            _logger.warning(
+                "No measureConfig.json found — measureMacro will use defaults. "
+                "Run readout calibration to populate it."
+            )
 
     # ------------------------------------------------------------------
     # Teardown

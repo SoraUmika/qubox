@@ -33,8 +33,9 @@ from tqdm import tqdm
 
 from ..core.errors import ConfigError, ConnectionError, JobError
 from ..core.utils import require, numeric_keys_to_ints, get_nested
+from ..core.logging import get_logger
 
-_logger = logging.getLogger(__name__)
+_logger = get_logger(__name__)
 
 
 # ────────────────────────── ExecMode / RunResult ──────────────────────────────
@@ -223,7 +224,7 @@ class ProgramRunner:
 
                 # Progress
                 if show_progress:
-                    self._report_progress(self.job, n_total, progress_handle)
+                    self._report_progress(self.job, n_total, progress_handle, show_progress=True)
 
                 # Execution report
                 if print_report:
@@ -274,28 +275,36 @@ class ProgramRunner:
         except Exception as e:
             _logger.error("Failed to halt job: %s", e)
 
-    def _report_progress(self, job: RunningQmJob, n_total: int, handle: str) -> None:
+    def _report_progress(self, job: RunningQmJob, n_total: int, handle: str, *, show_progress: bool = True) -> None:
         if not n_total:
             _logger.info("n_total not passed; skipping progress.")
             return
         handles = job.result_handles
-        if handle not in handles.keys():
-            _logger.warning("Progress handle '%s' not found; waiting without progress bar.", handle)
+
+        # Try the requested handle, then common fallback names
+        actual_handle = None
+        for candidate in (handle, "iteration", "n", "avg_counter"):
+            if candidate in handles.keys():
+                actual_handle = candidate
+                break
+
+        if actual_handle is None:
+            _logger.info("No progress handle found (tried '%s' + fallbacks); waiting for completion...", handle)
             while handles.is_processing():
-                time.sleep(0.05)
+                time.sleep(0.1)
+            _logger.info("Job complete.")
             return
 
-        show_bar = _logger.isEnabledFor(logging.INFO)
-        with tqdm(total=n_total, desc="Running Program...", disable=not show_bar) as bar:
+        with tqdm(total=n_total, desc="Running Program...", disable=not show_progress) as bar:
             while handles.is_processing():
                 time.sleep(0.05)
                 with contextlib.suppress(Exception):
-                    h = handles.get(handle)
+                    h = handles.get(actual_handle)
                     if h:
                         bar.n = h.fetch_all()
                         bar.refresh()
             with contextlib.suppress(Exception):
-                h = handles.get(handle)
+                h = handles.get(actual_handle)
                 if h:
                     bar.n = h.fetch_all()
                     bar.refresh()

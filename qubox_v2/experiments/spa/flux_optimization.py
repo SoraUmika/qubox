@@ -4,8 +4,10 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase
+from ..result import AnalysisResult
 from ...analysis import post_process as pp
 from ...analysis.output import Output
 from ...hardware.program_runner import RunResult
@@ -64,6 +66,71 @@ class SPAFluxOptimization(ExperimentBase):
             mode=rr.mode, output=output, sim_samples=None,
             metadata={"n_dc_points": len(dc_list)},
         )
+
+    def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        dc_values = result.output.extract("dc_values")
+        sample_fqs = result.output.extract("sample_fqs")
+        results_list = result.output.get("results", [])
+        metrics: dict[str, Any] = {}
+
+        if dc_values is not None and sample_fqs is not None and results_list:
+            # Build magnitude matrix (n_dc x n_freq)
+            mag_matrix = []
+            for out in results_list:
+                mag = out.get("magnitude", None)
+                if mag is not None:
+                    mag_matrix.append(np.asarray(mag))
+            if mag_matrix:
+                mag_2d = np.array(mag_matrix)
+                best_idx = np.unravel_index(np.argmax(mag_2d), mag_2d.shape)
+                metrics["best_dc"] = float(dc_values[best_idx[0]])
+                metrics["best_freq"] = float(sample_fqs[best_idx[1]])
+                metrics["peak_magnitude"] = float(mag_2d[best_idx])
+                metrics["n_dc_points"] = len(dc_values)
+                metrics["n_freq_points"] = len(sample_fqs)
+
+        return AnalysisResult.from_run(result, metrics=metrics)
+
+    def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
+        dc_values = analysis.data.get("dc_values")
+        sample_fqs = analysis.data.get("sample_fqs")
+        results_list = analysis.data.get("results", [])
+        if dc_values is None or sample_fqs is None or not results_list:
+            return None
+
+        mag_matrix = []
+        for out in results_list:
+            mag = out.get("magnitude", None)
+            if mag is not None:
+                mag_matrix.append(np.asarray(mag))
+        if not mag_matrix:
+            return None
+
+        mag_2d = np.array(mag_matrix)
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+        else:
+            fig = ax.figure
+
+        im = ax.pcolormesh(
+            np.asarray(sample_fqs) / 1e6, np.asarray(dc_values),
+            mag_2d, shading="auto",
+        )
+        fig.colorbar(im, ax=ax, label="Magnitude")
+
+        best_dc = analysis.metrics.get("best_dc")
+        best_freq = analysis.metrics.get("best_freq")
+        if best_dc is not None and best_freq is not None:
+            ax.axhline(best_dc, color="r", ls="--", alpha=0.5)
+            ax.axvline(best_freq / 1e6, color="r", ls="--", alpha=0.5)
+            ax.plot(best_freq / 1e6, best_dc, "rx", ms=12, mew=2)
+
+        ax.set_xlabel("Probe Frequency (MHz)")
+        ax.set_ylabel("DC Flux Bias (V)")
+        ax.set_title("SPA Flux Optimization")
+        plt.tight_layout()
+        plt.show()
+        return fig
 
 
 class SPAFluxOptimization2(ExperimentBase):
@@ -168,6 +235,45 @@ class SPAFluxOptimization2(ExperimentBase):
         })
         return RunResult(mode="run", output=output, sim_samples=None)
 
+    def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        mode = result.output.get("mode", "sweep")
+        metrics: dict[str, Any] = {"mode": mode}
+
+        if mode == "sweep":
+            # Delegate to SPAFluxOptimization.analyze
+            basic = SPAFluxOptimization(self._ctx)
+            return basic.analyze(result, update_calibration=update_calibration, **kw)
+
+        best_dc = result.output.get("best_dc", None)
+        if best_dc is not None:
+            metrics["best_dc"] = float(best_dc)
+
+        return AnalysisResult.from_run(result, metrics=metrics)
+
+    def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
+        mode = analysis.metrics.get("mode", "sweep")
+        if mode == "sweep":
+            basic = SPAFluxOptimization(self._ctx)
+            return basic.plot(analysis, ax=ax, **kwargs)
+
+        best_dc = analysis.metrics.get("best_dc")
+        if best_dc is None:
+            return None
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(6, 4))
+        else:
+            fig = ax.figure
+
+        ax.axhline(best_dc, color="r", lw=2, label=f"best DC = {best_dc:.5f} V")
+        ax.set_ylabel("DC Flux Bias (V)")
+        ax.set_title(f"SPA Flux Optimization ({mode})")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+        return fig
+
 
 class SPAPumpFrequencyOptimization(ExperimentBase):
     """SPA pump power × frequency 2-D optimization.
@@ -244,3 +350,58 @@ class SPAPumpFrequencyOptimization(ExperimentBase):
         })
         self.save_output(output, "SPAPumpFreqOpt")
         return RunResult(mode="run", output=output, sim_samples=None)
+
+    def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        metric_matrix = result.output.extract("metric_matrix")
+        pump_powers = result.output.extract("pump_powers")
+        pump_detunings = result.output.extract("pump_detunings")
+        metric_name = result.output.get("metric", "assignment_fidelity")
+        metrics: dict[str, Any] = {"metric": metric_name}
+
+        if metric_matrix is not None and pump_powers is not None and pump_detunings is not None:
+            # Mask NaN entries before finding best
+            valid = ~np.isnan(metric_matrix)
+            if np.any(valid):
+                masked = np.where(valid, metric_matrix, -np.inf)
+                best_idx = np.unravel_index(np.argmax(masked), masked.shape)
+                metrics["best_pump_power"] = float(pump_powers[best_idx[0]])
+                metrics["best_pump_detuning"] = float(pump_detunings[best_idx[1]])
+                metrics["best_metric"] = float(metric_matrix[best_idx])
+
+        return AnalysisResult.from_run(result, metrics=metrics)
+
+    def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
+        metric_matrix = analysis.data.get("metric_matrix")
+        pump_powers = analysis.data.get("pump_powers")
+        pump_detunings = analysis.data.get("pump_detunings")
+        if metric_matrix is None or pump_powers is None or pump_detunings is None:
+            return None
+
+        metric_name = analysis.metrics.get("metric", "Metric")
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+        else:
+            fig = ax.figure
+
+        im = ax.pcolormesh(
+            np.asarray(pump_detunings) / 1e6,
+            np.asarray(pump_powers),
+            np.asarray(metric_matrix),
+            shading="auto",
+        )
+        fig.colorbar(im, ax=ax, label=metric_name)
+
+        best_power = analysis.metrics.get("best_pump_power")
+        best_detune = analysis.metrics.get("best_pump_detuning")
+        if best_power is not None and best_detune is not None:
+            ax.axhline(best_power, color="r", ls="--", alpha=0.5)
+            ax.axvline(best_detune / 1e6, color="r", ls="--", alpha=0.5)
+            ax.plot(best_detune / 1e6, best_power, "rx", ms=12, mew=2)
+
+        ax.set_xlabel("Pump Detuning (MHz)")
+        ax.set_ylabel("Pump Power (dBm)")
+        ax.set_title(f"SPA Pump Optimization ({metric_name})")
+        plt.tight_layout()
+        plt.show()
+        return fig
