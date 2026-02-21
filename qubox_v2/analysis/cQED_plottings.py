@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import matplotlib.pyplot as plt
 from math import factorial
 from .fitting import generalized_fit
@@ -360,7 +360,7 @@ def display_fock_populations(
             plot_title = f"Fock Populations {label}"
             if fit_alpha and (fit_params is not None):
                 alpha_fit = fit_params['alpha']
-                plot_title += rf"  (|Î±| â‰ˆ {alpha_fit:.2f})"
+                plot_title += rf"  (|alpha| â‰ˆ {alpha_fit:.2f})"
         else:
             # User-provided title
             plot_title = title
@@ -399,7 +399,7 @@ def plot_wigner(W: np.ndarray,
                 x_vals: np.ndarray,
                 p_vals: np.ndarray) -> None:
     """
-    Plot a Wigner function W(Î±) on the (Re Î±, Im Î±) plane.
+    Plot a Wigner function W(alpha) on the (Re alpha, Im alpha) plane.
 
     Parameters
     ----------

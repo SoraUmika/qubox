@@ -1,6 +1,6 @@
-﻿
+
 from .waveforms import *
-from ..pulse_manager import PulseOperationManager
+from ..pulses.manager import PulseOperationManager
 from typing import Dict, Iterable, Tuple, Union, Optional
 def register_qubit_rotation(
     pom: PulseOperationManager,
@@ -30,7 +30,7 @@ def register_qubit_rotation(
     axis : {"X", "Y"}
         Rotation axis in the IQ plane:
           - "X": aligned along I (phase = 0)
-          - "Y": rotated by +Ï€/2 in IQ (phase = +Ï€/2)
+          - "Y": rotated by +pi_val/2 in IQ (phase = +pi_val/2)
     rlen : float
         Pulse length (ns).
     amp : float
@@ -91,7 +91,7 @@ def register_qubit_rotation(
         z = np.array(gauss, dtype=float) + 1j * np.array(drag, dtype=float)
 
     if axis_u == "Y":
-        z = z * 1j  # e^{iÏ€/2}
+        z = z * 1j  # e^{ipi_val/2}
 
     I_samples = z.real
     Q_samples = z.imag

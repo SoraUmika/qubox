@@ -1,4 +1,4 @@
-﻿# qubox/gates_v2/sequence.py
+# qubox_v2/gates/sequence.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List

@@ -1,4 +1,4 @@
-﻿# solver.py
+# solver.py
 import qutip as qt
 
 def _compile_hamiltonian(H, tlist, args=None):

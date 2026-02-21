@@ -1,4 +1,4 @@
-﻿# qubox/compile/param_space.py
+# qubox_v2/compile/param_space.py
 from __future__ import annotations
 
 from dataclasses import dataclass, field

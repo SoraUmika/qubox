@@ -1,4 +1,4 @@
-﻿# qubox/gates_v2/models/displacement.py
+# qubox_v2/gates/models/displacement.py
 from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache

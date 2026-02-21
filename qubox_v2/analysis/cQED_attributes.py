@@ -1,4 +1,4 @@
-﻿from typing import Optional
+from typing import Optional
 from dataclasses import dataclass, asdict
 import json
 from .analysis_tools import complex_encoder, complex_decoder

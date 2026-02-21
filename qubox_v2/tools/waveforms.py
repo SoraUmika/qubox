@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 from collections.abc import Sequence
 
 from scipy.signal.windows import gaussian, blackman, dpss
@@ -89,7 +89,7 @@ def kaiser_pulse_waveforms(
 
     Optional features:
       - subtracted: subtract final sample so first/last go closer to 0 (reduces HF leakage)
-      - detuning: apply a complex carrier exp(i 2Ï€ detuning t) in Hz (same convention as your DRAG function)
+      - detuning: apply a complex carrier exp(i 2pi_val detuning t) in Hz (same convention as your DRAG function)
       - alpha + anharmonicity: add an "i * derivative" quadrature term, DRAG-style.
         Note: for a pure selectivity window you can leave alpha=0.
 
@@ -102,7 +102,7 @@ def kaiser_pulse_waveforms(
     beta : float
         Kaiser window beta. Larger beta -> lower sidelobes (less crosstalk) but wider mainlobe (longer pulses needed).
     detuning : float
-        Detuning in Hz for complex modulation (baseband envelope multiplied by exp(i 2Ï€ detuning t)).
+        Detuning in Hz for complex modulation (baseband envelope multiplied by exp(i 2pi_val detuning t)).
     subtracted : bool
         If True, subtract the last sample so the waveform ends near 0 (reduces spectral splatter).
     sampling_rate : float
@@ -154,7 +154,7 @@ def kaiser_pulse_waveforms(
         denv_dt = np.gradient(env, dt_s)  # d(env)/dt in units of V/s
 
         # DRAG scaling: mirror your gaussian_drag convention
-        # Use (2Ï€*anharmonicity - 2Ï€*detuning) in rad/s
+        # Use (2pi_val*anharmonicity - 2pi_val*detuning) in rad/s
         denom = 2 * np.pi * (anharmonicity - detuning)
         z = z + 1j * denv_dt * (alpha / denom)
 
@@ -194,7 +194,7 @@ def slepian_pulse_waveforms(
         Passed to scipy.signal.windows.dpss(M, NW).
         Common values are 3, 4, etc.
     detuning : float
-        Detuning in Hz for complex modulation (baseband envelope multiplied by exp(i 2Ï€ detuning t)).
+        Detuning in Hz for complex modulation (baseband envelope multiplied by exp(i 2pi_val detuning t)).
     subtracted : bool
         If True, subtract the last sample so the waveform ends near 0.
     sampling_rate : float
@@ -556,9 +556,9 @@ def design_clear_kicks_from_rates(
     Parameters
     ----------
     kappa_rad_s : float
-        Resonator linewidth Îº in rad/s.
+        Resonator linewidth kappa in rad/s.
     chi_rad_s : float
-        Dispersive shift Ï‡ in rad/s (positive, we use Â±Ï‡ for g/e).
+        Dispersive shift chi_val in rad/s (positive, we use Â±chi_val for g/e).
     A_steady : float
         Steady-state measurement amplitude in volts (your usual readout level).
     segment_dt_s : float
@@ -578,7 +578,7 @@ def design_clear_kicks_from_rates(
     s_e = np.exp(-lam_e * segment_dt_s)
 
     # Linear response for constant drive during one segment
-    # Î±_out = s_j Î±_in + g_j * A, where A is in volts
+    # alpha_out = s_j alpha_in + g_j * A, where A is in volts
     g_g = -1j / lam_g * (1 - s_g)
     g_e = -1j / lam_e * (1 - s_e)
 
@@ -588,7 +588,7 @@ def design_clear_kicks_from_rates(
 
     # --- Ring-up system: 2 segments (A1, A2) ---
     # For each state j âˆˆ {g, e}:
-    #   Î±_j^(2) = s_j g_j A1 + g_j A2 = Î±_ss_j
+    #   alpha_j^(2) = s_j g_j A1 + g_j A2 = alpha_ss_j
     M = np.array(
         [
             [s_g * g_g, g_g],
@@ -600,8 +600,8 @@ def design_clear_kicks_from_rates(
     A1, A2 = np.linalg.solve(M, rhs_up)
 
     # --- Ring-down system: 2 segments (A4, A5) ---
-    # Start both states at steady state (Î±_ss_j), end at Î±_j^(5) = 0
-    # Î±_j^(5) = s_j^2 Î±_ss_j + s_j g_j A4 + g_j A5 = 0
+    # Start both states at steady state (alpha_ss_j), end at alpha_j^(5) = 0
+    # alpha_j^(5) = s_j^2 alpha_ss_j + s_j g_j A4 + g_j A5 = 0
     rhs_down = -np.array(
         [s_g**2 * alpha_ss_g, s_e**2 * alpha_ss_e],
         dtype=complex,
@@ -629,7 +629,7 @@ def build_CLEAR_waveform_from_physics(
     dt_s: float = 1e-9,
 ):
     """
-    Wrapper around CLEAR_waveform using Îº, Ï‡, and dt to choose kick amplitudes.
+    Wrapper around CLEAR_waveform using kappa, chi_val, and dt to choose kick amplitudes.
 
     Assumes all four kick segments have the same duration if you pass an int
     for t_kick (recommended for the analytic design).
@@ -644,9 +644,9 @@ def build_CLEAR_waveform_from_physics(
     A_steady : float
         Plateau amplitude in volts (your usual readout amplitude).
     kappa_rad_s : float
-        Resonator linewidth Îº in rad/s.
+        Resonator linewidth kappa in rad/s.
     chi_rad_s : float
-        Dispersive shift Ï‡ in rad/s.
+        Dispersive shift chi_val in rad/s.
     dt_s : float
         Time per sample in seconds (e.g. 1e-9 for 1 ns).
 
@@ -728,7 +728,7 @@ def gaussian_amp_for_same_rotation(
     sigma_tgt = target_dur / (2.0 * n_sigma)
 
     # Truncation factor from integrating a centered Gaussian over [0, dur]:
-    # area = amp * sigma * sqrt(2Ï€) * erf( (dur/2) / (sqrt(2)*sigma) )
+    # area = amp * sigma * sqrt(2pi_val) * erf( (dur/2) / (sqrt(2)*sigma) )
     # Here (dur/2)/(sqrt(2)*sigma) = n_sigma/sqrt(2), same for both pulses,
     # so erf(...) cancels; leaving amp âˆ 1/sigma âˆ 1/dur.
     # Still, we compute it explicitly for clarity.

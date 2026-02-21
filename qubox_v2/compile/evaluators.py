@@ -1,4 +1,4 @@
-﻿# qubox/compile/evaluators.py
+# qubox_v2/compile/evaluators.py
 from __future__ import annotations
 
 from typing import Any, Optional, Sequence

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 """config_builder.py
 
 Typed helper classes and a fluent ``ConfigBuilder`` to assemble Quantumâ€‘Machines

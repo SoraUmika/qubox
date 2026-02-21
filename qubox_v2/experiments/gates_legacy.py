@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -147,8 +147,8 @@ def embed_kraus_on_total(
 
 def _single_qubit_rotation(theta: float, phi: float) -> np.ndarray:
     """
-    Ideal single-qubit rotation about equatorial axis (cos Ï†, sin Ï†, 0):
-        U(Î¸, Ï†) = exp[-i Î¸/2 (cos Ï† Ïƒ_x + sin Ï† Ïƒ_y)]
+    Ideal single-qubit rotation about equatorial axis (cos phi, sin phi, 0):
+        U(Î¸, phi) = exp[-i Î¸/2 (cos phi Ïƒ_x + sin phi Ïƒ_y)]
     """
     theta = float(theta)
     phi = float(phi)
@@ -797,11 +797,11 @@ class SQR(Gate):
     Photon-number-Selective Qubit Rotation (generalisation of SNAP).
 
     Reference template source:
-      - If ref_I_x180_wf/ref_Q_x180_wf are provided: use them (X-selective Ï€ template).
+      - If ref_I_x180_wf/ref_Q_x180_wf are provided: use them (X-selective pi_val template).
       - Otherwise: look up ref_sel_x180_pulse from Gate.mgr (robustly, with '_pulse' toggling).
 
     Waveform:
-      w_tot(t) = Î£_n  scale_n * w0(t) * exp[-i(phi_n + d_alpha_n)] * exp(+i( (Ï‰_det[n]+d_omega_n) t ))
+      w_tot(t) = Î£_n  scale_n * w0(t) * exp[-i(phi_n + d_alpha_n)] * exp(+i( (omega_det[n]+d_omega_n) t ))
     where w0(t) is the complex template extracted from the reference pulse.
     """
 
@@ -1017,7 +1017,7 @@ class SQR(Gate):
 
         max_n = min(self.thetas.size, int(getattr(att, "max_fock_level", self.thetas.size - 1)) + 1)
 
-        # detunings Î”f_n (Hz) -> omega_det (rad/s)
+        # detunings Deltaf_n (Hz) -> omega_det (rad/s)
         if from_chi is None:
             from_chi = not (hasattr(att, "fock_fqs") and (getattr(att, "fock_fqs") is not None))
 
@@ -1133,27 +1133,27 @@ class SNAP(Gate):
 
     We support two constructions:
 
-    (A) include_unselective=False  -> two *selective* Ï€ pulses back-to-back
+    (A) include_unselective=False  -> two *selective* pi_val pulses back-to-back
         Implements the user's intended mapping:
-          Î¸=Ï€  -> X180 then  X180
+          Î¸=pi_val  -> X180 then  X180
           Î¸=0  -> X180 then -X180
 
-    (B) include_unselective=True   -> one *selective* Ï€ pulse + one *unselective* Ï€ pulse
+    (B) include_unselective=True   -> one *selective* pi_val pulse + one *unselective* pi_val pulse
         We rewrite this branch so it implements the SAME Î¸-mapping as (A), by choosing the
-        selective pulse axis Ï†_sel(Î¸) relative to the fixed unselective axis Ï†_uns.
+        selective pulse axis phi_sel(Î¸) relative to the fixed unselective axis phi_uns.
 
         Derivation (equatorial axes):
-          R(Ï€, Ï†_uns) R(Ï€, Ï†_sel) = -exp(i(Ï†_uns-Ï†_sel) Ïƒz)
-        Acting on |g> gives phase  -exp(-i(Ï†_uns-Ï†_sel)).
-        Choose Ï†_sel so that this phase equals exp(i Î¸) up to a global constant.
+          R(pi_val, phi_uns) R(pi_val, phi_sel) = -exp(i(phi_uns-phi_sel) Ïƒz)
+        Acting on |g> gives phase  -exp(-i(phi_uns-phi_sel)).
+        Choose phi_sel so that this phase equals exp(i Î¸) up to a global constant.
 
-        Taking Ï†_sel = Î¸ + Ï†_uns - Ï€  gives:
-          -exp(-i(Ï†_uns-Ï†_sel)) = -exp(-i(Ï†_uns-(Î¸+Ï†_uns-Ï€))) = -exp(-i(Ï€-Î¸)) = exp(iÎ¸)
-        (exactly; no leftover global aside from 2Ï€ periodicity).
+        Taking phi_sel = Î¸ + phi_uns - pi_val  gives:
+          -exp(-i(phi_uns-phi_sel)) = -exp(-i(phi_uns-(Î¸+phi_uns-pi_val))) = -exp(-i(pi_val-Î¸)) = exp(iÎ¸)
+        (exactly; no leftover global aside from 2pi_val periodicity).
 
-        So for Ï†_uns = 0 (X), Ï†_sel = Î¸ - Ï€:
-          Î¸=Ï€ -> Ï†_sel=0  ( +X )
-          Î¸=0 -> Ï†_sel=Ï€  ( -X )
+        So for phi_uns = 0 (X), phi_sel = Î¸ - pi_val:
+          Î¸=pi_val -> phi_sel=0  ( +X )
+          Î¸=0 -> phi_sel=pi_val  ( -X )
         which matches the same rule you stated.
     """
 
@@ -1362,7 +1362,7 @@ class SNAP(Gate):
         L = int(self.raw_angles.size)
         levels = np.arange(L, dtype=int)
 
-        # detunings Î”f_n in Hz
+        # detunings Deltaf_n in Hz
         if from_chi is None:
             from_chi = not (hasattr(att, "fock_fqs") and (getattr(att, "fock_fqs") is not None))
 
@@ -1382,8 +1382,8 @@ class SNAP(Gate):
         use_two_selective = (not add_unsel)
 
         if use_two_selective:
-            # Two selective Ï€ back-to-back (FIXED mapping):
-            #   Î¸=Ï€ -> X then X
+            # Two selective pi_val back-to-back (FIXED mapping):
+            #   Î¸=pi_val -> X then X
             #   Î¸=0 -> X then -X
             win = 2 * N
             T_sel = win * dt
@@ -1413,7 +1413,7 @@ class SNAP(Gate):
                 # Pulse 1: +X
                 w1 = (w0 * np.exp(1j * 0.0)) * np.exp(1j * (omega_n * t[seg1]))
 
-                # Pulse 2 axis: Ï†2 = Ï€ - Î¸  (so Î¸=Ï€ -> 0, Î¸=0 -> Ï€)
+                # Pulse 2 axis: phi2 = pi_val - Î¸  (so Î¸=pi_val -> 0, Î¸=0 -> pi_val)
                 phi2 = (np.pi - theta_n) + dalp
                 w2 = (w0 * np.exp(1j * phi2)) * np.exp(1j * (omega_n * t[seg2]))
 
@@ -1423,12 +1423,12 @@ class SNAP(Gate):
             w_out = w_tot
 
         else:
-            # One selective Ï€ then append unselective Ï€,
+            # One selective pi_val then append unselective pi_val,
             # rewritten to produce the SAME Î¸ mapping as above.
 
-            # Unselective axis angle Ï†_uns in the equatorial plane:
+            # Unselective axis angle phi_uns in the equatorial plane:
             #   X => 0
-            #   Y => Ï€/2  (synthesized by multiplying by exp(iÏ€/2))
+            #   Y => pi_val/2  (synthesized by multiplying by exp(ipi_val/2))
             phi_uns = 0.0 if self.unselective_axis == "x" else (np.pi / 2.0)
 
             win_sel = N
@@ -1455,13 +1455,13 @@ class SNAP(Gate):
                 omega_n = omega_det[n] + dome
 
                 # Choose selective axis so that:
-                #   phase(|g>) after [selective Ï€, then unselective Ï€] equals exp(i Î¸_n)
-                #   Ï†_sel = Î¸ + Ï†_uns - Ï€  (plus calibration correction dalp)
+                #   phase(|g>) after [selective pi_val, then unselective pi_val] equals exp(i Î¸_n)
+                #   phi_sel = Î¸ + phi_uns - pi_val  (plus calibration correction dalp)
                 phi_sel = (theta_n + phi_uns - np.pi) + dalp
 
                 w_sel += scale_n * (w0 * np.exp(1j * phi_sel)) * np.exp(1j * (omega_n * t))
 
-            # Unselective Ï€ template (no per-n detuning modulation here)
+            # Unselective pi_val template (no per-n detuning modulation here)
             w_uns = self._get_unsel_wx()
             if self.unselective_axis == "y":
                 w_uns = w_uns * np.exp(1j * (np.pi / 2.0))

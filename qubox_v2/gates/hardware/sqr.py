@@ -1,4 +1,4 @@
-﻿# qubox/gates_v2/hardware/sqr.py
+# qubox_v2/gates/hardware/sqr.py
 from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
@@ -6,8 +6,7 @@ import numpy as np
 from ..hardware_base import GateHardware
 from ..hash_utils import array_md5
 
-# Adjust imports to your project layout:
-from qubox_v2.pulse_manager import PulseOp
+from qubox_v2.analysis.pulseOp import PulseOp
 
 
 @dataclass

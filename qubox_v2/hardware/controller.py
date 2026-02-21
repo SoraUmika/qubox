@@ -130,7 +130,8 @@ class HardwareController:
 
     def _element_octave_rf_out(self, el: str) -> tuple[str, int] | None:
         """Return (octave_name, rf_out_port) for an element, or None."""
-        cfg = self.qm.get_config() if self.qm else {}
+        # Use the original hardware config (not qm.get_config() which strips RF_inputs)
+        cfg = self.config.hardware_base or {}
         el_cfg = (cfg.get("elements") or {}).get(el)
         if not isinstance(el_cfg, dict):
             return None
@@ -148,7 +149,8 @@ class HardwareController:
         if tup is None:
             return False
         octave_name, rf_port = tup
-        cfg = self.qm.get_config() if self.qm else {}
+        # Use the original hardware config (not qm.get_config() which normalizes octave data)
+        cfg = self.config.hardware_base or {}
         rf_outs = get_nested(cfg, ["octaves", octave_name, "RF_outputs"], {})
         if not isinstance(rf_outs, dict):
             return False

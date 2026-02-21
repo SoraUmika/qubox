@@ -1,4 +1,4 @@
-﻿#circitQED.py
+#circitQED.py
 import numpy as np
 import qutip as qt
 from tqdm import tqdm
@@ -12,10 +12,10 @@ from .hamiltonian_builder import build_rotated_hamiltonian
 # -----------------------------------------------------------------------------
 # â€¢ Units: all frequencies are ANGULAR (rad/s). We set â„ = 1, so H has units of rad/s.
 # â€¢ Model: cavity mode a, weakly-anharmonic qubit (transmon truncation) b.
-# â€¢ Drives: represented as complex exponentials; a "cosine" drive gets split into Â±Ï‰ parts.
+# â€¢ Drives: represented as complex exponentials; a "cosine" drive gets split into Â±omega parts.
 # â€¢ Rotating frame: we build H'(t) = Uâ€ (t) H(t) U(t) âˆ’ F with U(t) = exp(âˆ’i F t).
 #   In the eigenbasis of F, each matrix element |i><j| picks up a phase e^(âˆ’i(d_i âˆ’ d_j)t).
-# â€¢ RWA: optional filter that drops fast-rotating terms with |Ï‰_eff| above a cutoff.
+# â€¢ RWA: optional filter that drops fast-rotating terms with |omega_eff| above a cutoff.
 # -----------------------------------------------------------------------------
 
 @dataclass
@@ -36,10 +36,10 @@ class circuitQED:
                  qubit_T1=None, qubit_T2=None, Nc=5, Nq=2, chi=0, chi2=0, kerr=0, kerr2=0, drives={}):
         """
         Parameters are in angular units (rad/s) except lifetimes T (seconds).
-        H_static = Ï‰c aâ€ a + Ï‰q bâ€ b + (Î±/2) bâ€ 2 b2 + Ï‡ (aâ€ a)(bâ€ b) + (K/2) aâ€ 2 a2.
+        H_static = omegac aâ€ a + omegaq bâ€ b + (alpha/2) bâ€ 2 b2 + chi_val (aâ€ a)(bâ€ b) + (K/2) aâ€ 2 a2.
         Notes:
-          â€¢ Î±<0 for transmon Kerr, Ï‡ is dispersive cross-Kerr.
-          â€¢ Îº = 1/T_cavity, Î“1 = 1/T1, Î“Ï† = max(0, 1/T2 âˆ’ 1/(2T1)).
+          â€¢ alpha<0 for transmon Kerr, chi_val is dispersive cross-Kerr.
+          â€¢ kappa = 1/T_cavity, Î“1 = 1/T1, Î“phi = max(0, 1/T2 âˆ’ 1/(2T1)).
         """
         # Store system parameters.
         self.wc = cavity_freq
@@ -246,10 +246,10 @@ class circuitQED:
         for d in self.drives:
             name = d.get("name","drive")
             ch   = d.get("channel","?")
-            Ï‰    = float(d.get("carrier_freq",0.0))
+            omega    = float(d.get("carrier_freq",0.0))
             A    = np.array([self._drive_envelope(t, d, args) for t in tlist], dtype=complex)
 
-            label = f"{name} [{ch}] @ Ï‰/2Ï€={Ï‰/2/np.pi/1e9:.3f} GHz"
+            label = f"{name} [{ch}] @ omega/2pi_val={omega/2/np.pi/1e9:.3f} GHz"
             m = mode.lower()
             if m == "env":
                 if np.any(np.abs(A.imag) > 0): 
@@ -263,7 +263,7 @@ class circuitQED:
                 ax.plot(tlist*1e9, A.imag, "--", label=label+" (Q)")
                 ax.set_ylabel("Baseband A(t) [rad/s]")
             elif m == "lab":
-                y = np.real(A * np.exp(-1j*Ï‰*tlist))
+                y = np.real(A * np.exp(-1j*omega*tlist))
                 ax.plot(tlist*1e9, y, label=label+" (lab)")
                 ax.set_ylabel("Drive coeff. [rad/s]")
             else:
@@ -344,8 +344,8 @@ class circuitQED:
     def H_static_lab(self):
         """
         H_static in LAB basis:
-          Ï‰c aâ€ a + Ï‰q bâ€ b + (Î±/2) bâ€ 2 b2 + Ï‡ (aâ€ a)(bâ€ b) + (K/2) aâ€ 2 a2.
-        Î± and K are Kerr (self-nonlinearities), Ï‡ is cross-Kerr (dispersive coupling).
+          omegac aâ€ a + omegaq bâ€ b + (alpha/2) bâ€ 2 b2 + chi_val (aâ€ a)(bâ€ b) + (K/2) aâ€ 2 a2.
+        alpha and K are Kerr (self-nonlinearities), chi_val is cross-Kerr (dispersive coupling).
         """
         return self.H_cavity + self.H_qubit + self.H_anharm + self.H_chi + self.H_kerr
 
@@ -353,9 +353,9 @@ class circuitQED:
         """
         Choose a generator F for the rotating frame (all in LAB basis).
         Common choices:
-          - "cavity":    F = Ï‰c aâ€ a               (makes cavity-resonant drive slow)
-          - "qubit":     F = Ï‰q bâ€ b               (makes qubit-resonant drive slow)
-          - "both_diag": F = Ï‰c aâ€ a + Ï‰q bâ€ b + diagonal Kerr terms
+          - "cavity":    F = omegac aâ€ a               (makes cavity-resonant drive slow)
+          - "qubit":     F = omegaq bâ€ b               (makes qubit-resonant drive slow)
+          - "both_diag": F = omegac aâ€ a + omegaq bâ€ b + diagonal Kerr terms
           - "full_diag": F = H_static itself      (if H_static is diagonal in the chosen basis)
           - Qobj:        supply any Hermitian operator directly
         """
@@ -400,9 +400,9 @@ class circuitQED:
     def construct_collapse_operators(self):
         """
         Return Lindblad jump operators:
-          â€¢ sqrt(Îº) a          : cavity photon loss
+          â€¢ sqrt(kappa) a          : cavity photon loss
           â€¢ sqrt(Î“1) b         : qubit relaxation |e>â†’|g|
-          â€¢ sqrt(2Î“Ï†) n_q      : pure dephasing; this choice makes Ï_ge decay at Î“Ï†.
+          â€¢ sqrt(2Î“phi) n_q      : pure dephasing; this choice makes Ï_ge decay at Î“phi.
         """
         collapse_ops = []
         if self.kappa > 0:

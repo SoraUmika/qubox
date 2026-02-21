@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import pandas as pd
 from .output import Output
 def gaussianity_score(x: np.ndarray) -> float:
@@ -94,7 +94,7 @@ def butterfly_metrics(
     det_L_threshold: float = 1e-8,
 ) -> Output:
     """
-    Compute F, Q, V, Î›_M, and the post-measurement transition matrix T
+    Compute F, Q, V, Lambda_M, and the post-measurement transition matrix T
     for the butterfly experiment, given binary outcomes of m1 and m2.
 
     Parameters
@@ -104,7 +104,7 @@ def butterfly_metrics(
     m2_g, m2_e : array_like
         Outcomes of the second measurement M2 (0/1) for initial |0>_i and |1>_i.
     det_L_threshold : float
-        Minimum allowed |det(Î›_M)| before we consider the matrix invalid.
+        Minimum allowed |det(Lambda_M)| before we consider the matrix invalid.
 
     Returns
     -------
@@ -121,7 +121,7 @@ def butterfly_metrics(
     m2_g = np.asarray(m2_g, dtype=int)
     m2_e = np.asarray(m2_e, dtype=int)
 
-    # ---- Confusion matrix Î›_M: P(m1 | state_i) -------------------------
+    # ---- Confusion matrix Lambda_M: P(m1 | state_i) -------------------------
     a0 = float(np.mean(m1_g))           # P(m1=1 | |0>_i)
     a1 = float(np.mean(1 - m1_e))       # P(m1=0 | |1>_i)
 
@@ -173,8 +173,8 @@ def butterfly_metrics(
 
     if not Lambda_M_valid:
         note = (
-            "Invalid Î›_M (low visibility / near-singular): "
-            f"V={V:.4g}, det(Î›_M)={det_L:.3e} < {det_L_threshold:.3e}. "
+            "Invalid Lambda_M (low visibility / near-singular): "
+            f"V={V:.4g}, det(Lambda_M)={det_L:.3e} < {det_L_threshold:.3e}. "
             "Thresholds / weights likely off; Q, t01, t10 set to NaN, "
             "transition_matrix is all-NaN."
         )
@@ -205,7 +205,7 @@ def butterfly_metrics(
         vec_e_0 = J_e[:, 0]
         vec_e_1 = J_e[:, 1]
 
-        # Eq. (64): P(|Ï†>_o, m1 | Ïˆ_i) = Î›_M^{-1} P(m2, m1 | Ïˆ_i)
+        # Eq. (64): P(|phi>_o, m1 | Ïˆ_i) = Lambda_M^{-1} P(m2, m1 | Ïˆ_i)
         state_g_0 = Lambda_inv @ vec_g_0
         state_g_1 = Lambda_inv @ vec_g_1
         state_e_0 = Lambda_inv @ vec_e_0

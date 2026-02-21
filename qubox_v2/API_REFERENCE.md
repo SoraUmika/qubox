@@ -369,11 +369,11 @@ four focused classes.
 #### `hardware.ConfigEngine`
 
 ```python
-engine = ConfigEngine(hardware_json="hardware.json", pulse_json="pulses.json")
+engine = ConfigEngine(hardware_path="hardware.json")
 
 qm_config = engine.build_qm_config()    # Full QM-compatible dict
 engine.patch_hardware("elements.qubit.intermediate_frequency", 50e6)
-engine.merge_pulses(pulse_dict)
+engine.merge_pulses(pom)                 # Accepts PulseOperationManager
 engine.save_hardware("hardware_out.json")
 ```
 
@@ -382,16 +382,19 @@ engine.save_hardware("hardware_out.json")
 #### `hardware.HardwareController`
 
 ```python
-hw = HardwareController(config_engine=engine, qop_ip="10.0.0.1")
+from qm import QuantumMachinesManager
+
+qmm = QuantumMachinesManager(host="10.0.0.1", cluster_name="Cluster_1")
+hw = HardwareController(qmm=qmm, config_engine=engine)
 qm = hw.open_qm()
 
 # LO management (with external LO routing for OctaveLOSource.LO1–LO5)
 hw.set_element_lo("qubit", 5.5e9)       # Updates Octave or external LO
 hw.set_element_fq("qubit", 5.55e9)      # Adjusts IF to hit target freq
-hw.set_octave_gain("qubit", 10)          # dBm
-hw.calibrate_element("qubit")            # Octave mixer calibration
+hw.set_octave_output("qubit", "on")     # RFOutputMode
+hw.init_config(output_mode=RFOutputMode.on)
 
-lo, src = hw.get_element_lo("qubit")     # Returns (freq, "internal"|device_name)
+lo = hw.get_element_lo("qubit")         # Returns frequency
 ```
 
 **External LO routing:**
@@ -402,31 +405,30 @@ lo, src = hw.get_element_lo("qubit")     # Returns (freq, "internal"|device_name
 #### `hardware.ProgramRunner`
 
 ```python
-runner = ProgramRunner(controller=hw)
+runner = ProgramRunner(qmm=qmm, controller=hw, config_engine=engine)
 
 # Run on hardware
-result: RunResult = runner.run_program(program, mode=ExecMode.RUN, n_avg=1000)
-print(result.I, result.Q)                # Fetched data
+result: RunResult = runner.run_program(program, n_total=1000)
+print(result.output)                     # Fetched data
 
-# Simulate
-sim = runner.simulate(program, duration=10_000, plot=True)
+# Execution mode
+runner.set_exec_mode(ExecMode.SIMULATE)
+sim = runner.run_program(program)
 ```
 
-**`ExecMode` enum:** `RUN`, `SIMULATE`, `CONTINUOUS_WAVE`  
-**`RunResult` dataclass:** `job`, `data`, `I`, `Q`, `timestamps`, `duration`
+**`ExecMode` enum:** `HARDWARE`, `SIMULATE`
+**`RunResult` dataclass:** `mode`, `output`, `sim_samples`, `metadata`
 
 #### `hardware.QueueManager`
 
 ```python
-queue = QueueManager(controller=hw)
+queue = QueueManager(runner=runner)
 
 # Batch submission with progress bar
 results = queue.run_many(programs, labels=["spec", "rabi", "T1"])
 
 # Fine-grained control
-job_id = queue.submit(program)
-queue.count()
-queue.pending_jobs()
+pending = queue.submit(program)
 ```
 
 ---
@@ -439,19 +441,20 @@ Manages external instruments (SignalCore LOs, OctoDac, SPA pump, etc.)
 via QCoDeS or InstrumentServer backends.
 
 ```python
-dm = DeviceManager("devices.json", autoload=True)
+dm = DeviceManager("devices.json")
+
+# Load and connect
+dm.instantiate_all()                    # Connect to all configured devices
 
 # Access a device
-lo = dm["signal_core_1"]                 # DeviceHandle
-lo.set("frequency", 6e9)
-lo.set("power", 10)
+lo = dm.get("signal_core_1")           # Returns device instance
+dm.apply("signal_core_1", frequency=6e9, power=10)
 
 # Ramp with safety limits
-dm.ramp("octodac_ch1", target=0.5, rate=0.01)
+dm.ramp("octodac_ch1", param="voltage", to=0.5, step=0.01)
 
 # Snapshot all device states
 snap = dm.snapshot()
-dm.close_all()
 ```
 
 ---
@@ -463,21 +466,22 @@ dm.close_all()
 The 2 362-line pulse manager with dual permanent/volatile stores.
 
 ```python
-pom = PulseOperationManager(config_engine)
+# Load from JSON (typical)
+pom = PulseOperationManager.from_json("pulses.json")
 
-# Register a pulse
-pom.register("pi_pulse", element="qubit", type="gaussian",
-             amplitude=0.5, sigma=20, length=100)
+# Or create empty
+pom = PulseOperationManager()
 
-# Volatile (session-only) pulses
-pom.register_volatile("temp_pulse", ...)
+# Add waveforms and pulses
+pom.add_waveform("gauss_wf", "arbitrary", samples)
+pom.add_pulse("x180_pulse", "control", length=40, I_wf="gauss_wf", Q_wf="zero_wf")
+pom.set_element_operation("qubit", "x180", "x180_pulse")
 
-# Burn to hardware config
-pom.burn(include_volatile=True)
+# Burn to hardware config via ConfigEngine
+config_engine.merge_pulses(pom, include_volatile=True)
 
 # Save / load
-pom.save("pulses.json")
-pom.load("pulses.json")
+pom.save_json("pulses.json")
 ```
 
 #### `pulses.models`
@@ -512,21 +516,18 @@ Simplified facade over `PulseOperationManager` for common operations.
 ```python
 from qubox_v2.pulses import PulseRegistry
 
-registry = PulseRegistry(pulse_op_manager)
+registry = PulseRegistry()
 
-# Register pulses with a clean API
-registry.register("x180", element="qubit", type="gaussian",
-                   amplitude=0.45, sigma=10, length=40)
+# Add control pulses with a clean API
+registry.add_control_pulse("qubit", "x180",
+                           I_wf=gauss_samples, length=40)
 
-# Volatile (session-only) pulses
-registry.register_volatile("temp_probe", ...)
+# Add measurement pulse
+registry.add_measurement_pulse("resonator", "readout",
+                               length=1000, amplitude=0.1)
 
-# Query
-registry.list_pulses()
-registry.get("x180")
-
-# Burn all to hardware config
-registry.burn()
+# Burn to config via ConfigEngine
+config_engine.merge_pulses(registry, include_volatile=True)
 ```
 
 #### `pulses.IntegrationWeightManager` (NEW)
@@ -967,17 +968,20 @@ with ExperimentRunner("./experiments/cooldown_2025") as exp:
 ### C. Use the hardware layer directly
 
 ```python
+from qm import QuantumMachinesManager
 from qubox_v2.hardware import ConfigEngine, HardwareController, ProgramRunner
 
-engine = ConfigEngine(hardware_json="hardware.json")
-hw = HardwareController(config_engine=engine, qop_ip="10.0.0.1")
-runner = ProgramRunner(controller=hw)
+engine = ConfigEngine(hardware_path="hardware.json")
+qmm = QuantumMachinesManager(host="10.0.0.1", cluster_name="Cluster_1")
+hw = HardwareController(qmm=qmm, config_engine=engine)
+runner = ProgramRunner(qmm=qmm, controller=hw, config_engine=engine)
 
-# Set external LO frequency
+# Open QM and set LO
+hw.open_qm()
 hw.set_element_lo("qubit", 5.5e9)
 
 # Run
-result = runner.run_program(my_program, mode="run")
+result = runner.run_program(my_program)
 
 hw.close()
 ```
@@ -987,7 +991,7 @@ hw.close()
 ```python
 from qubox_v2.hardware import QueueManager
 
-queue = QueueManager(controller=hw)
+queue = QueueManager(runner=runner)
 results = queue.run_many(
     [prog1, prog2, prog3],
     labels=["spec", "rabi", "T1"],

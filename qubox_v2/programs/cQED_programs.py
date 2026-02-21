@@ -1,11 +1,11 @@
-﻿
+
 from contextlib import nullcontext
 from qm.qua import *
 from qualang_tools.loops import from_array
 from .macros.measure import measureMacro
 from .macros.sequence import sequenceMacros
 import numpy as np 
-from .gates_legacy import Gate, GateArray, Measure
+from ..experiments.gates_legacy import Gate, GateArray, Measure
 
 def readout_trace(ro_therm_clks, n_avg):
     """
@@ -150,16 +150,16 @@ def qubit_spectroscopy(sat_pulse, qb_el, if_frequencies, qb_gain, qb_len, qb_the
     
 def qubit_spectroscopy_ef(sat_pulse, qb_el, if_frequencies, qb_ge_if, qb_gain, qb_len, r180 , qb_therm_clks, n_avg:int=1):
     """
-    Perform |e>â†’|f> spectroscopy by first preparing |e> via a Ï€-pulse (r180), then sweeping drive IF.
+    Perform |e>â†’|f> spectroscopy by first preparing |e> via a pi_val-pulse (r180), then sweeping drive IF.
 
     Parameters:
         ro_el          : Readout resonator element
         qb_el          : Qubit element
         if_frequencies : Python array/list of IFs for the spectroscopy sweep
-        qb_ge_if       : IF at which to apply the Ï€-pulse that drives |g>â†’|e>
+        qb_ge_if       : IF at which to apply the pi_val-pulse that drives |g>â†’|e>
         qb_gain        : Gain for the saturation pulse
         qb_len         : Duration of the saturation pulse
-        r180           : Name of the Ï€-pulse used to prepare |e>
+        r180           : Name of the pi_val-pulse used to prepare |e>
         qb_therm_clks  : Thermalization wait time after readout
         n_avg          : Number of averaging iterations (default=1)
     """
@@ -355,7 +355,7 @@ def ramsey_chevron(ro_el, qb_el, r90, qb_if, dfs, delay_clks, qb_therm_clks, n_a
     Parameters:
         ro_el           : Readout resonator element
         qb_el           : Qubit element
-        r90             : Name of the Ï€/2 pulse used to prepare/close Ramsey
+        r90             : Name of the pi_val/2 pulse used to prepare/close Ramsey
         qb_if           : Base IF for qubit drive
         dfs             : Python array/list of detunings relative to qb_if
         delay_clks      : Python array/list of free-evolution delays (in clock cycles)
@@ -396,12 +396,12 @@ def ramsey_chevron(ro_el, qb_el, r90, qb_if, dfs, delay_clks, qb_therm_clks, n_a
 
 def T1_relaxation(qb_el, r180, wait_cycles_list, qb_therm_clks, n_avg):
     """
-    Measure Tâ‚ (energy relaxation) by applying a Ï€-pulse and then waiting variable times.
+    Measure Tâ‚ (energy relaxation) by applying a pi_val-pulse and then waiting variable times.
 
     Parameters:
         ro_el             : Readout resonator element
         qb_el             : Qubit element
-        r180              : Name of the Ï€-pulse that inverts |g>â†’|e>
+        r180              : Name of the pi_val-pulse that inverts |g>â†’|e>
         wait_cycles_list  : Python array/list of wait times (in clock cycles) before readout
         qb_therm_clks     : Thermalization wait after readout
         n_avg             : Number of averaging iterations
@@ -432,12 +432,12 @@ def T1_relaxation(qb_el, r180, wait_cycles_list, qb_therm_clks, n_avg):
 
 def T2_ramsey(qb_el, r90, wait_cycles_list, qb_therm_clks, n_avg):
     """
-    Measure Tâ‚‚* (Ramsey dephasing) by applying two Ï€/2 pulses separated by variable wait times.
+    Measure Tâ‚‚* (Ramsey dephasing) by applying two pi_val/2 pulses separated by variable wait times.
 
     Parameters:
         ro_el             : Readout resonator element
         qb_el             : Qubit element
-        r90               : Name of the Ï€/2 pulse
+        r90               : Name of the pi_val/2 pulse
         wait_cycles_list  : Python array/list of free-evolution delays (clock cycles)
         qb_therm_clks     : Thermalization wait after readout
         n_avg             : Number of averaging iterations
@@ -468,14 +468,14 @@ def T2_ramsey(qb_el, r90, wait_cycles_list, qb_therm_clks, n_avg):
 def T2_echo(qb_el, r180, r90,
             half_wait_cycles_list, qb_therm_clks, n_avg):
     """
-    Measure Tâ‚‚ (Hahn echo) by applying Ï€/2 â€“ wait â€“ Ï€ â€“ wait â€“ Ï€/2 sequence,
+    Measure Tâ‚‚ (Hahn echo) by applying pi_val/2 â€“ wait â€“ pi_val â€“ wait â€“ pi_val/2 sequence,
     with the wait time swept in half-intervals.
 
     Parameters:
         ro_el                : Readout resonator element
         qb_el                : Qubit element
-        r180                 : Name of the Ï€-pulse
-        r90                  : Name of the Ï€/2 pulse
+        r180                 : Name of the pi_val-pulse
+        r90                  : Name of the pi_val/2 pulse
         half_wait_cycles_list: Python array/list of half-wait times
         qb_therm_clks        : Thermalization wait after measurement
         n_avg                : Number of averaging iterations
@@ -531,9 +531,9 @@ def qubit_state_tomography(
     qb_el : str, optional
         Qubit element name.
     x90 : str, optional
-        +Ï€/2 about X pulse name (used for measuring Ïƒ_y).
+        +pi_val/2 about X pulse name (used for measuring Ïƒ_y).
     yn90 : str, optional
-        -Ï€/2 about Y pulse name (used for measuring Ïƒ_x).
+        -pi_val/2 about Y pulse name (used for measuring Ïƒ_x).
 
     Returns
     -------
@@ -1260,7 +1260,7 @@ def readout_leakage_benchmarking(ro_el, qb_el, r180, control_bits, qb_therm_clks
                 save(state, state_st)                    
                 with for_each_(i_mem, bit_row):
                     with if_(i_mem == 1):
-                        play(r180, qb_el)                          # Ï€-pulse
+                        play(r180, qb_el)                          # pi_val-pulse
                     with else_():
                         play(r180*amp(0), qb_el)                   # identity
                     align(qb_el, ro_el)
@@ -1403,7 +1403,7 @@ def randomized_benchmarking(
 
 def qubit_pulse_train_legacy(
     qb_el: str,
-    reference_pulse: str,      # Ï€/2 pulse handle
+    reference_pulse: str,      # pi_val/2 pulse handle
     rotation_pulse: str,       # rotation pulse handle
     reference_clks: int,       # <-- needed to pre-advance readout timeline
     rotation_clks: int,
@@ -1520,7 +1520,7 @@ def qubit_pulse_train_legacy(
 
 def qubit_pulse_train(
     qb_el: str,
-    reference_pulse: str,      # Ï€/2 pulse handle
+    reference_pulse: str,      # pi_val/2 pulse handle
     rotation_pulse: str,       # rotation pulse handle
     N_values,                  # iterable of N; sequence applies N pulses
     qb_therm_clks: int,
@@ -1612,7 +1612,7 @@ def qubit_pulse_train(
 
 def drag_calibration_YALE(
     qb_el: str,
-    amps,         # list/np.array of Î± pre-factors (dimensionless)
+    amps,         # list/np.array of alpha pre-factors (dimensionless)
     x180, x90, y180, y90,    # your pulse handles
     qb_therm_clks: int,
     n_avg: int = 200,
@@ -1663,7 +1663,7 @@ def drag_calibration_YALE(
 
 def drag_calibration_GOOGLE(
     qb_el: str,
-    amps,          # list / np.array of Î± pre-factors to scan
+    amps,          # list / np.array of alpha pre-factors to scan
     iters,         # list / np.array of iteration counts, e.g. np.arange(0, 26, 1)
     x180,          # your calibrated pi pulse handle
     qb_therm_clks: int,
@@ -1673,9 +1673,9 @@ def drag_calibration_GOOGLE(
     Google-style DRAG calibration:
     - For each alpha in `amps`
     - For each iteration count in `iters`
-      - Apply many [x180(+Î±), x180(-Î±)] pairs in a row to amplify coherent error
+      - Apply many [x180(+alpha), x180(-alpha)] pairs in a row to amplify coherent error
       - Measure I/Q + state
-    The correct Î± is the one that keeps the qubit closest to |g> even after many repetitions.
+    The correct alpha is the one that keeps the qubit closest to |g> even after many repetitions.
     """
 
     ro_el = measureMacro.active_element()
@@ -1704,11 +1704,11 @@ def drag_calibration_GOOGLE(
                 with for_(*from_array(it, iters)):
 
                     # error amplification loop:
-                    # repeat [x180(+Î±); x180(-Î±)] 'it' times
+                    # repeat [x180(+alpha); x180(-alpha)] 'it' times
                     with for_(pulses, 0, pulses <= it, pulses + 1):
-                        # +Î± pulse
+                        # +alpha pulse
                         play(x180 * amp(1, 0, 0, a), qb_el)
-                        # -Î± pulse (note sign flip on both main amp and DRAG amp)
+                        # -alpha pulse (note sign flip on both main amp and DRAG amp)
                         play(x180 * amp(-1, 0, 0, -a), qb_el)
 
                     # measure after the burst
@@ -2397,8 +2397,8 @@ def storage_wigner_tomography(
         st_el, qb_el, ro_el,
         base_disp,
         x_vals, p_vals, base_alpha,
-        x90_pulse,              # fast Ï€/2 on the qubit
-        parity_wait_clks,       # â‰ƒ Ï€/Ï‡, in clock ticks
+        x90_pulse,              # fast pi_val/2 on the qubit
+        parity_wait_clks,       # â‰ƒ pi_val/chi_val, in clock ticks
         st_therm_clks,          # storage cooldown
         n_avg                   # number of repeats
 ):
@@ -2514,7 +2514,7 @@ def phase_evolution_prog(ro_el, qb_el, st_el,
 def storage_chi_ramsey(
     ro_el, qb_el, st_el,
     disp_pulse,           # displacement pulse to put n photons in the cavity
-    x90_pulse,            # Ï€/2 pulse on the qubit
+    x90_pulse,            # pi_val/2 pulse on the qubit
     delay_ticks,          # list/ndarray of waitingâ€time values (in clock ticks)
     st_therm_clks,        # cooldown for storage (in clock ticks)
     n_avg                 # number of averages
@@ -2556,7 +2556,7 @@ def storage_chi_ramsey(
 def storage_ramsey(
     ro_el, qb_el, st_el,
     disp_pulse,           # displacement pulse to put n photons in the cavity
-    sel_r180,            # Ï€/2 pulse on the qubit
+    sel_r180,            # pi_val/2 pulse on the qubit
     delay_ticks,          # list/ndarray of waitingâ€time values (in clock ticks)
     st_therm_clks,        # cooldown for storage (in clock ticks)
     n_avg                 # number of averages
@@ -2634,7 +2634,7 @@ def qubit_reset_benchmark(qb_el: str, random_bits, r180: str,
         with for_(rep, 0, rep < num_shots, rep + 1):
             with for_each_(bit, random_bits):
 
-                # Optional: prepare |e> for the "1" target by a leading Ï€
+                # Optional: prepare |e> for the "1" target by a leading pi_val
                 with if_(bit):
                     play(r180, qb_el)
 

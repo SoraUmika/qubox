@@ -1,4 +1,4 @@
-﻿# qubox/compile/gpu_accelerators.py
+# qubox_v2/compile/gpu_accelerators.py
 """
 GPU-accelerated quantum gate compilation using JAX.
 
@@ -281,7 +281,7 @@ def enable_jax_acceleration(verbose: bool = True) -> bool:
     """
     Enable GPU acceleration by replacing evaluators with JAX versions.
     
-    This monkey-patches qubox.compile.evaluators to use GPU-accelerated
+    This monkey-patches qubox_v2.compile.evaluators to use GPU-accelerated
     implementations. All existing code will automatically benefit from
     GPU acceleration without any modifications.
     
@@ -330,7 +330,7 @@ def enable_jax_acceleration(verbose: bool = True) -> bool:
         
     except ImportError as e:
         if verbose:
-            print(f"âš ï¸  Could not import qubox.compile.evaluators: {e}")
+            print(f"âš ï¸  Could not import qubox_v2.compile.evaluators: {e}")
         return False
 
 
@@ -368,7 +368,7 @@ def disable_jax_acceleration(verbose: bool = True) -> bool:
         
     except ImportError as e:
         if verbose:
-            print(f"âš ï¸  Could not import qubox.compile.evaluators: {e}")
+            print(f"âš ï¸  Could not import qubox_v2.compile.evaluators: {e}")
         return False
 
 

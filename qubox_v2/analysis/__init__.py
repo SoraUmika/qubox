@@ -1,4 +1,4 @@
-﻿from . import (
+from . import (
     algorithms,
     analysis_tools,
     cQED_attributes,

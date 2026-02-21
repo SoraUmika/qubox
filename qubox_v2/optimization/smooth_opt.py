@@ -1,4 +1,4 @@
-﻿import scipy.optimize
+import scipy.optimize
 
 def scipy_minimize(fun, x0, args=(), method=None, jac=None, hess=None, hessp=None,
                     bounds=None, constraints=(), tol=None, callback=None, options=None):

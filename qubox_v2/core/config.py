@@ -129,7 +129,7 @@ class HardwareConfig(BaseModel):
     controllers: Dict[str, ControllerConfig] = Field(default_factory=dict)
     octaves: Dict[str, OctaveConfig] = Field(default_factory=dict)
     elements: Dict[str, ElementConfig] = Field(default_factory=dict)
-    __qubox: Optional[QuboxExtras] = Field(default=None, alias="__qubox")
+    qubox_extras: Optional[QuboxExtras] = Field(default=None, alias="__qubox")
 
     model_config = {"populate_by_name": True, "extra": "allow"}
 
@@ -160,5 +160,4 @@ class HardwareConfig(BaseModel):
 
     def get_qubox_extras(self) -> QuboxExtras:
         """Return the __qubox section (or empty defaults)."""
-        extras = getattr(self, "__qubox", None)
-        return extras if extras is not None else QuboxExtras()
+        return self.qubox_extras if self.qubox_extras is not None else QuboxExtras()

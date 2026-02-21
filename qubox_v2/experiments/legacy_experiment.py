@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 from ..programs import cQED_programs
 from ..analysis.output import Output
 from ..analysis.analysis_tools import (
@@ -20,6 +20,7 @@ from ..hardware.program_runner import ExecMode, RunResult
 from ..hardware.controller import HardwareController
 from ..hardware.config_engine import ConfigEngine
 # Legacy compat import QuaProgramManager, RunResult, ExecMode
+from ..hardware.qua_program_manager import QuaProgramManager
 from ..pulses.manager import PulseOperationManager, PulseOp, MAX_AMPLITUDE
 from ..programs.macros.measure import measureMacro
 from ..core.logging import temporarily_set_levels
@@ -1441,10 +1442,10 @@ class cQED_Experiment:
 
     def qubit_pulse_train_legacy(self, N_values, K=2, rotation_pulse="x180", n_avg=1000, r90_pulse="x90") -> RunResult:
         """
-        Qubit pulse train experiment to calibrate Ï€-pulse amplitude.
+        Qubit pulse train experiment to calibrate pi_val-pulse amplitude.
         
         For each N in N_values:
-            |gâŸ© --(Ï€/2)--> superposition --[KN Ã— rotation pulse]--> final state --> measure P_e(N)
+            |gâŸ© --(pi_val/2)--> superposition --[KN Ã— rotation pulse]--> final state --> measure P_e(N)
         
         If the rotation pulse amplitude is correct, P_e(N) should ideally be independent of N.
         Any deviation indicates amplitude miscalibration.
@@ -1457,7 +1458,7 @@ class cQED_Experiment:
         n_avg : int
             Number of averages per N value
         r90_pulse : str
-            Name of the Ï€/2 pulse (default: "x90")
+            Name of the pi_val/2 pulse (default: "x90")
         rotation_pulse : str
             Name of the rotation pulse (default: "x180")
         
@@ -1520,7 +1521,7 @@ class cQED_Experiment:
             Array of N values (number of rotation pulses to apply).
             Example: np.arange(0, 50, 2) for N = 0, 2, 4, ..., 48
         reference_pulse : str, optional
-            Name of reference pulse (e.g., Ï€/2 pulse). Default: "x90"
+            Name of reference pulse (e.g., pi_val/2 pulse). Default: "x90"
         rotation_pulse : str, optional
             Name of rotation pulse to calibrate. Default: "x180"
         run_reference : bool, optional
@@ -1641,10 +1642,10 @@ class cQED_Experiment:
         n_avg : int
             Number of averages (shots).
         x90_pulse : str, optional
-            Pulse name that implements +Ï€/2 about X (used to map Ïƒ_y â†’ Z).
+            Pulse name that implements +pi_val/2 about X (used to map Ïƒ_y â†’ Z).
             Default "x90".
         yn90_pulse : str, optional
-            Pulse name that implements -Ï€/2 about Y (used to map Ïƒ_x â†’ Z).
+            Pulse name that implements -pi_val/2 about Y (used to map Ïƒ_x â†’ Z).
             Default "yn90".
         therm_clks : int or None, optional
             Wait time (clock cycles) after each axis measurement.
@@ -2600,7 +2601,7 @@ class cQED_Experiment:
             # --------- Confusion matrix ----------
             confusion_matrix = out.get("confusion_matrix", None)
             if confusion_matrix is not None:
-                print("\nMeasurement confusion matrix Î›_M = P(m1 | state_i):")
+                print("\nMeasurement confusion matrix Lambda_M = P(m1 | state_i):")
                 print(confusion_matrix.to_markdown(floatfmt=".4f"))
             else:
                 print("\n(confusion_matrix missing)")
@@ -3220,7 +3221,7 @@ class cQED_Experiment:
                     kappa_hz = float(attr.ro_kappa)
                     if kappa_hz <= 0:
                         raise ValueError("attributes.ro_kappa must be > 0 (Hz).")
-                    ringdown_ns_raw = 1e9 / kappa_hz  # Ï„ = 1/Îº, in ns
+                    ringdown_ns_raw = 1e9 / kappa_hz  # Ï„ = 1/kappa, in ns
                 else:
                     ringdown_ns_raw = float(ringdown_len)
 
@@ -3478,7 +3479,7 @@ class cQED_Experiment:
         z_r180 = np.array(ga_r180) + 1j * np.array(dr_r180)
         z_r90  = np.array(ga_r90)  + 1j * np.array(dr_r90)
         
-        # Rotation by Ï€/2 to generate Y pulses from X pulses
+        # Rotation by pi_val/2 to generate Y pulses from X pulses
         pi_rot = np.exp(1j * np.pi / 2)
         z_y180 = z_r180 * pi_rot
         z_y90  = z_r90  * pi_rot
@@ -3982,7 +3983,7 @@ class cQED_Experiment:
             state_prep,           # state_prep callable
             qb_if,
             fock_ifs,             # fock_ifs array[int]
-            sel_r180,             # selective Ï€
+            sel_r180,             # selective pi_val
             calibrate_ref_r180_S,
             attr.qb_therm_clks,
             attr.st_therm_clks,   # st_therm_clks
@@ -4276,9 +4277,9 @@ class cQED_Experiment:
         state_prep,                      # callable or list of callables
         *,
         tag_off_idle_duration=None,
-        sel_r180="sel_x180",             # selective Ï€ (|g,n> <-> |e,n>)
-        rxp90="x90",                   # global +Ï€/2 about x (maps Ïƒ_yâ†’Ïƒ_z)
-        rym90="yn90",                   # global -Ï€/2 about y (maps Ïƒ_xâ†’Ïƒ_z)
+        sel_r180="sel_x180",             # selective pi_val (|g,n> <-> |e,n>)
+        rxp90="x90",                   # global +pi_val/2 about x (maps Ïƒ_yâ†’Ïƒ_z)
+        rym90="yn90",                   # global -pi_val/2 about y (maps Ïƒ_xâ†’Ïƒ_z)
         qb_if=None,                      # interaction/idle IF during state_prep; defaults to qb_fq
         n_avg: int = 1000,
     ):
@@ -4440,10 +4441,10 @@ class cQED_Experiment:
         alpha_amp, eps_amp = choose_displacements(n)
         if disp_alpha is None:
             disp_alpha = Displacement(alpha=alpha_amp, build=True)
-            print(f"[info] |Î±| = {alpha_amp:.3f}")
+            print(f"[info] |alpha| = {alpha_amp:.3f}")
         if disp_epsilon is None:
             disp_epsilon = Displacement(alpha=eps_amp, build=True)
-            print(f"[info] |Îµ| = {eps_amp:.3f}")
+            print(f"[info] |mu| = {eps_amp:.3f}")
 
         if not snap_np_list:
             snap_np_list = []

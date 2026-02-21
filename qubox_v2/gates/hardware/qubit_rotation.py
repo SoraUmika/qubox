@@ -1,4 +1,4 @@
-﻿# qubox/gates_v2/hardware/qubit_rotation.py
+# qubox_v2/gates/hardware/qubit_rotation.py
 from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
@@ -6,8 +6,8 @@ import numpy as np
 from ..hardware_base import GateHardware
 from ..hash_utils import stable_hash
 
-# Adjust imports to your project layout:
-from qubox_v2.pulse_manager import PulseOp, MAX_AMPLITUDE
+from qubox_v2.analysis.pulseOp import PulseOp
+from qubox_v2.core.types import MAX_AMPLITUDE
 
 @dataclass
 class QubitRotationHardware(GateHardware):

@@ -1,0 +1,219 @@
+{
+  "controllers": {
+    "con1": {
+      "analog_outputs": {
+        "1": {
+          "offset": 0.0
+        },
+        "2": {
+          "offset": 0.0
+        },
+        "3": {
+          "offset": 0.0
+        },
+        "4": {
+          "offset": 0.0
+        },
+        "5": {
+          "offset": 0.0
+        },
+        "6": {
+          "offset": 0.0
+        },
+        "9": {
+          "offset": 0.0
+        },
+        "10": {
+          "offset": 0.0
+        }
+      },
+      "digital_outputs": {
+        "1": {},
+        "2": {},
+        "3": {},
+        "5": {}
+      },
+      "analog_inputs": {
+        "1": {
+          "offset": 0.00947713
+        },
+        "2": {
+          "offset": 0.00962465
+        }
+      }
+    }
+  },
+  "octaves": {
+    "oct1": {
+      "RF_outputs": {
+        "1": {
+          "LO_frequency": 8800000000.0,
+          "LO_source": "internal",
+          "output_mode": "always_on",
+          "gain": -10
+        },
+        "2": {
+          "LO_frequency": 7000000000.0,
+          "LO_source": "external",
+          "output_mode": "always_on",
+          "gain": 0
+        },        
+        "3": {
+          "LO_frequency": 6200000000.0,
+          "LO_source": "internal",
+          "output_mode": "always_on",
+          "gain": 0
+        },
+        "5": {
+          "LO_frequency": 5400000000.0,
+          "LO_source": "internal",
+          "output_mode": "always_on",
+          "gain": 0
+        }
+      },
+      "RF_inputs": {
+        "1": {
+          "RF_source": "RF_in",
+          "LO_frequency": 8800000000.0,
+          "LO_source": "internal",
+          "IF_mode_I": "direct",
+          "IF_mode_Q": "direct"
+        }
+      },
+      "connectivity": "con1"
+    }
+  },
+  "elements": {
+    "resonator": {
+      "RF_inputs": {
+        "port": [
+          "oct1",
+          1
+        ]
+      },
+      "RF_outputs": {
+        "port": [
+          "oct1",
+          1
+        ]
+      },
+      "intermediate_frequency": -50000000.0,
+      "digitalInputs": {
+        "switch": {
+          "port": [
+            "con1",
+            1
+          ],
+          "delay": 0,
+          "buffer": 0
+        },
+        "pump": {
+          "port": [
+            "con1",
+            2
+          ],
+          "delay": 114,
+          "buffer": 18
+        }
+      },
+      "time_of_flight": 280,
+      "operations": {}
+    },
+    "qubit2": {
+      "RF_inputs": {
+        "port": [
+          "oct1",
+          2
+        ]
+      },
+      "intermediate_frequency": -50000000.0,
+      "digitalInputs": {
+        "switch": {
+          "port": [
+            "con1",
+            2
+          ],
+          "delay": 57,
+          "buffer": 18
+        }
+      },
+      "operations": {}
+    },
+    "qubit": {
+      "RF_inputs": {
+        "port": [
+          "oct1",
+          3
+        ]
+      },
+      "intermediate_frequency": -50000000.0,
+      "digitalInputs": {
+        "switch": {
+          "port": [
+            "con1",
+            3
+          ],
+          "delay": 57,
+          "buffer": 18
+        }
+      },
+      "operations": {}
+    },
+    "storage": {
+      "RF_inputs": {
+        "port": [
+          "oct1",
+          5
+        ]
+      },
+      "intermediate_frequency": -50000000.0,
+      "digitalInputs": {
+        "switch": {
+          "port": [
+            "con1",
+            5
+          ],
+          "delay": 57,
+          "buffer": 18
+        }
+      },
+      "operations": {}
+    }
+  },
+  "__qubox": {
+    "external_lo_map": {
+      "oct1:2": {"device": "octave_external_lo2", "lo_port": "LO2"},
+      "oct1:4": {"device": "octave_external_lo4", "lo_port": "LO4"}
+    }
+  },
+  "octave_links": [
+    {
+      "octave": "oct1",
+      "controller": "con1",
+      "rf_out": 1,
+      "ao_i": 1,
+      "ao_q": 2
+    },
+    {
+      "octave": "oct1",
+      "controller": "con1",
+      "rf_out": 2,
+      "ao_i": 3,
+      "ao_q": 4
+    },
+    {
+      "octave": "oct1",
+      "controller": "con1",
+      "rf_out": 3,
+      "ao_i": 5,
+      "ao_q": 6
+    },
+    {
+      "octave": "oct1",
+      "controller": "con1",
+      "rf_out": 5,
+      "ao_i": 9,
+      "ao_q": 10
+    }
+  ]
+}

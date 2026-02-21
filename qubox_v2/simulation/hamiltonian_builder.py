@@ -1,4 +1,4 @@
-﻿# hamiltonian_builder.py
+# hamiltonian_builder.py
 
 import qutip as qt
 from typing import Callable, Dict, List, Optional, Union
@@ -15,7 +15,7 @@ class Term:
     label: str = ""
 
 # -----------------------------------------------------------------------------
-# Term: one time-dependent piece A(t) * e^(âˆ’i Ï‰ t) * op
+# Term: one time-dependent piece A(t) * e^(âˆ’i omega t) * op
 # -----------------------------------------------------------------------------
 
 def _iter_nz(Q, tol=1e-12):

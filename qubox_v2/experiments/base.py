@@ -160,7 +160,7 @@ class ExperimentRunner:
     # ------------------------------------------------------------------
     # Run helpers
     # ------------------------------------------------------------------
-    def run(self, program, *, mode: ExecMode = ExecMode.RUN, **kw: Any) -> RunResult:
+    def run(self, program, *, mode: ExecMode = ExecMode.HARDWARE, **kw: Any) -> RunResult:
         """Run a QUA program.  Delegates to ``ProgramRunner``."""
         return self.runner.run_program(program, mode=mode, **kw)
 

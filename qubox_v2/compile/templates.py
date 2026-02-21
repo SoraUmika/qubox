@@ -1,4 +1,4 @@
-﻿# qubox/compile/templates.py
+# qubox_v2/compile/templates.py
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple

@@ -1,4 +1,4 @@
-﻿# qubox/compile/gpu_utils.py
+# qubox_v2/compile/gpu_utils.py
 """
 GPU acceleration utilities using CuPy.
 Falls back to NumPy if CuPy is not available or GPU is not present.

@@ -1,4 +1,4 @@
-﻿# drive_builder.py
+# drive_builder.py
 import numpy as np
 from math import erf, sqrt, pi
 from typing import Optional, Dict, Tuple, List, Callable, Sequence, Any, Union
@@ -182,7 +182,7 @@ class DriveGenerator:
 
     def qubit_rotation_tp(self,
                           theta: float,             # rotation angle (rad)
-                          phi: float,               # azimuth of rotation axis (rad); 0â†’x, Ï€/2â†’y
+                          phi: float,               # azimuth of rotation axis (rad); 0â†’x, pi_val/2â†’y
                           duration: float,          # gate time (s)
                           t0: float = 0.0,
                           shape: str = "constant",  # "constant" or "gaussian"
@@ -190,8 +190,8 @@ class DriveGenerator:
                           name: Optional[str] = None,
                           carrier: Optional[float] = None) -> Dict:
         """
-        Implements U = exp[-i (Î¸/2) (cosÏ† Ïƒ_x + sinÏ† Ïƒ_y)] using a single IQ envelope.
-        Area convention: Î¸ = 2 âˆ« A(t) dt, with complex baseband A(t) = |A| e^{iÏ†} * shape(t).
+        Implements U = exp[-i (Î¸/2) (cosphi Ïƒ_x + sinphi Ïƒ_y)] using a single IQ envelope.
+        Area convention: Î¸ = 2 âˆ« A(t) dt, with complex baseband A(t) = |A| e^{iphi} * shape(t).
         """
         shape_params = shape_params or {}
         w = float(self.sys.wq) if (carrier is None) else float(carrier)
@@ -233,10 +233,10 @@ class DriveGenerator:
             "type": "rotation"
         }
 
-    # ---------------------- 4b) SQR (Î¸_n, Ï†_n; equatorial axes) ----------------------
+    # ---------------------- 4b) SQR (Î¸_n, phi_n; equatorial axes) ----------------------
     def sqr_tp(self,
                thetas: np.ndarray,                 # per-Fock rotation angles Î¸_n (rad)
-               phis:   np.ndarray,                 # per-Fock azimuths Ï†_n (rad) for axes
+               phis:   np.ndarray,                 # per-Fock azimuths phi_n (rad) for axes
                T: float,                           # selective window duration (s)
                *,
                d_lambda: Optional[np.ndarray] = None,  # per-n amplitude tweak
@@ -250,11 +250,11 @@ class DriveGenerator:
         ) -> Dict:
         """
         Multi-tone selective qubit rotation:
-          U_n = exp[-i (Î¸_n/2) (cosÏ†_n Ïƒ_x + sinÏ†_n Ïƒ_y)] acting only when the cavity is in |n>.
+          U_n = exp[-i (Î¸_n/2) (cosphi_n Ïƒ_x + sinphi_n Ïƒ_y)] acting only when the cavity is in |n>.
         Uses a single selective Gaussian window. Zeros in Î¸_n act as spectators.
 
         Baseband per-tone envelope:
-          A_n(t) = (Î»_n + dÎ»_n) * g(t) * exp[ +i(Ï†_n + dÎ±_n) ] * exp[ -i (nÏ‡ + dÏ‰_n) (t - t_mid) ],
+          A_n(t) = (Î»_n + dÎ»_n) * g(t) * exp[ +i(phi_n + dalpha_n) ] * exp[ -i (nchi_val + domega_n) (t - t_mid) ],
         with Î»_n chosen so that 2 * âˆ« g(t) dt * Î»_n = Î¸_n.
         """
         import math
@@ -322,10 +322,10 @@ class DriveGenerator:
         return drive
     # ------------------ 1) QUBIT ROTATION --------------------
     def qubit_rotation(self,
-                       angle: float,                # rotation angle (rad), e.g. Ï€ for 180Â°
+                       angle: float,                # rotation angle (rad), e.g. pi_val for 180Â°
                        duration: float,             # gate time (s)
                        axis: str = "x",             # "x", "y" or "phase" (use 'phase' + phase)
-                       phase: Optional[float] = None,  # radians; if None, uses axis â†’ 0 or +Ï€/2
+                       phase: Optional[float] = None,  # radians; if None, uses axis â†’ 0 or +pi_val/2
                        t0: float = 0.0,
                        shape: str = "constant",     # "constant" or "gaussian"
                        shape_params: Optional[dict] = None,
@@ -392,17 +392,17 @@ class DriveGenerator:
 
     # ---------------- 2) CAVITY DISPLACEMENT -----------------
     def cavity_displacement(self,
-                            beta: complex,           # target complex displacement (dimensionless cavity Î±)
+                            beta: complex,           # target complex displacement (dimensionless cavity alpha)
                             duration: float,
                             t0: float = 0.0,
-                            detuning: float = 0.0,   # Î”Ï‰ from wc (rad/s); usually 0
+                            detuning: float = 0.0,   # Deltaomega from wc (rad/s); usually 0
                             shape: str = "constant",
                             shape_params: Optional[dict] = None,
                             name: Optional[str] = None,
                             carrier: Optional[float] = None) -> Dict:
         """
-        Displacement under H = A(t) a e^{-iÏ‰t} + A*(t) aâ€  e^{+iÏ‰t}.
-        In the cavity rotating frame, dâŸ¨aâŸ©/dt = -i A*(t). To get Î”âŸ¨aâŸ© = Î², we need âˆ« A(t) dt = -i Î²*.
+        Displacement under H = A(t) a e^{-iomegat} + A*(t) aâ€  e^{+iomegat}.
+        In the cavity rotating frame, dâŸ¨aâŸ©/dt = -i A*(t). To get DeltaâŸ¨aâŸ© = Î², we need âˆ« A(t) dt = -i Î²*.
         This picks the complex amplitude so the time integral equals -i*conj(beta).
         """
         shape_params = shape_params or {}
@@ -460,22 +460,22 @@ class DriveGenerator:
             t0: float = 0.0,
             name: str = "SNAP/single",
             include_unselective: bool = False,
-            T_pi: Optional[float] = None,            # unselective (fast) Ï€/2 pulse length (s), default 24 ns
+            T_pi: Optional[float] = None,            # unselective (fast) pi_val/2 pulse length (s), default 24 ns
             unselective_axis: str = "x",
             unselective_gain = 1.0,
             t_gap: float = 0.0
         ) -> Dict:
         """
         One-drive SNAP:
-            Stage-1:  fast Ï€/2 comb (if include_unselective) OR selective Ï€/2
+            Stage-1:  fast pi_val/2 comb (if include_unselective) OR selective pi_val/2
             gap
-            Stage-2:  selective Ï€/2 with per-n phase thetas (phase-imparting)
+            Stage-2:  selective pi_val/2 with per-n phase thetas (phase-imparting)
 
         â€¢ Unselective stage (include_unselective=True): a *sum over tones* at
-        Ï‰_q + nÏ‡ for n = 0..Nc-1, all using the same short Gaussian and per-tone
-        area = Ï€/2 (scaled by `unselective_gain`). This guarantees |g,n> â†’ |e,n>
+        omega_q + nchi_val for n = 0..Nc-1, all using the same short Gaussian and per-tone
+        area = pi_val/2 (scaled by `unselective_gain`). This guarantees |g,n> â†’ |e,n>
         ideally for each addressed n.
-        â€¢ Selective stages use a Gaussian of length T (6Ïƒ = T) with per-tone area Ï€/2.
+        â€¢ Selective stages use a Gaussian of length T (6Ïƒ = T) with per-tone area pi_val/2.
         """
         import math
         thetas = np.asarray(thetas, float)
@@ -488,14 +488,14 @@ class DriveGenerator:
         chi = -float(getattr(self.sys, "chi", 0.0))
         Nc  = int(getattr(self.sys, "Nc", L))  # use system cavity truncation as comb size
 
-        # ------------ Gaussian helpers + per-tone Ï€/2 calibration ------------
+        # ------------ Gaussian helpers + per-tone pi_val/2 calibration ------------
         # Selective Gaussian (length T: 6Ïƒ = T)
         sigma_sel = T/6.0
         def g_sel(t, tm): return np.exp(-(t - tm)**2/(2.0*sigma_sel**2))
 
         z_sel    = T / (2.0*np.sqrt(2.0)*sigma_sel)
         area_sel = np.sqrt(2.0*np.pi)*sigma_sel*math.erf(z_sel)   # finite-window area
-        lam0     = np.pi/(2.0*area_sel)                           # per-tone amplitude â†’ Ï€/2 area
+        lam0     = np.pi/(2.0*area_sel)                           # per-tone amplitude â†’ pi_val/2 area
 
         # ---------------- timing ----------------
         if include_unselective:
@@ -504,7 +504,7 @@ class DriveGenerator:
             t2_start, t2_dur = t1_start + t1_dur + t_gap, T
             T_total = t1_dur + t_gap + t2_dur
         else:
-            # two selective Ï€/2 stages (legacy)
+            # two selective pi_val/2 stages (legacy)
             t1_start, t1_dur = t0, T
             t2_start, t2_dur = t1_start + t1_dur + t_gap, T
             T_total = t1_dur + t_gap + t2_dur
@@ -519,15 +519,15 @@ class DriveGenerator:
         lam2    = lam0 + d_lambda
         alp2    = thetas + d_alpha
 
-        # ------------- UNSELECTIVE = multi-tone fast Ï€/2 comb ----------------
+        # ------------- UNSELECTIVE = multi-tone fast pi_val/2 comb ----------------
         if include_unselective:
-            # axis choice: xâ†’0, yâ†’+Ï€/2 (IQ convention A = |A| e^{iÏ†})
+            # axis choice: xâ†’0, yâ†’+pi_val/2 (IQ convention A = |A| e^{iphi})
             phi_unsel = 0.0 if (unselective_axis.lower() == "x") else (np.pi/2)
 
             sigma_u = t1_dur/6.0
             z_u     = t1_dur / (2.0*np.sqrt(2.0)*sigma_u)
             area_u  = np.sqrt(2.0*np.pi)*sigma_u*math.erf(z_u)
-            Om_pi   = np.pi/(2.0*area_u)   # per-tone amplitude for Ï€/2 area
+            Om_pi   = np.pi/(2.0*area_u)   # per-tone amplitude for pi_val/2 area
 
             # Detuning set for the comb: n = 0..Nc-1
             nU     = np.arange(Nc, dtype=float)
@@ -545,16 +545,16 @@ class DriveGenerator:
             A = 0.0 + 0.0j
 
             if include_unselective:
-                # Multi-tone sum: same short Gaussian, same per-tone Ï€/2 area
+                # Multi-tone sum: same short Gaussian, same per-tone pi_val/2 area
                 # Centered at t1_mid so the complex exponentials are (t - t1_mid).
                 A += unselective_gain * np.exp(1j*phi_unsel) * g_unsel(t) * np.sum(
                     Om_pi * np.exp(-1j * deltaU * (t - t1_mid))
                 )
             else:
-                # Selective Ï€/2 (legacy): sum over tones up to L
+                # Selective pi_val/2 (legacy): sum over tones up to L
                 A += g_sel(t, t1_mid) * lam0 * np.sum(np.exp(-1j * delta1 * (t - t1_mid)))
 
-            # Phase-imparting selective Ï€/2 (minus sign follows your convention)
+            # Phase-imparting selective pi_val/2 (minus sign follows your convention)
             A -= g_sel(t, t2_mid) * np.sum(
                 lam2 * np.exp(1j*alp2) * np.exp(-1j * delta2 * (t - t2_mid))
             )
@@ -592,7 +592,7 @@ def plot_drive_time_and_freq(
     drive_def: Dict,
     dt: Optional[float] = None,          # sample step [s]; default auto (â‰ˆ T/2000)
     t_margin: float = 0.0,               # extra time before/after gate [s]
-    mode: str = "lab",                   # "lab" (A e^{-iÏ‰t}) or "baseband" (A)
+    mode: str = "lab",                   # "lab" (A e^{-iomegat}) or "baseband" (A)
     window: str = "hann",                # None | "hann" | "hamming"
     zero_pad: int = 0,                   # extra zeros appended (for FFT interpolation)
     db: bool = False,                    # plot frequency magnitude in dB
@@ -607,7 +607,7 @@ def plot_drive_time_and_freq(
 
     Time trace:
       - baseband: A(t) = complex envelope from sys._drive_envelope
-      - lab:      x(t) = A(t) * exp(-i * Ï‰_carrier * t)
+      - lab:      x(t) = A(t) * exp(-i * omega_carrier * t)
 
     Frequency trace:
       - FFT with chosen window; frequency axis centered (fftshift).

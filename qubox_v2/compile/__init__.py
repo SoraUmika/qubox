@@ -1,4 +1,4 @@
-﻿# qubox/compile/__init__.py
+# qubox_v2/compile/__init__.py
 
 from .param_space import ParamBlock, ParamSpace
 from .templates import (

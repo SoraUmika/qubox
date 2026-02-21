@@ -1,4 +1,4 @@
-﻿# qubox/gates_v2/hardware/snap.py
+# qubox_v2/gates/hardware/snap.py
 from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
@@ -6,8 +6,7 @@ import numpy as np
 from ..hardware_base import GateHardware
 from ..hash_utils import array_md5
 
-# Adjust to your real module paths:
-from qubox_v2.pulse_manager import PulseOp
+from qubox_v2.analysis.pulseOp import PulseOp
 
 
 def _get_attr(att, name, default=None):
@@ -35,7 +34,7 @@ class SNAPHardware(GateHardware):
 
     Parameters follow your legacy implementation:
       - angles[n] : target SNAP phase angle (rad) (paper parameterization)
-      - d_lambda[n], d_alpha[n], d_omega[n] : per-Fock corrections for the selective Ï€ synthesis
+      - d_lambda[n], d_alpha[n], d_omega[n] : per-Fock corrections for the selective pi_val synthesis
       - include_unselective : choose implementation variant
       - unselective_axis : 'x' or 'y'
       - unselective_position : 'before' or 'after'
@@ -163,7 +162,7 @@ class SNAPHardware(GateHardware):
         chi, chi2, chi3 = _resolve_chis(att)
         dt = float(_get_attr(att, "dt_s", 1e-9))
 
-        # calibrated selective Ï€ templates
+        # calibrated selective pi_val templates
         xid = self.sel_x180_pulse_id
         yid = self.sel_y180_pulse_id
         I_x0, Q_x0 = mgr.get_pulse_waveforms(xid)
@@ -202,7 +201,7 @@ class SNAPHardware(GateHardware):
         use_two_selective = (not add_unsel)
 
         if use_two_selective:
-            # TWO selective Ï€â€™s (legacy)
+            # TWO selective pi_valâ€™s (legacy)
             win_len = 2 * len_pi
             T_sel = 2 * t_pi
             lam0 = np.pi / (2.0 * T_sel)
@@ -229,7 +228,7 @@ class SNAPHardware(GateHardware):
                 Ix, Qx = rot(I_x0, Q_x0, w_n)
                 Iy, Qy = rot(I_y0, Q_y0, w_n)
 
-                # Ï€1 axis = 0; Ï€2 axis = Î¸_n + dÎ±_n âˆ’ Î”Ï‰_n * (T_sel/2)
+                # pi_val1 axis = 0; pi_val2 axis = Î¸_n + dalpha_n âˆ’ Deltaomega_n * (T_sel/2)
                 phi2 = (th + dalp) - dome * (0.5 * T_sel)
 
                 I1, Q1 = mix(0.0,  Ix, Qx, Iy, Qy)
@@ -243,7 +242,7 @@ class SNAPHardware(GateHardware):
             marker = mgr._perm.pulses[xid].get("digital_marker", "ON")
             return I_tot, Q_tot, len(I_tot), marker
 
-        # ONE selective Ï€ + ONE unselective Ï€
+        # ONE selective pi_val + ONE unselective pi_val
         win_len = len_pi
         T_sel = t_pi
         lam0 = np.pi / (2.0 * T_sel)

@@ -1,4 +1,4 @@
-﻿# qubox/gates_v2/hash_utils.py
+# qubox_v2/gates/hash_utils.py
 from __future__ import annotations
 import hashlib
 import json

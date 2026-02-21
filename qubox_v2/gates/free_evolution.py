@@ -1,4 +1,4 @@
-﻿# qubox/gates_v2/models/free_evolution.py
+# qubox_v2/gates/free_evolution.py
 from __future__ import annotations
 import numpy as np
 from .contexts import ModelContext

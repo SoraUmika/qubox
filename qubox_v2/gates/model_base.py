@@ -1,4 +1,4 @@
-﻿# qubox/gates_v2/model_base.py
+# qubox_v2/gates/model_base.py
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass

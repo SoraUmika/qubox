@@ -1,11 +1,11 @@
-﻿# qubox/gates_v2/models/common.py
+# qubox_v2/gates/models/common.py
 from __future__ import annotations
 import numpy as np
 
 def single_qubit_rotation(theta: float, phi: float) -> np.ndarray:
     """
-    Ideal single-qubit rotation about equatorial axis (cos Ï†, sin Ï†, 0):
-        U(Î¸, Ï†) = exp[-i Î¸/2 (cos Ï† Ïƒ_x + sin Ï† Ïƒ_y)]
+    Ideal single-qubit rotation about equatorial axis (cos phi, sin phi, 0):
+        U(Î¸, phi) = exp[-i Î¸/2 (cos phi Ïƒ_x + sin phi Ïƒ_y)]
     """
     theta = float(theta)
     phi = float(phi)

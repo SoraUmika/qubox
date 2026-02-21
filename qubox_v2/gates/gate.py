@@ -1,4 +1,4 @@
-﻿# qubox/gates_v2/gate.py
+# qubox_v2/gates/gate.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional

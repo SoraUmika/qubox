@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 import json, warnings
 from typing import Any, Dict, List, Union
 import numpy as np

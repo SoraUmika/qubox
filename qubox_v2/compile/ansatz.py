@@ -1,4 +1,4 @@
-﻿# qubox/compile/ansatz.py
+# qubox_v2/compile/ansatz.py
 from __future__ import annotations
 
 from dataclasses import dataclass

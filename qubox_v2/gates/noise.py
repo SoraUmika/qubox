@@ -1,4 +1,4 @@
-﻿# qubox/gates_v2/noise.py
+# qubox_v2/gates/noise.py
 from __future__ import annotations
 import math
 import numpy as np

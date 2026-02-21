@@ -1,4 +1,4 @@
-﻿# qubox/compile/optimizers.py
+# qubox_v2/compile/optimizers.py
 from __future__ import annotations
 
 from dataclasses import dataclass

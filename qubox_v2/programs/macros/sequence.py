@@ -1,5 +1,5 @@
-﻿from qm.qua import *
-from .measure_macro import measureMacro
+from qm.qua import *
+from .measure import measureMacro
 from qualang_tools.loops import from_array
 import numpy as np
 class sequenceMacros:
@@ -165,7 +165,7 @@ class sequenceMacros:
             One of {"ZSCORE","AFFINE","HYSTERESIS","BLOBS"} or None.
             If None, uses simple scalar-threshold rule on I.
         r180 : str
-            Name of the Ï€ pulse used for conditional resets.
+            Name of the pi_val pulse used for conditional resets.
         qb_el : str
             Qubit element name.
         max_trials : int
@@ -293,7 +293,7 @@ class sequenceMacros:
         # Active reset loop
         # -------------------------------
         with while_((~done) & (tries < max_trials)):
-            # Conditional Ï€ to move toward target_state
+            # Conditional pi_val to move toward target_state
             if ts == "e":
                 cls.conditional_reset_excited(I, thr, r180=r180, qb_el=qb_el)
             else:

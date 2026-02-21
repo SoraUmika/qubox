@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import inspect
 import numbers
 from collections.abc import Callable

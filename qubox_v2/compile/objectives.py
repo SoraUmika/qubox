@@ -1,4 +1,4 @@
-﻿# qubox/compile/objectives.py
+# qubox_v2/compile/objectives.py
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import matplotlib.pyplot as plt
 
 def plot_hm(data, x_data, y_data,

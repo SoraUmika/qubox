@@ -13,7 +13,7 @@ from .config_engine import ConfigEngine
 from .controller import HardwareController
 from .program_runner import ProgramRunner, RunResult, ExecMode
 from .queue_manager import QueueManager
-from .octave import OctaveManager
+from .qua_program_manager import QuaProgramManager
 
 __all__ = [
     "ConfigEngine",
@@ -22,5 +22,5 @@ __all__ = [
     "RunResult",
     "ExecMode",
     "QueueManager",
-    "OctaveManager",
+    "QuaProgramManager",
 ]

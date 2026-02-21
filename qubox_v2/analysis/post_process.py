@@ -1,4 +1,4 @@
-﻿from .analysis_tools import Output, demod2volts
+from .analysis_tools import Output, demod2volts
 import numpy as np
 from .analysis_tools import apply_norm_IQ
 from .analysis_tools import bools_to_sigma_z
@@ -82,7 +82,7 @@ def proc_default_legacy(output: Output, axis: int = 0, targets=None, **kwargs) -
             I, Q = output.extract(I_key, Q_key)
             S = I + 1j * Q
 
-            # Wrapped phase in (-Ï€, Ï€]
+            # Wrapped phase in (-pi_val, pi_val]
             Phases = np.angle(S)
             # Ensure ndarray then unwrap along requested axis
             if np.ndim(S) == 0:
@@ -235,13 +235,13 @@ def ro_state_correct_proc(
         return output
 
     # --- validate and invert confusion matrix ---
-    Î› = np.asarray(confusion, dtype=float)
-    if Î›.shape[0] != Î›.shape[1]:
+    Lambda = np.asarray(confusion, dtype=float)
+    if Lambda.shape[0] != Lambda.shape[1]:
         raise ValueError("Confusion matrix must be square (n_outcomes, n_states).")
-    if np.linalg.det(Î›) == 0:
+    if np.linalg.det(Lambda) == 0:
         raise ValueError("Confusion matrix is singular; cannot invert.")
 
-    Î›_inv = np.linalg.inv(Î›)
+    Lambda_inv = np.linalg.inv(Lambda)
 
     def _to_PgPe(a: np.ndarray):
         """
@@ -264,7 +264,7 @@ def ro_state_correct_proc(
 
     def _correct(PgPe: np.ndarray) -> np.ndarray:
         """
-        Apply Î›â»Â¹ to PgPe along the last axis, with basic physicality fixes.
+        Apply Lambdaâ»Â¹ to PgPe along the last axis, with basic physicality fixes.
         PgPe is assumed to have shape (..., 2).
         Returns an array of the SAME SHAPE as PgPe.
         """
@@ -279,8 +279,8 @@ def ro_state_correct_proc(
         flat = PgPe.reshape(-1, 2)  # (M, 2)
 
         # Apply inverse confusion matrix on each row
-        # p_true_flat[i] = Î›_inv @ flat[i]
-        p_true_flat = (Î›_inv @ flat.T).T  # still (M, 2)
+        # p_true_flat[i] = Lambda_inv @ flat[i]
+        p_true_flat = (Lambda_inv @ flat.T).T  # still (M, 2)
 
         if clip:
             p_true_flat = np.maximum(p_true_flat, 0.0)

@@ -1,4 +1,4 @@
-﻿# qubox/compile/structure_search.py
+# qubox_v2/compile/structure_search.py
 from __future__ import annotations
 
 from dataclasses import dataclass, field

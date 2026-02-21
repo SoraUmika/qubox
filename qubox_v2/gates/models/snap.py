@@ -1,4 +1,4 @@
-﻿# qubox/gates/models/snap.py
+# qubox_v2/gates/models/snap.py
 from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np

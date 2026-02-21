@@ -80,8 +80,7 @@ class SessionManager:
 
         # --- 1. Configuration engine ---
         self.config_engine = ConfigEngine(
-            hardware_json=self._resolve_path("hardware.json", required=True),
-            pulse_json=self._resolve_path("pulses.json", required=False),
+            hardware_path=self._resolve_path("hardware.json", required=True),
         )
 
         # --- 2. QM connection ---
@@ -100,11 +99,15 @@ class SessionManager:
             controller=self.hardware,
             config_engine=self.config_engine,
         )
-        self.queue = QueueManager(controller=self.hardware)
+        self.queue = QueueManager(runner=self.runner)
 
         # --- 4. Pulse management (both legacy POM and new PulseRegistry) ---
-        self.pulse_mgr = PulseOperationManager(self.config_engine)
-        self.pulses = PulseRegistry(self.config_engine)
+        pl_path = self._resolve_path("pulses.json", required=False)
+        if pl_path:
+            self.pulse_mgr = PulseOperationManager.from_json(pl_path)
+        else:
+            self.pulse_mgr = PulseOperationManager()
+        self.pulses = PulseRegistry()
 
         # --- 5. Calibration store ---
         cal_path = self.experiment_path / "config" / "calibration.json"
@@ -113,10 +116,15 @@ class SessionManager:
         )
 
         # --- 6. External devices ---
-        self.devices = DeviceManager(
-            self.experiment_path / "devices.json",
-            autoload=load_devices,
-        )
+        device_path = self._resolve_path("devices.json", required=False)
+        if device_path is None:
+            device_path = self.experiment_path / "devices.json"
+        self.devices = DeviceManager(device_path)
+        if load_devices is True:
+            self.devices.instantiate_all()
+        elif isinstance(load_devices, (list, tuple, set)):
+            if load_devices:
+                self.devices.instantiate(list(load_devices))
 
         # --- 7. Experiment attributes (cQED parameters) ---
         self.attributes = self._load_attributes()
@@ -173,7 +181,7 @@ class SessionManager:
     # ------------------------------------------------------------------
     def burn_pulses(self, include_volatile: bool = True) -> None:
         """Push all registered pulses into the QM config."""
-        self.pulse_mgr.burn(include_volatile=include_volatile)
+        self.config_engine.merge_pulses(self.pulse_mgr, include_volatile=include_volatile)
         self.hardware.apply_changes()
 
     # ------------------------------------------------------------------
@@ -236,10 +244,11 @@ class SessionManager:
             self.hardware.close()
         except Exception as e:
             _logger.warning("Error closing hardware: %s", e)
-        try:
-            self.devices.close_all()
-        except Exception as e:
-            _logger.warning("Error closing devices: %s", e)
+        for name, handle in self.devices.handles.items():
+            try:
+                handle.disconnect()
+            except Exception as e:
+                _logger.warning("Error disconnecting device '%s': %s", name, e)
         self.calibration.save()
         _logger.info("SessionManager closed.")
 

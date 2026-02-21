@@ -1,4 +1,4 @@
-﻿from typing import Callable, List
+from typing import Callable, List
 from skopt import gp_minimize
 from skopt.space import Real, Integer, Categorical
 
