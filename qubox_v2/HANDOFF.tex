@@ -272,6 +272,176 @@ with SessionManager("./cooldown_2025", qop_ip="10.0.0.1") as session:
         Created \texttt{MIGRATION.md} (comprehensive v2$\rightarrow$v3 guide).
         Updated this HANDOFF.tex with final status.
         \textbf{All R1--R8 items COMPLETE. R9 (Lab facade) deferred as optional.}
+
+  \item[Sessions 5--9] \textbf{API Consistency \& Modernization.}
+        Created \texttt{hardware/qua\_program\_manager.py} compatibility facade.
+        Notebook generation (\texttt{notebooks/qubox\_v2\_usage.ipynb}).
+        Migrated \texttt{seq\_1\_device/} data and validated end-to-end flow.
+        Comprehensive codebase-wide fixes detailed in Section~\ref{sec:api-modernization}.
 \end{description}
+
+% ============================================================
+\section{API Consistency \& Modernization (Sessions 5--9)}
+\label{sec:api-modernization}
+% ============================================================
+
+A comprehensive sweep of the codebase was performed to eliminate all stale
+imports, broken constructor calls, naming inconsistencies, and documentation
+inaccuracies.  All changes below have been verified with import tests.
+
+\subsection{Phase 1: SessionManager Runtime Fixes}
+
+\texttt{experiments/session.py} had \textbf{6 broken call sites} that would
+crash at runtime.  Each was corrected to match the actual v3 constructor
+signatures:
+
+\begin{longtable}{p{5cm}p{4cm}p{5cm}}
+\toprule
+\textbf{Call Site} & \textbf{Bug} & \textbf{Fix} \\
+\midrule
+\endhead
+\texttt{ConfigEngine()} &
+  \texttt{hardware\_json=}, \texttt{pulse\_json=} (no such params) &
+  \texttt{hardware\_path=} (single path) \\
+\texttt{QueueManager()} &
+  \texttt{controller=self.hardware} &
+  \texttt{runner=self.runner} \\
+\texttt{PulseOperationManager()} &
+  \texttt{POM(self.config\_engine)} &
+  \texttt{POM.from\_json(path)} or \texttt{POM()} \\
+\texttt{PulseRegistry()} &
+  \texttt{PulseRegistry(self.config\_engine)} &
+  \texttt{PulseRegistry()} (no args) \\
+\texttt{DeviceManager()} &
+  \texttt{autoload=} (no such param) &
+  \texttt{DeviceManager(path)} + manual \texttt{instantiate\_all()} \\
+\texttt{burn\_pulses()} &
+  \texttt{self.pulse\_mgr.burn()} (no such method) &
+  \texttt{config\_engine.merge\_pulses(pom)} \\
+\bottomrule
+\end{longtable}
+
+\subsection{Phase 2: Broken Imports in gates/hardware/}
+
+Four files imported from \texttt{qubox\_v2.pulse\_manager}, which does not exist:
+
+\begin{longtable}{lp{9cm}}
+\toprule
+\textbf{File} & \textbf{Fix} \\
+\midrule
+\endhead
+\texttt{gates/hardware/displacement.py} &
+  \texttt{from qubox\_v2.analysis.pulseOp import PulseOp};
+  \texttt{from qubox\_v2.core.types import MAX\_AMPLITUDE} \\
+\texttt{gates/hardware/qubit\_rotation.py} & Same as displacement \\
+\texttt{gates/hardware/snap.py} &
+  \texttt{from qubox\_v2.analysis.pulseOp import PulseOp} \\
+\texttt{gates/hardware/sqr.py} & Same as snap \\
+\bottomrule
+\end{longtable}
+
+\subsection{Phase 3: Package Name in File Headers}
+
+$\sim$33 files in \texttt{gates/} and \texttt{compile/} had incorrect header
+comments (\texttt{\# qubox/gates\_v2/...} or \texttt{\# qubox/...}).
+All updated to \texttt{\# qubox\_v2/...}.
+Additionally, error messages in \texttt{compile/gpu\_accelerators.py} referenced
+\texttt{"qubox.compile.evaluators"} --- corrected to
+\texttt{"qubox\_v2.compile.evaluators"}.
+
+\subsection{Phase 4: API\_REFERENCE.md Corrections}
+
+Updated all inaccurate constructor signatures and example snippets:
+
+\begin{itemize}
+  \item \texttt{ConfigEngine}: \texttt{hardware\_json=} $\rightarrow$ \texttt{hardware\_path=}; removed \texttt{pulse\_json=}
+  \item \texttt{HardwareController}: added \texttt{qmm} parameter, removed \texttt{qop\_ip}
+  \item \texttt{ProgramRunner}: corrected to 3 params (\texttt{qmm}, \texttt{controller}, \texttt{config\_engine})
+  \item \texttt{ExecMode}: \texttt{RUN} $\rightarrow$ \texttt{HARDWARE}
+  \item \texttt{QueueManager}: \texttt{controller=} $\rightarrow$ \texttt{runner=}
+  \item \texttt{DeviceManager}: removed \texttt{autoload=}, \texttt{close\_all()}
+  \item \texttt{PulseOperationManager}: corrected constructor
+  \item \texttt{PulseRegistry}: corrected constructor (no args)
+  \item Quick-Start examples C and D: corrected hardware layer + queue examples
+\end{itemize}
+
+\subsection{Phase 5: Explicit \texttt{\_\_all\_\_} for Wildcard-Import Inits}
+
+Added explicit \texttt{\_\_all\_\_} declarations to prevent namespace pollution:
+
+\begin{itemize}
+  \item \texttt{tools/\_\_init\_\_.py} --- 2 generators + 10 waveform functions
+  \item \texttt{optimization/\_\_init\_\_.py} --- 6 optimization routines
+  \item \texttt{simulation/\_\_init\_\_.py} --- 8 exports (circuitQED, Term,
+        solve\_lindblad, DriveGenerator, etc.)
+\end{itemize}
+
+\subsection{Phase 6: External LO Detection Fix}
+
+\texttt{hardware/controller.py} methods \texttt{\_element\_octave\_rf\_out()}
+and \texttt{\_is\_external\_lo()} were using \texttt{self.qm.get\_config()}
+which returns the SDK-normalized config where \texttt{RF\_inputs} is stripped.
+This caused \texttt{UnableToSetFrequencyError} for elements connected to
+external LO sources.
+
+\textbf{Fix:} Both methods now use \texttt{self.config.hardware\_base} (the
+original un-normalized config) to correctly detect external LO routing.
+
+\subsection{Phase 7: Stale Import in tools/generators.py}
+
+Two broken imports in \texttt{tools/generators.py}:
+\begin{itemize}
+  \item \texttt{from ..pulse\_manager import PulseOperationManager}
+        $\rightarrow$ \texttt{from ..pulses.manager import PulseOperationManager}
+  \item \texttt{from ..gates\_legacy import QubitRotation}
+        $\rightarrow$ \texttt{from ..experiments.gates\_legacy import QubitRotation}
+\end{itemize}
+
+\subsection{Verification}
+
+All changes verified with comprehensive import tests:
+\begin{lstlisting}
+python -c "
+from qubox_v2.tools.generators import register_rotations_from_ref_iq
+from qubox_v2.gates.hardware.displacement import DisplacementHardware
+from qubox_v2.gates.hardware.qubit_rotation import QubitRotationHardware
+from qubox_v2.gates.hardware.snap import SNAPHardware
+from qubox_v2.gates.hardware.sqr import SQRHardware
+from qubox_v2.experiments.session import SessionManager
+from qubox_v2.experiments.legacy_experiment import cQED_Experiment
+from qubox_v2.compile.api import compile_with_ansatz
+from qubox_v2.hardware.controller import HardwareController
+from qubox_v2.hardware.qua_program_manager import QuaProgramManager
+from qubox_v2.optimization import scipy_minimize, cma_es, spsa
+from qubox_v2.tools import drag_gaussian_pulse_waveforms
+print('All imports passed successfully')
+"
+\end{lstlisting}
+
+Additionally, a codebase-wide grep confirmed \textbf{zero remaining stale
+references} to \texttt{qubox\_v2.pulse\_manager}, \texttt{..gates\_legacy}
+(without \texttt{experiments} prefix), or bare \texttt{qubox.} package names
+(outside of the intentional \texttt{compat/} module).
+
+\subsection{Files Modified (Modernization Summary)}
+
+\begin{longtable}{lrl}
+\toprule
+\textbf{Category} & \textbf{Count} & \textbf{Files} \\
+\midrule
+\endhead
+Critical runtime fix     & 1  & \texttt{experiments/session.py} \\
+Broken imports           & 4  & \texttt{gates/hardware/\{displacement,qubit\_rotation,snap,sqr\}.py} \\
+File headers             & 33 & \texttt{gates/**/*.py}, \texttt{compile/**/*.py} \\
+Error messages           & 1  & \texttt{compile/gpu\_accelerators.py} \\
+API documentation        & 1  & \texttt{API\_REFERENCE.md} \\
+Init exports             & 3  & \texttt{tools/}, \texttt{optimization/}, \texttt{simulation/} \texttt{\_\_init\_\_.py} \\
+External LO fix          & 1  & \texttt{hardware/controller.py} \\
+Stale imports            & 1  & \texttt{tools/generators.py} \\
+Compat facade            & 1  & \texttt{hardware/qua\_program\_manager.py} (created) \\
+\midrule
+\textbf{Total}           & \textbf{$\sim$46} & \\
+\bottomrule
+\end{longtable}
 
 \end{document}

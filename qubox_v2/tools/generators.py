@@ -111,9 +111,7 @@ def register_qubit_rotation(
 
 import numpy as np
 from typing import Dict, Iterable, Optional, Tuple, Union
-from ..gates_legacy import QubitRotation
-import numpy as np
-from typing import Dict, Iterable, Optional, Tuple, Union
+from ..experiments.gates_legacy import QubitRotation
 
 
 def register_rotations_from_ref_iq(
