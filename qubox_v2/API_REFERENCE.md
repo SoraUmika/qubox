@@ -27,7 +27,8 @@
    - [3.15 compat/](#315-compat)
 4. [Migration Guide](#4-migration-guide)
 5. [Quick-Start Examples](#5-quick-start-examples)
-6. [Design Principles](#6-design-principles)
+6. [Recipes](#6-recipes)
+7. [Design Principles](#7-design-principles)
 
 ---
 
@@ -315,10 +316,30 @@ JSON-backed typed calibration persistence with snapshot history.
 
 Typed, versioned calibration data with JSON persistence and snapshot history.
 
+**Constructor:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `path` | `str \| Path` | *(required)* | Path to calibration JSON file. Created with defaults if it does not exist. |
+| `auto_save` | `bool` | `False` | If `True`, every mutating method automatically writes to disk. |
+
+**Persistence behaviour:**
+
+- On construction, if `path` does not exist the file is created immediately
+  with default `CalibrationData` (version 3.0.0). The parent directory is
+  created automatically (`parents=True`).
+- All disk writes use **atomic write** (temp file + `os.replace`) so a crash
+  mid-write never leaves a corrupt JSON file.
+- With `auto_save=False` (the default), call `store.save()` explicitly or
+  rely on `SessionManager` context-manager cleanup (`with SessionManager(...) as s:`
+  calls `s.calibration.save()` on exit).
+- With `auto_save=True`, every `set_*()` call writes to disk immediately.
+
 ```python
 from qubox_v2.calibration import CalibrationStore
 
-store = CalibrationStore("./calibration.json", auto_save=False)
+# Path used by SessionManager: <experiment_path>/config/calibration.json
+store = CalibrationStore("./experiment/config/calibration.json", auto_save=False)
 
 # Readout discrimination
 store.set_discrimination("resonator", threshold=0.003, angle=1.23,
@@ -364,9 +385,23 @@ last = store.get_latest_fit("T1")             # -> FitRecord | None
 hist = store.get_fit_history("T1")            # -> list[FitRecord]
 
 # Persistence & snapshots
-store.save()                                  # Write to JSON
+store.save()                                  # Write to JSON (atomic)
 snap = store.snapshot("pre_optimization")     # Timestamped backup
 store.reload()                                # Reload from disk
+
+# Diagnostic summary
+print(store.summary())
+# CalibrationStore: ./experiment/config/calibration.json
+#   file exists: True
+#   auto_save:   False
+#   version:     3.0.0
+#   created:     2025-02-20T14:30:00
+#   modified:    2025-02-20T15:45:00
+#
+#   discrimination: 1 entries [resonator]
+#   frequencies: 2 entries [qubit, storage]
+#   coherence: 1 entries [qubit]
+#   ...
 ```
 
 #### `calibration.models` — Pydantic v2 Calibration Models
@@ -432,6 +467,45 @@ history = CalibrationHistory("./cal_history")
 history.record(qubit_cal, tag="post_cooldown")
 history.list_entries()
 ```
+
+---
+
+#### Calibration Audit — Which Experiments Update What
+
+All calibration writes are gated by `analyze(result, update_calibration=True)`.
+No experiment calls `store.save()` directly — saving is handled by `SessionManager.close()`
+or `auto_save=True`.
+
+| Experiment | Store Method | Fields Updated |
+|------------|-------------|----------------|
+| `ResonatorSpectroscopy` | `set_frequencies(ro_el, ...)` | `lo_freq`, `if_freq` |
+| `ResonatorSpectroscopyX180` | `set_frequencies(ro_el, ...)` | `chi` |
+| `ReadoutFrequencyOptimization` | `set_frequencies(ro_el, ...)` | `lo_freq`, `if_freq` |
+| `QubitSpectroscopy` | `set_frequencies(qb_el, ...)` | `qubit_freq` |
+| `QubitSpectroscopyCoarse` | `set_frequencies(qb_el, ...)` | `qubit_freq` |
+| `StorageSpectroscopy` | `set_frequencies(st_el, ...)` | `qubit_freq`, `kappa` |
+| `StorageChiRamsey` | `set_frequencies(st_el, ...)` | `chi` |
+| `TemporalRabi` | `set_pulse_calibration("x180", ...)` | `pi_length` |
+| `PowerRabi` | `set_pulse_calibration("x180", ...)` | `amplitude` |
+| `DRAGCalibration` | `set_pulse_calibration("x180", ...)` | `drag_coeff` |
+| `T1Relaxation` | `set_coherence(qb_el, ...)` | `T1` |
+| `T2Ramsey` | `set_coherence(qb_el, ...)` | `T2_ramsey` |
+| `T2Echo` | `set_coherence(qb_el, ...)` | `T2_echo` |
+| `ReadoutGEDiscrimination` | `set_discrimination(ro_el, ...)` | `angle`, `threshold`, `fidelity` |
+| `ReadoutButterflyMeasurement` | `set_readout_quality(ro_el, ...)` | `F`, `Q`, `V` |
+
+**Experiments that measure but do not persist** (no `update_calibration` path):
+
+| Experiment | What it measures | Why not persisted |
+|------------|-----------------|-------------------|
+| `QubitSpectroscopyEF` | `f_ef`, `gamma` | E-F transition not tracked in CalibrationData |
+| `ResonatorPowerSpectroscopy` | `optimal_gain`, `optimal_freq` | 2-D exploration, not a single calibration |
+| `AllXY` | `gate_error` | Diagnostic only, no stored field |
+| `RandomizedBenchmarking` | `avg_gate_fidelity`, `error_per_gate` | Diagnostic only |
+| `FockResolvedT1` | `T1_fock_0`, `T1_fock_1`, ... | Per-Fock T1 not in CalibrationData schema |
+| `FockResolvedPowerRabi` | `g_pi_fock_0`, `g_pi_fock_1`, ... | Per-Fock gains managed via FockSQRCalibration |
+| `StorageWignerTomography` | `W_min`, `W_max`, `negativity` | Diagnostic only |
+| `QubitStateTomography` | `sx`, `sy`, `sz`, `purity` | Diagnostic only |
 
 ---
 
@@ -672,6 +746,45 @@ from qubox_v2.programs.macros import measureMacro, sequenceMacros
 
 Central service container that replaces the god-object wiring of `cQED_Experiment`.
 
+**Constructor parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `experiment_path` | `str \| Path` | *(required)* | Root directory. Config, data, and calibration live here. |
+| `qop_ip` | `str \| None` | `None` | OPX+ IP / hostname. Resolved from `hardware.json` if `None`. |
+| `cluster_name` | `str \| None` | `None` | QM cluster identifier. |
+| `load_devices` | `bool \| list[str]` | `True` | `True` = all devices, `False` = none, `list` = named subset. |
+| `oct_cal_path` | `str \| Path \| None` | `None` | Octave calibration DB path. Defaults to `experiment_path`. |
+| `auto_save_calibration` | `bool` | `False` | If `True`, `CalibrationStore` auto-saves on every mutation. |
+
+**Expected directory structure:**
+
+```
+<experiment_path>/
+├── config/
+│   ├── hardware.json          # QM hardware configuration
+│   ├── pulses.json            # Pulse definitions
+│   ├── calibration.json       # CalibrationStore (auto-created)
+│   ├── cqed_params.json       # cQED_attributes (auto-created)
+│   └── devices.json           # External instruments (optional)
+├── data/                      # Experiment output files (auto-created)
+└── octave_cal/                # Octave calibration DB (optional)
+```
+
+**Owned components (attributes):**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `config_engine` | `ConfigEngine` | Hardware config builder |
+| `hardware` / `hw` | `HardwareController` | LO routing, Octave, QM connection |
+| `runner` | `ProgramRunner` | Program execution |
+| `queue` | `QueueManager` | Batch job submission |
+| `pulse_mgr` | `PulseOperationManager` | Full pulse manager |
+| `pulses` | `PulseRegistry` | Simplified pulse facade |
+| `calibration` | `CalibrationStore` | Typed calibration persistence |
+| `devices` | `DeviceManager` | External instruments |
+| `attributes` / `attr` | `cQED_attributes` | Typed experiment parameters |
+
 ```python
 from qubox_v2.experiments.session import SessionManager
 
@@ -846,6 +959,439 @@ Users can override auto_p0 by passing explicit `p0=` to `analyze()`.
 | `cavity/` | `StorageSpectroscopy`, `StorageSpectroscopyCoarse`, `NumSplittingSpectroscopy`, `StorageRamsey`, `StorageChiRamsey`, `StoragePhaseEvolution`, `FockResolvedSpectroscopy`, `FockResolvedT1`, `FockResolvedRamsey`, `FockResolvedPowerRabi` |
 | `tomography/` | `QubitStateTomography`, `FockResolvedStateTomography`, `StorageWignerTomography`, `SNAPOptimization` |
 | `spa/` | `SPAFluxOptimization`, `SPAFluxOptimization2`, `SPAPumpFrequencyOptimization` |
+
+#### Experiment `run()` Parameter Reference
+
+Full parameter signatures for every experiment class, organized by subdirectory.
+All experiments share the protocol: `exp = Class(session); result = exp.run(...); analysis = exp.analyze(result)`.
+
+##### spectroscopy/
+
+**`ResonatorSpectroscopy.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `readout_op` | `str` | *(required)* | Readout operation name |
+| `rf_begin` | `float` | `8605e6` | Start frequency (Hz) |
+| `rf_end` | `float` | `8620e6` | End frequency (Hz) |
+| `df` | `float` | `50e3` | Frequency step (Hz) |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: `set_frequencies(ro_el, lo_freq=..., if_freq=...)` | Metrics: `f0`, `kappa`
+
+**`ResonatorPowerSpectroscopy.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `readout_op` | `str` | *(required)* | Readout operation name |
+| `rf_begin` | `float` | *(required)* | Start frequency (Hz) |
+| `rf_end` | `float` | *(required)* | End frequency (Hz) |
+| `df` | `float` | *(required)* | Frequency step (Hz) |
+| `g_min` | `float` | `1e-3` | Min readout gain |
+| `g_max` | `float` | `0.5` | Max readout gain |
+| `N_a` | `int` | `50` | Gain steps |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: none | Metrics: `optimal_gain`, `optimal_freq`
+
+**`ResonatorSpectroscopyX180.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `rf_begin` | `float` | *(required)* | Start frequency (Hz) |
+| `rf_end` | `float` | *(required)* | End frequency (Hz) |
+| `df` | `float` | *(required)* | Frequency step (Hz) |
+| `r180` | `str` | `"x180"` | Pi pulse operation name |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: `set_frequencies(ro_el, chi=...)` | Metrics: `f0_g`, `f0_e`, `chi`
+
+**`ReadoutFrequencyOptimization.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `rf_begin` | `float` | *(required)* | Start frequency (Hz) |
+| `rf_end` | `float` | *(required)* | End frequency (Hz) |
+| `df` | `float` | *(required)* | Frequency step (Hz) |
+| `ro_op` | `str \| None` | `None` | Readout op override |
+| `r180` | `str` | `"x180"` | Pi pulse name |
+| `n_runs` | `int` | `1000` | Shots per frequency |
+
+Calibration: `set_frequencies(ro_el, lo_freq=..., if_freq=...)` | Metrics: `best_fidelity`, `best_freq`
+
+**`QubitSpectroscopy.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pulse` | `str` | *(required)* | Qubit drive pulse name |
+| `rf_begin` | `float` | *(required)* | Start frequency (Hz) |
+| `rf_end` | `float` | *(required)* | End frequency (Hz) |
+| `df` | `float` | *(required)* | Frequency step (Hz) |
+| `qb_gain` | `float` | *(required)* | Qubit drive gain |
+| `qb_len` | `int` | *(required)* | Drive pulse length (ns) |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: `set_frequencies(qb_el, qubit_freq=...)` | Metrics: `f0`, `gamma`
+
+**`QubitSpectroscopyCoarse.run()`** — same as `QubitSpectroscopy` but uses multi-LO segments for wide sweeps.
+
+**`QubitSpectroscopyEF.run()`** — same signature as `QubitSpectroscopy`. No calibration update. Metrics: `f_ef`, `gamma`.
+
+##### time_domain/
+
+**`TemporalRabi.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pulse` | `str` | *(required)* | Drive pulse name |
+| `pulse_len_begin` | `int` | *(required)* | Start duration (ns, multiple of 4) |
+| `pulse_len_end` | `int` | *(required)* | End duration (ns) |
+| `dt` | `int` | `4` | Duration step (ns) |
+| `pulse_gain` | `float` | `1.0` | Pulse gain scaling |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: `set_pulse_calibration("x180", pi_length=...)` | Metrics: `f_Rabi`, `T_decay`, `pi_length`
+
+**`PowerRabi.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `max_gain` | `float` | *(required)* | Maximum gain to sweep |
+| `dg` | `float` | `1e-3` | Gain step |
+| `op` | `str` | `"x180"` | Pulse operation name |
+| `length` | `int \| None` | `None` | Override pulse length (ns) |
+| `truncate_clks` | `int \| None` | `None` | Truncation in clock cycles |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: `set_pulse_calibration("x180", amplitude=...)` | Metrics: `g_pi`
+
+**`T1Relaxation.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `delay_end` | `int` | *(required)* | Max delay (clock cycles) |
+| `dt` | `int` | *(required)* | Delay step (clock cycles) |
+| `delay_begin` | `int` | `4` | Min delay (clock cycles) |
+| `r180` | `str` | `"x180"` | Pi pulse name |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: `set_coherence(qb_el, T1=...)` | Metrics: `T1`
+
+**`T2Ramsey.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `qb_detune` | `int` | *(required)* | Detuning (Hz) |
+| `delay_end` | `int` | *(required)* | Max delay (clock cycles) |
+| `dt` | `int` | *(required)* | Delay step (clock cycles) |
+| `delay_begin` | `int` | `4` | Min delay (clock cycles) |
+| `r90` | `str` | `"x90"` | Half-pi pulse name |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: `set_coherence(qb_el, T2_ramsey=...)` | Metrics: `T2_star`, `f_det`
+
+**`T2Echo.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `delay_end` | `int` | *(required)* | Max delay (clock cycles) |
+| `dt` | `int` | *(required)* | Delay step (clock cycles) |
+| `delay_begin` | `int` | `8` | Min delay (clock cycles) |
+| `r180` | `str` | `"x180"` | Pi pulse name |
+| `r90` | `str` | `"x90"` | Half-pi pulse name |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: `set_coherence(qb_el, T2_echo=...)` | Metrics: `T2_echo`
+
+**`ResidualPhotonRamsey.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `t_R_begin` | `int` | *(required)* | Start Ramsey time (clock cycles) |
+| `t_R_end` | `int` | *(required)* | End Ramsey time (clock cycles) |
+| `dt` | `int` | *(required)* | Step (clock cycles) |
+| `test_ro_op` | `str` | *(required)* | Test readout operation |
+| `qb_detuning` | `int` | `0` | Qubit detuning (Hz) |
+| `t_relax` | `int` | `40` | Relaxation time (ns) |
+| `t_buffer` | `int` | `400` | Buffer time (ns) |
+| `r90` | `str` | `"x90"` | Half-pi pulse |
+| `r180` | `str` | `"x180"` | Pi pulse |
+| `prep_e` | `bool` | `False` | Prepare excited state |
+| `test_ro_amp` | `float` | `1.0` | Test readout amplitude |
+| `measure_ro_op` | `str` | `"readout_long"` | Measurement readout op |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: none | Metrics: `T2`
+
+##### calibration/
+
+**`AllXY.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `gate_indices` | `list[int] \| None` | `None` | Subset of 21 AllXY sequences (all if None) |
+| `prefix` | `str` | `""` | Gate name prefix |
+| `qb_detuning` | `int` | `0` | Detuning offset (Hz) |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: none | Metrics: `gate_error`
+
+**`DRAGCalibration.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `amps` | `ndarray \| list[float]` | *(required)* | DRAG amplitude sweep |
+| `n_avg` | `int` | `1000` | Averages |
+| `x180` | `str` | `"x180"` | X180 pulse name |
+| `x90` | `str` | `"x90"` | X90 pulse name |
+| `y180` | `str` | `"y180"` | Y180 pulse name |
+| `y90` | `str` | `"y90"` | Y90 pulse name |
+
+Calibration: `set_pulse_calibration("x180", drag_coeff=...)` | Metrics: `optimal_alpha`
+
+**`RandomizedBenchmarking.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `m_list` | `list[int]` | *(required)* | Clifford depths |
+| `num_sequence` | `int` | *(required)* | Sequences per depth |
+| `n_avg` | `int` | `1000` | Averages |
+| `interleave_op` | `str \| None` | `None` | Gate to interleave |
+| `primitives_by_id` | `dict \| None` | `None` | Custom primitive mapping |
+| `primitive_prefix` | `str` | `""` | Primitive name prefix |
+| `max_sequences_per_compile` | `int` | `10` | Batch size |
+| `guard_clks` | `int` | `18` | Idle guard cycles |
+
+Calibration: none | Metrics: `p`, `avg_gate_fidelity`, `error_per_gate`
+
+**`QubitPulseTrain.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `N_values` | `list[int] \| ndarray` | *(required)* | Pulse repetition counts |
+| `reference_pulse` | `str` | `"x90"` | Reference pulse |
+| `rotation_pulse` | `str` | `"x180"` | Rotation pulse |
+| `run_reference` | `bool` | `False` | Include zero-amplitude reference |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: none | Metrics: `I_std`, `Q_std`, `amp_err`
+
+**`IQBlob.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `r180` | `str` | `"x180"` | Pi pulse name |
+| `n_runs` | `int` | `1000` | Shots |
+
+Calibration: none | Metrics: `fidelity`, `angle`, `threshold`, `confusion_matrix`
+
+**`ReadoutGEDiscrimination.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `measure_op` | `str` | *(required)* | Measure operation name |
+| `drive_frequency` | `float` | *(required)* | Readout drive frequency (Hz) |
+| `r180` | `str` | `"x180"` | Pi pulse |
+| `gain` | `float` | `1.0` | Readout gain |
+| `n_samples` | `int` | `10_000` | Shots |
+| `blob_k_g` | `float` | `2.0` | Ground blob k-sigma |
+| `blob_k_e` | `float \| None` | `None` | Excited blob k-sigma |
+
+Calibration: `set_discrimination(ro_el, angle=..., threshold=..., fidelity=...)` | Metrics: `fidelity`, `angle`, `threshold`, `gg`, `ge`, `eg`, `ee`
+
+**`ReadoutButterflyMeasurement.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prep_policy` | `str \| None` | `None` | Post-selection policy |
+| `prep_kwargs` | `dict \| None` | `None` | Policy kwargs |
+| `r180` | `str` | `"x180"` | Pi pulse |
+| `n_samples` | `int` | `10_000` | Shots |
+| `M0_MAX_TRIALS` | `int` | `16` | Max post-selection retries |
+
+Calibration: `set_readout_quality(ro_el, F=..., Q=..., V=...)` | Metrics: `F`, `Q`, `V`
+
+**`CalibrateReadoutFull.run()`** — pipeline running `ReadoutWeightsOptimization` + `ReadoutGEDiscrimination` + `ReadoutButterflyMeasurement` in sequence. Returns `dict` of sub-results.
+
+**`ReadoutAmpLenOpt.run()`** — 2-D sweep of readout amplitude x length. Returns `Output` with `fidelity_matrix`. Metrics: `best_length`, `best_gain`, `best_fidelity`.
+
+##### cavity/
+
+**`StorageSpectroscopy.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `disp` | `str` | *(required)* | Displacement pulse name |
+| `rf_begin` | `float` | *(required)* | Start frequency (Hz) |
+| `rf_end` | `float` | *(required)* | End frequency (Hz) |
+| `df` | `float` | *(required)* | Frequency step (Hz) |
+| `storage_therm_time` | `int` | *(required)* | Thermalization time (clock cycles) |
+| `sel_r180` | `str` | `"sel_x180"` | Selective pi pulse |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: `set_frequencies(st_el, qubit_freq=..., kappa=...)` | Metrics: `f_storage`, `kappa`
+
+**`StorageSpectroscopyCoarse.run()`** — multi-LO wide sweep variant. Same analyze/calibration as `StorageSpectroscopy`.
+
+**`NumSplittingSpectroscopy.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `rf_centers` | `list[float] \| ndarray` | *(required)* | Peak center frequencies (Hz) |
+| `rf_spans` | `list[float] \| ndarray` | *(required)* | Span around each center (Hz) |
+| `df` | `float` | *(required)* | Frequency step (Hz) |
+| `sel_r180` | `str` | `"sel_x180"` | Selective pi pulse |
+| `state_prep` | `Any` | `None` | State preparation |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: none | Metrics: `n_peaks`
+
+**`StorageRamsey.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `delay_ticks` | `ndarray \| list[int]` | *(required)* | Delay sweep (clock cycles) |
+| `st_detune` | `int` | `0` | Storage detuning (Hz) |
+| `disp_pulse` | `str` | `"const_alpha"` | Displacement pulse |
+| `sel_r180` | `str` | `"sel_x180"` | Selective pi pulse |
+| `n_avg` | `int` | `200` | Averages |
+
+Calibration: none | Metrics: `T2_storage`
+
+**`StorageChiRamsey.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fock_fq` | `float` | *(required)* | Fock transition frequency (Hz) |
+| `delay_ticks` | `ndarray \| list[int]` | *(required)* | Delay sweep (clock cycles) |
+| `disp_pulse` | `str` | `"const_alpha"` | Displacement pulse |
+| `x90_pulse` | `str` | `"x90"` | Half-pi pulse |
+| `n_avg` | `int` | `200` | Averages |
+
+Calibration: `set_frequencies(st_el, chi=...)` | Metrics: `chi`, `nbar`, `T2_eff`
+
+**`FockResolvedSpectroscopy.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `probe_fqs` | `list[float] \| ndarray` | *(required)* | Probe frequencies |
+| `state_prep` | `Any` | `None` | State preparation |
+| `sel_r180` | `str` | `"sel_x180"` | Selective pi pulse |
+| `calibrate_ref_r180_S` | `bool` | `True` | Calibrate reference |
+| `n_avg` | `int` | `100` | Averages |
+
+Calibration: none | Metrics: `n_fock` or `n_points`
+
+**`FockResolvedT1.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fock_fqs` | `list[float] \| ndarray` | *(required)* | Fock transition frequencies |
+| `fock_disps` | `list[str]` | *(required)* | Displacement names per Fock |
+| `delay_end` | `int` | *(required)* | Max delay (clock cycles) |
+| `dt` | `int` | *(required)* | Delay step (clock cycles) |
+| `delay_begin` | `int` | `4` | Min delay |
+| `sel_r180` | `str` | `"sel_x180"` | Selective pi pulse |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: none | Metrics: `T1_fock_0`, `T1_fock_1`, ...
+
+**`FockResolvedRamsey.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fock_fqs` | `list[float] \| ndarray` | *(required)* | Fock frequencies |
+| `detunings` | `list[float] \| ndarray` | *(required)* | Detuning sweep |
+| `disps` | `list[str]` | *(required)* | Displacement names |
+| `delay_end` | `int` | *(required)* | Max delay |
+| `dt` | `int` | *(required)* | Delay step |
+| `delay_begin` | `int` | `4` | Min delay |
+| `sel_r90` | `str` | `"sel_x90"` | Selective 90 pulse |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: none | Metrics: `T2_fock_0`, `T2_fock_1`, ...
+
+**`FockResolvedPowerRabi.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fock_fqs` | `list[float] \| ndarray` | *(required)* | Fock frequencies |
+| `gains` | `list[float] \| ndarray` | *(required)* | Gain sweep |
+| `sel_qb_pulse` | `str` | *(required)* | Selective qubit pulse |
+| `disp_n_list` | `list[str]` | *(required)* | Displacement list per Fock |
+| `n_avg` | `int` | `1000` | Averages |
+
+Calibration: none | Metrics: `g_pi_fock_0`, `g_pi_fock_1`, ...
+
+##### tomography/
+
+**`QubitStateTomography.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `state_prep` | `Callable \| list` | *(required)* | State preparation |
+| `n_avg` | `int` | *(required)* | Averages |
+| `x90_pulse` | `str` | `"x90"` | X90 pulse (keyword-only) |
+| `yn90_pulse` | `str` | `"yn90"` | Y-90 pulse (keyword-only) |
+| `therm_clks` | `int \| None` | `None` | Thermalization (keyword-only) |
+
+Calibration: none | Metrics: `sx`, `sy`, `sz`, `purity`
+
+**`FockResolvedStateTomography.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fock_fqs` | `list[float] \| ndarray` | *(required)* | Fock frequencies |
+| `state_prep` | `Callable \| list` | *(required)* | State preparation |
+| `sel_r180` | `str` | `"sel_x180"` | Selective pi (keyword-only) |
+| `rxp90` | `str` | `"x90"` | X90 pulse (keyword-only) |
+| `rym90` | `str` | `"yn90"` | Y-90 pulse (keyword-only) |
+| `n_avg` | `int` | `1000` | Averages (keyword-only) |
+
+Calibration: none | Metrics: `n_fock`, `fock_pops`
+
+**`StorageWignerTomography.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `gates` | `list` | *(required)* | Gate sequence for state prep |
+| `x_vals` | `ndarray \| list` | *(required)* | Phase-space x grid |
+| `p_vals` | `ndarray \| list` | *(required)* | Phase-space p grid |
+| `base_alpha` | `float` | `10.0` | Displacement magnitude scale |
+| `r90_pulse` | `str` | `"x90"` | Half-pi pulse |
+| `n_avg` | `int` | `200` | Averages |
+
+Calibration: none | Metrics: `W_min`, `W_max`, `negativity`
+
+##### spa/
+
+**`SPAFluxOptimization.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dc_list` | `list[float] \| ndarray` | *(required)* | DC bias voltages |
+| `sample_fqs` | `list[float] \| ndarray` | *(required)* | Probe frequencies |
+| `n_avg` | `int` | *(required)* | Averages |
+| `odc_name` | `str` | `"octodac_bf"` | OctoDac device name (keyword-only) |
+| `odc_param` | `str` | `"voltage5"` | OctoDac parameter (keyword-only) |
+| `step` | `float` | `0.005` | Voltage ramp step (keyword-only) |
+| `delay_s` | `float` | `0.1` | Settle delay in seconds (keyword-only) |
+
+Calibration: none | Metrics: `best_dc`, `best_freq`, `peak_magnitude`
+
+**`SPAPumpFrequencyOptimization.run()`**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `readout_op` | `str` | *(required)* | Readout operation |
+| `drive_frequency` | `float` | *(required)* | Drive frequency (Hz) |
+| `pump_powers` | `list[float] \| ndarray` | *(required)* | Pump power sweep |
+| `pump_detunings` | `list[float] \| ndarray` | *(required)* | Pump detuning sweep |
+| `r180` | `str` | `"x180"` | Pi pulse |
+| `samples_per_run` | `int` | `25_000` | Shots per point |
+| `metric` | `str` | `"assignment_fidelity"` | Optimization metric name |
+
+Calibration: none | Metrics: `best_pump_power`, `best_pump_detuning`, `best_metric`
 
 #### `experiments.ExperimentRunner`
 
@@ -1205,7 +1751,116 @@ print(f"Gates: {result.parameters}")
 
 ---
 
-## 6. Design Principles
+## 6. Recipes
+
+### A. Verify calibration persistence
+
+```python
+from qubox_v2.experiments.session import SessionManager
+
+with SessionManager("./seq_1_device", qop_ip="10.0.0.1") as session:
+    # Check file exists and inspect contents
+    print(session.calibration.summary())
+
+    # Verify a round-trip: write → save → reload → read
+    session.calibration.set_coherence("qubit", T1=25e3)
+    session.calibration.save()
+    session.calibration.reload()
+    coh = session.calibration.get_coherence("qubit")
+    assert coh is not None and abs(coh.T1 - 25e3) < 1e-6
+    print("Calibration persistence OK")
+```
+
+### B. End-to-end qubit characterization with calibration
+
+```python
+from qubox_v2.experiments.session import SessionManager
+from qubox_v2.experiments.spectroscopy import ResonatorSpectroscopy, QubitSpectroscopy
+from qubox_v2.experiments.time_domain import PowerRabi, T1Relaxation, T2Ramsey
+from qubox_v2.experiments.calibration import ReadoutGEDiscrimination
+
+with SessionManager("./seq_1_device", qop_ip="10.0.0.1") as session:
+    # 1. Resonator spectroscopy → calibrate readout frequency
+    res = ResonatorSpectroscopy(session)
+    r = res.run(readout_op="readout")
+    a = res.analyze(r, update_calibration=True)
+    res.plot(a)
+
+    # 2. Qubit spectroscopy → calibrate qubit frequency
+    qb = QubitSpectroscopy(session)
+    r = qb.run(pulse="saturation", rf_begin=5.2e9, rf_end=5.3e9, df=100e3,
+               qb_gain=0.1, qb_len=10000)
+    a = qb.analyze(r, update_calibration=True)
+    qb.plot(a)
+
+    # 3. Power Rabi → calibrate pi pulse gain
+    rabi = PowerRabi(session)
+    r = rabi.run(max_gain=0.5, dg=1e-3)
+    a = rabi.analyze(r, update_calibration=True)
+    rabi.plot(a)
+    print(f"g_pi = {a.metrics['g_pi']:.4f}")
+
+    # 4. T1 → calibrate coherence
+    t1 = T1Relaxation(session)
+    r = t1.run(delay_end=50000, dt=200)
+    a = t1.analyze(r, update_calibration=True)
+    print(f"T1 = {a.metrics['T1']:.0f} ns")
+
+    # 5. Readout discrimination → calibrate threshold/angle
+    disc = ReadoutGEDiscrimination(session)
+    r = disc.run(measure_op="readout", drive_frequency=8.61e9, n_samples=10000)
+    a = disc.analyze(r, update_calibration=True)
+    print(f"Fidelity = {a.metrics['fidelity']:.1f}%")
+
+    # All calibrations saved automatically on context manager exit
+    print(session.calibration.summary())
+```
+
+### C. Inspect calibration without hardware
+
+```python
+from qubox_v2.calibration import CalibrationStore
+
+store = CalibrationStore("./seq_1_device/config/calibration.json")
+print(store.summary())
+
+# Read specific sections
+freqs = store.get_frequencies("qubit")
+if freqs:
+    print(f"Qubit freq: {freqs.qubit_freq / 1e9:.6f} GHz")
+    print(f"LO freq:    {freqs.lo_freq / 1e9:.6f} GHz")
+    print(f"IF freq:    {freqs.if_freq / 1e6:.3f} MHz")
+
+coh = store.get_coherence("qubit")
+if coh:
+    print(f"T1: {coh.T1:.0f} ns = {coh.T1 / 1e3:.1f} us")
+    if coh.T2_ramsey:
+        print(f"T2*: {coh.T2_ramsey:.0f} ns = {coh.T2_ramsey / 1e3:.1f} us")
+
+disc = store.get_discrimination("resonator")
+if disc:
+    print(f"Discrimination fidelity: {disc.fidelity:.1f}%")
+    print(f"Threshold: {disc.threshold:.6f}")
+```
+
+### D. Create a calibration snapshot before optimization
+
+```python
+with SessionManager("./seq_1_device", qop_ip="10.0.0.1") as session:
+    # Snapshot current state
+    snap_path = session.calibration.snapshot("pre_optimization")
+    print(f"Snapshot saved to: {snap_path}")
+
+    # ... run optimization experiments ...
+
+    # If something goes wrong, restore
+    # from qubox_v2.calibration import CalibrationStore
+    # session.calibration = CalibrationStore(snap_path)
+```
+
+---
+
+## 7. Design Principles
 
 1. **Single Responsibility** — Each class does one thing well.
    ConfigEngine builds configs; HardwareController manages connections;

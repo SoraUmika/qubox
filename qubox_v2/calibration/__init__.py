@@ -29,6 +29,11 @@ from .algorithms import (
     optimize_fock_sqr_iterative,
     optimize_fock_sqr_spsa,
 )
+from .mixer_calibration import (
+    ManualMixerCalibrator,
+    MixerCalibrationConfig,
+    SAMeasurementHelper,
+)
 
 __all__ = [
     # Store
@@ -54,4 +59,8 @@ __all__ = [
     "fit_pulse_train",
     "optimize_fock_sqr_iterative",
     "optimize_fock_sqr_spsa",
+    # Mixer calibration
+    "ManualMixerCalibrator",
+    "MixerCalibrationConfig",
+    "SAMeasurementHelper",
 ]

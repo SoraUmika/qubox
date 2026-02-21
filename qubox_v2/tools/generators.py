@@ -111,7 +111,20 @@ def register_qubit_rotation(
 
 import numpy as np
 from typing import Dict, Iterable, Optional, Tuple, Union
-from ..experiments.gates_legacy import QubitRotation
+
+
+def _as_padded_complex(I, Q, *, pad_to_4: bool = True) -> np.ndarray:
+    """Combine I/Q into complex array, optionally padded to multiple of 4."""
+    I = np.asarray(I, dtype=float)
+    Q = np.asarray(Q, dtype=float)
+    if I.shape != Q.shape:
+        raise ValueError("I and Q must have the same shape.")
+    if pad_to_4:
+        pad = (-len(I)) % 4
+        if pad:
+            I = np.pad(I, (0, pad))
+            Q = np.pad(Q, (0, pad))
+    return I + 1j * Q
 
 
 def register_rotations_from_ref_iq(
@@ -125,36 +138,34 @@ def register_rotations_from_ref_iq(
     make_r0: bool = True,
     override: bool = True,
     persist: bool = False,
-    # keep these hooks; they map cleanly onto QubitRotation knobs
     d_lambda_map: Optional[Dict[str, float]] = None,
     d_alpha_map: Optional[Dict[str, float]] = None,
     d_omega_map: Optional[Dict[str, float]] = None,
-    # keep your global sign flip (applies to the reference template itself)
 ):
     """
-    Register rotations derived from a reference IQ waveform (assumed to be x180),
-    but implemented via QubitRotation.
+    Register rotations derived from a reference IQ waveform (assumed to be x180).
 
-    Strategy:
-      1) Use (ref_I, ref_Q) as the explicit x180 template inside QubitRotation.
-      2) For each requested op in {x180,x90,xn90,y180,y90,yn90}, build a QubitRotation
-         with the (theta, phi) values for the convention:
-            U(theta,phi) = exp[-i theta/2 (cos(phi) sx + sin(phi) sy)]
-         where phi=0 -> +X, phi=+pi/2 -> +Y.
+    Uses the same waveform math as gates_legacy.QubitRotation but without requiring
+    Gate.attributes or Gate.mgr to be set.  The core formula is:
 
-    Notes:
-      - global_sign multiplies the complex template (I + iQ) before building any pulses.
-      - This function assumes your QubitRotation.build() registers a PulseOp into the
-        PulseOperationManager. We then alias the created op name to a nice name like
-        f"{prefix}x90" by copying/renaming the registered pulse op (best-effort).
+        w0 = pad_to_4(ref_I + 1j*ref_Q)
+        phi_eff = phi + d_alpha
+        amp_scale = (theta / pi) * (1.0 + d_lambda / lam0)
+        w_new = amp_scale * w0 * exp(-1j * phi_eff)
+
+    Convention table:
+        x180  -> theta=pi,    phi=0
+        x90   -> theta=pi/2,  phi=0
+        xn90  -> theta=-pi/2, phi=0
+        y180  -> theta=pi,    phi=pi/2
+        y90   -> theta=pi/2,  phi=pi/2
+        yn90  -> theta=-pi/2, phi=pi/2
     """
 
     I0 = np.asarray(ref_I, dtype=float)
     Q0 = np.asarray(ref_Q, dtype=float)
     if I0.shape != Q0.shape:
         raise ValueError(f"ref_I shape {I0.shape} != ref_Q shape {Q0.shape}")
-
-    # Apply global sign to the *complex* template (equivalent to I,Q both multiplied)
 
     if isinstance(rotations, str):
         rotations = (rotations,)
@@ -168,9 +179,8 @@ def register_rotations_from_ref_iq(
     if "all" in rot_set:
         rot_set = {"ref_r180", "x180", "x90", "xn90", "y180", "y90", "yn90"}
 
-    # Convention table (your requested one)
     THETA_PHI: Dict[str, Tuple[float, float]] = {
-        "ref_r180": (np.pi, 0.0),  # Reference x180 rotation (registered separately)
+        "ref_r180": (np.pi, 0.0),
         "x180": (np.pi, 0.0),
         "x90":  (np.pi / 2.0, 0.0),
         "xn90": (-np.pi / 2.0, 0.0),
@@ -179,28 +189,29 @@ def register_rotations_from_ref_iq(
         "yn90": (-np.pi / 2.0, np.pi / 2.0),
     }
 
-    # Default tweak maps
     d_lambda_map = {} if d_lambda_map is None else dict(d_lambda_map)
     d_alpha_map  = {} if d_alpha_map  is None else dict(d_alpha_map)
     d_omega_map  = {} if d_omega_map  is None else dict(d_omega_map)
 
     created: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
 
+    # Build padded complex template once
+    w0 = _as_padded_complex(I0, Q0, pad_to_4=True)
+    N = len(w0)
+
     def _mk_names(op_full: str):
-        # matches your previous naming helper
         return (f"{op_full}_pulse", f"{op_full}_I_wf", f"{op_full}_Q_wf")
 
-    # Optional R0 (zeros) pulse, same as before
+    # Optional R0 (zeros) pulse
     if make_r0:
         op_full = f"{prefix}r0"
         pulse_name, I_wf_name, Q_wf_name = _mk_names(op_full)
-        rlen = int(I0.size)
-        Izeros = np.zeros(rlen, dtype=float)
-        Qzeros = np.zeros(rlen, dtype=float)
+        Izeros = np.zeros(N, dtype=float)
+        Qzeros = np.zeros(N, dtype=float)
         pom.create_control_pulse(
             element=element,
             op=op_full,
-            length=rlen,
+            length=N,
             pulse_name=pulse_name,
             I_wf_name=I_wf_name,
             Q_wf_name=Q_wf_name,
@@ -211,76 +222,73 @@ def register_rotations_from_ref_iq(
         )
         created[op_full] = (Izeros, Qzeros)
 
-    # ---- First, register ref_r180 directly if requested ----
-    # This MUST be done before building any QubitRotation objects,
-    # since QubitRotation will extract ref_r180_pulse from the manager
+    # Register ref_r180 directly (unmodified template) if requested
     if "ref_r180" in rot_set:
         op_full = f"{prefix}ref_r180"
         pulse_name, I_wf_name, Q_wf_name = _mk_names(op_full)
-        rlen = int(I0.size)
-        
+        I_padded = np.real(w0).astype(float)
+        Q_padded = np.imag(w0).astype(float)
         pom.create_control_pulse(
             element=element,
             op=op_full,
-            length=rlen,
+            length=N,
             pulse_name=pulse_name,
             I_wf_name=I_wf_name,
             Q_wf_name=Q_wf_name,
-            I_samples=I0,
-            Q_samples=Q0,
+            I_samples=I_padded,
+            Q_samples=Q_padded,
             persist=persist,
             override=override,
         )
-        created[op_full] = (I0, Q0)
-        # Remove from rot_set so we don't process it again
+        created[op_full] = (I_padded, Q_padded)
         rot_set = rot_set - {"ref_r180"}
 
-    # ---- Build each remaining rotation via QubitRotation ----
+    # Build each remaining rotation using direct waveform math
+    # matching gates_legacy.QubitRotation.waveforms() convention
     for op in sorted(rot_set):
         theta, phi = THETA_PHI[op]
+        dlam = float(d_lambda_map.get(op, 0.0))
+        dalp = float(d_alpha_map.get(op, 0.0))
 
-        gate = QubitRotation(
-            theta=theta,
-            phi=phi,
-            d_lambda=float(d_lambda_map.get(op, 0.0)),
-            d_alpha=float(d_alpha_map.get(op, 0.0)),
-            d_omega=float(d_omega_map.get(op, 0.0)),
-            ref_I_x180_wf=I0,
-            ref_Q_x180_wf=Q0,
-            target=element,    # QubitRotation calls this "target"
-            build=False,
-        )
+        phi_eff = phi + dalp
 
-        # Build registers the pulse op into the manager (as per your QubitRotation.build)
-        # IMPORTANT: QubitRotation.build uses persist=False/override=True internally.
-        # If you need those to respect (persist, override), you should update build().
-        gate.build(mgr=pom)
+        # d_lambda correction: lam0 = pi / (2*T) where T = N * dt
+        # but since amp_scale = (theta/pi) * (1 + dlam/lam0) and
+        # lam0 cancels dt, we just need N (length in samples) and
+        # a nominal dt.  Use dt=1e-9 matching the default.
+        dt = 1e-9
+        T = N * dt
+        lam0 = (np.pi / (2.0 * T)) if T != 0.0 else 1.0
+        amp_scale = (theta / np.pi) * (1.0 + dlam / lam0)
 
-        # The gate.op is a hashed internal name. We'll *also* register a friendly alias
-        # op like f"{prefix}{op}" that points to the same waveforms, so your existing
-        # code can keep calling "x90", "y180", etc.
+        w_new = amp_scale * w0 * np.exp(-1j * phi_eff)
+
+        # d_omega modulation (centered time array)
+        dome = float(d_omega_map.get(op, 0.0))
+        if dome != 0.0:
+            t_arr = (np.arange(N) - (N - 1) / 2.0) * dt
+            w_new = w_new * np.exp(1j * dome * t_arr)
+
+        I_samp = np.real(w_new).astype(float)
+        Q_samp = np.imag(w_new).astype(float)
+
         alias_op = f"{prefix}{op}"
-
-        # Extract the waveforms (already padded/processed) directly from gate.waveforms()
-        # so we can create the alias pulse with your usual create_control_pulse.
-        I_samp, Q_samp, length, marker = gate.waveforms()
-
         pulse_name, I_wf_name, Q_wf_name = _mk_names(alias_op)
 
         pom.create_control_pulse(
             element=element,
             op=alias_op,
-            length=int(length),
+            length=N,
             pulse_name=pulse_name,
             I_wf_name=I_wf_name,
             Q_wf_name=Q_wf_name,
-            I_samples=np.asarray(I_samp, dtype=float),
-            Q_samples=np.asarray(Q_samp, dtype=float),
+            I_samples=I_samp,
+            Q_samples=Q_samp,
             persist=persist,
             override=override,
         )
 
-        created[alias_op] = (np.asarray(I_samp, dtype=float), np.asarray(Q_samp, dtype=float))
+        created[alias_op] = (I_samp, Q_samp)
 
     return created
 

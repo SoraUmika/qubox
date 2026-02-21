@@ -97,6 +97,7 @@ class SessionManager:
             qmm=self._qmm,
             config_engine=self.config_engine,
         )
+        self.hardware._cal_db_dir = Path(cal_db)
 
         # --- 3. Program runner + queue ---
         self.runner = ProgramRunner(
@@ -130,6 +131,7 @@ class SessionManager:
         elif isinstance(load_devices, (list, tuple, set)):
             if load_devices:
                 self.devices.instantiate(list(load_devices))
+        self.hardware.set_device_manager(self.devices)
 
         # --- 7. Experiment attributes (cQED parameters) ---
         self.attributes = self._load_attributes()

@@ -47,7 +47,7 @@ class FockResolvedSpectroscopy(ExperimentBase):
         prog = cQED_programs.fock_resolved_spectroscopy(
             attr.qb_el, state_prep,
             qb_if, fock_ifs,
-            sel_r180, attr.qb_therm_clks, n_avg,
+            sel_r180, attr.st_therm_clks, n_avg,
             sel_r180_transfer_calibration=calibrate_ref_r180_S,
         )
         result = self.run_program(
@@ -135,7 +135,7 @@ class FockResolvedT1(ExperimentBase):
             attr.qb_el, attr.st_el,
             fock_disps, fock_ifs,
             sel_r180, delay_clks,
-            attr.qb_therm_clks, n_avg,
+            attr.st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
@@ -275,7 +275,7 @@ class FockResolvedRamsey(ExperimentBase):
             attr.qb_el, attr.st_el,
             fock_ifs, np.asarray(detunings),
             disps, sel_r90, delay_clks,
-            attr.qb_therm_clks, n_avg,
+            attr.st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
@@ -412,7 +412,7 @@ class FockResolvedPowerRabi(ExperimentBase):
             attr.qb_el, attr.st_el,
             np.asarray(gains), disp_n_list,
             fock_ifs, sel_qb_pulse,
-            attr.qb_therm_clks, n_avg,
+            attr.st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,

@@ -48,6 +48,8 @@ class ReadoutQuality(BaseModel):
     F: float | None = None         # assignment fidelity
     Q: float | None = None         # QND-ness
     V: float | None = None         # visibility
+    t01: float | None = None       # 0->1 transition probability
+    t10: float | None = None       # 1->0 transition probability
     confusion_matrix: list[list[float]] | None = None
     affine_n: dict[str, list[float]] | None = None
 

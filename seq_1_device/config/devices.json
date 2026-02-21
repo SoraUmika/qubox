@@ -42,5 +42,17 @@
     },
     "settings": {},
     "enabled": true
+  },
+  "sa124b": {
+    "driver": "instrumentserver:Instrument",
+    "backend": "instrumentserver",
+    "connect": {
+      "host": "10.157.36.75",
+      "port": 50183,
+      "timeout": 60000,
+      "instrument_name": "sa124b_20234880"
+    },
+    "settings": {},
+    "enabled": true
   }
 }

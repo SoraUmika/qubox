@@ -11,7 +11,8 @@ import contextlib
 import logging
 import threading
 from copy import deepcopy
-from typing import Any, Callable, Dict, Iterable, List, Optional, Union
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Union
 
 import numpy as np
 from grpclib.exceptions import StreamTerminatedError
@@ -63,6 +64,9 @@ class HardwareController:
         # External device manager (optional, set via set_device_manager)
         self._device_manager = None
         self.spa_pump_sc = None
+
+        # Octave calibration DB directory (set by SessionManager)
+        self._cal_db_dir: Path | None = None
 
     # ─── Connection lifecycle ─────────────────────────────────────
     def open_qm(self, config_dict: Optional[dict] = None, *, close_other_machines: bool = True) -> None:
@@ -298,10 +302,70 @@ class HardwareController:
         target_IF: Optional[Union[float, list[float]]] = None,
         save_to_db: bool = True,
         output_mode: RFOutputMode = RFOutputMode.on,
+        *,
+        method: Literal["auto", "manual_scan_2d", "manual_minimizer"] = "auto",
+        sa_device_name: str = "sa124b",
+        mixer_cal_config: Any = None,
     ) -> None:
-        """Calibrate Octave for one or more elements."""
+        """Calibrate Octave IQ mixer for one or more elements.
+
+        Parameters
+        ----------
+        method : ``"auto"`` | ``"manual_scan_2d"`` | ``"manual_minimizer"``
+            ``"auto"`` uses QM's built-in Octave calibration (default).
+            Manual methods use an external SA124B spectrum analyser accessed
+            through the instrument server.
+        sa_device_name : str
+            DeviceManager key for the spectrum analyser (default ``"sa124b"``).
+        mixer_cal_config : MixerCalibrationConfig, optional
+            Override default SA / grid-search / minimiser parameters.
+        """
         self._require_qm()
 
+        # ── Auto calibration (existing behaviour) ─────────────
+        if method == "auto":
+            self._calibrate_auto(el, target_LO, target_IF, save_to_db, output_mode)
+            return
+
+        # ── Manual calibration ────────────────────────────────
+        from ..calibration.mixer_calibration import (
+            ManualMixerCalibrator,
+            MixerCalibrationConfig,
+            SAMeasurementHelper,
+        )
+
+        if self._device_manager is None:
+            raise ConfigError("DeviceManager required for manual calibration. "
+                              "Set it via set_device_manager().")
+
+        sa_dev = self._device_manager.get(sa_device_name)
+        if sa_dev is None:
+            raise ConfigError(f"SA device '{sa_device_name}' not found in DeviceManager.")
+
+        cfg = mixer_cal_config if isinstance(mixer_cal_config, MixerCalibrationConfig) else MixerCalibrationConfig()
+
+        db_dir = self._cal_db_dir
+        if db_dir is None:
+            raise ConfigError("Calibration DB directory not set. "
+                              "Use SessionManager or set hw._cal_db_dir.")
+        db_path = db_dir / "calibration_db.json"
+
+        sa_helper = SAMeasurementHelper(sa_dev, cfg)
+        calibrator = ManualMixerCalibrator(self, sa_helper, db_path, cfg)
+
+        self._manual_calibrate_elements(
+            calibrator, el, target_LO, target_IF, save_to_db, output_mode, method,
+        )
+
+    # ── Auto calibration (original implementation) ────────────
+    def _calibrate_auto(
+        self,
+        el: Optional[Union[str, Iterable[str]]],
+        target_LO: Optional[Union[float, list[float]]],
+        target_IF: Optional[Union[float, list[float]]],
+        save_to_db: bool,
+        output_mode: RFOutputMode,
+    ) -> None:
         def _calibrate_one(e: str, lo_val, if_val):
             if lo_val is None:
                 lo_val = float(self.get_element_lo(e))
@@ -324,6 +388,43 @@ class HardwareController:
 
         for e, lo_val, if_val in zip(elements, lo_list, if_list):
             _calibrate_one(e, lo_val, if_val)
+
+    # ── Manual calibration loop ───────────────────────────────
+    def _manual_calibrate_elements(
+        self,
+        calibrator,
+        el: Optional[Union[str, Iterable[str]]],
+        target_LO: Optional[Union[float, list[float]]],
+        target_IF: Optional[Union[float, list[float]]],
+        save_to_db: bool,
+        output_mode: RFOutputMode,
+        method: str,
+    ) -> None:
+        if el is None:
+            elements = list(self.elements.keys())
+        elif isinstance(el, str):
+            elements = [el]
+        else:
+            elements = list(el)
+        n = len(elements)
+
+        lo_list = list(target_LO) if isinstance(target_LO, (list, tuple)) else [target_LO] * n
+        if_list = list(target_IF) if isinstance(target_IF, (list, tuple)) else [target_IF] * n
+
+        for e, lo_val, if_val in zip(elements, lo_list, if_list):
+            if lo_val is None:
+                lo_val = float(self.get_element_lo(e))
+            if if_val is None:
+                if_val = float(self.get_element_if(e))
+            _logger.info(
+                "Manual calibration '%s' (%s): LO=%.3f MHz, IF=%.3f MHz",
+                e, method, lo_val * 1e-6, if_val * 1e-6,
+            )
+            if method == "manual_scan_2d":
+                calibrator.scan_2d(e, lo_val, if_val, save_to_db=save_to_db)
+            elif method == "manual_minimizer":
+                calibrator.minimizer(e, lo_val, if_val, save_to_db=save_to_db)
+            self.set_octave_output(e, output_mode)
 
     # ─── QM info ──────────────────────────────────────────────────
     def list_open_qms(self) -> list[str]:

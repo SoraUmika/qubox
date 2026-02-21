@@ -49,6 +49,7 @@ from .readout import (
     CalibrateReadoutFull,
     ReadoutAmpLenOpt,
 )
+from .readout_config import ReadoutConfig
 from .gates import (
     AllXY,
     DRAGCalibration,
@@ -71,6 +72,7 @@ __all__ = [
     "ReadoutButterflyMeasurement",
     "CalibrateReadoutFull",
     "ReadoutAmpLenOpt",
+    "ReadoutConfig",
     "AllXY",
     "DRAGCalibration",
     "QubitPulseTrain",

@@ -20,7 +20,9 @@ Usage::
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -67,8 +69,12 @@ class CalibrationStore:
             with open(self._path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
             return CalibrationData.model_validate(raw)
-        _logger.info("No calibration file found — creating defaults at %s", self._path)
+        # Write defaults to disk immediately so the file actually exists.
+        # Cannot call self.save() here because self._data is not yet assigned.
         data = CalibrationData(created=datetime.now().isoformat())
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._atomic_write(data)
+        _logger.info("Default calibration created at %s", self._path)
         return data
 
     # ------------------------------------------------------------------
@@ -182,6 +188,23 @@ class CalibrationStore:
     def get_fit_history(self, experiment: str) -> list[FitRecord]:
         return list(self._data.fit_history.get(experiment, []))
 
+    def store_weight_snapshot(self, element: str, weight_info: dict) -> None:
+        """Store a weight optimisation snapshot with timestamp.
+
+        Uses the existing :class:`FitRecord` model keyed under
+        ``"weight_optimization_{element}"`` so that weight history can
+        be queried via :meth:`get_fit_history`.
+        """
+        numeric = {k: float(v) for k, v in weight_info.items()
+                   if isinstance(v, (int, float))}
+        record = FitRecord(
+            experiment=f"weight_optimization_{element}",
+            model_name="segmented_weights",
+            params=numeric,
+            metadata=weight_info,
+        )
+        self.store_fit(record)
+
     # ------------------------------------------------------------------
     # Pulse train results
     # ------------------------------------------------------------------
@@ -223,15 +246,45 @@ class CalibrationStore:
     def to_dict(self) -> dict[str, Any]:
         return self._data.model_dump()
 
+    def summary(self) -> str:
+        """Return a human-readable summary of stored calibration data."""
+        lines = [
+            f"CalibrationStore: {self._path}",
+            f"  file exists: {self._path.exists()}",
+            f"  auto_save:   {self._auto_save}",
+            f"  version:     {self._data.version}",
+            f"  created:     {self._data.created}",
+            f"  modified:    {self._data.last_modified}",
+            "",
+        ]
+        sections = [
+            ("discrimination", self._data.discrimination),
+            ("readout_quality", self._data.readout_quality),
+            ("frequencies", self._data.frequencies),
+            ("coherence", self._data.coherence),
+            ("pulse_calibrations", self._data.pulse_calibrations),
+            ("fit_history", self._data.fit_history),
+            ("pulse_train_results", self._data.pulse_train_results),
+            ("fock_sqr_calibrations", self._data.fock_sqr_calibrations),
+            ("multi_state_calibration", self._data.multi_state_calibration),
+        ]
+        for name, store in sections:
+            count = len(store)
+            if count:
+                keys = ", ".join(sorted(store.keys()))
+                lines.append(f"  {name}: {count} entries [{keys}]")
+            else:
+                lines.append(f"  {name}: (empty)")
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
     def save(self) -> None:
-        """Write calibration data to JSON."""
+        """Write calibration data to JSON (atomic via temp file + rename)."""
         self._data.last_modified = datetime.now().isoformat()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._path, "w", encoding="utf-8") as f:
-            json.dump(self._data.model_dump(), f, indent=2, default=str)
+        self._atomic_write(self._data)
         _logger.info("Calibration saved to %s", self._path)
 
     def snapshot(self, tag: str = "") -> Path:
@@ -256,6 +309,22 @@ class CalibrationStore:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+    def _atomic_write(self, data: CalibrationData) -> None:
+        """Write data to JSON via temp file + os.replace (atomic on same FS)."""
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=self._path.parent, prefix=".cal_tmp_", suffix=".json",
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                json.dump(data.model_dump(), f, indent=2, default=str)
+            os.replace(tmp_path, self._path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
     def _touch(self) -> None:
         """Mark data as modified; auto-save if enabled."""
         self._data.last_modified = datetime.now().isoformat()

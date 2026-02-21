@@ -1,6 +1,6 @@
 # qubox_v2/gates/hardware/qubit_rotation.py
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 
 from ..hardware_base import GateHardware
@@ -9,17 +9,43 @@ from ..hash_utils import stable_hash
 from qubox_v2.analysis.pulseOp import PulseOp
 from qubox_v2.core.types import MAX_AMPLITUDE
 
+
+def _as_padded_complex(I, Q, *, pad_to_4: bool = True) -> np.ndarray:
+    """Combine I/Q into complex array, optionally padded to multiple of 4."""
+    I = np.asarray(I, dtype=float)
+    Q = np.asarray(Q, dtype=float)
+    if pad_to_4:
+        pad = (-len(I)) % 4
+        if pad:
+            I = np.pad(I, (0, pad))
+            Q = np.pad(Q, (0, pad))
+    return I + 1j * Q
+
+
 @dataclass
 class QubitRotationHardware(GateHardware):
     """
     Hardware backend for QubitRotation.
 
-    Uses base calibrated x180/y180 pulses and mixes them to synthesize arbitrary equatorial rotation.
+    Uses a single calibrated X reference template and complex rotation
+    to synthesize arbitrary equatorial rotations, matching the legacy
+    QubitRotation convention:
+
+        w0 = pad_to_4(I_ref + 1j*Q_ref)
+        phi_eff = phi + d_alpha
+        amp_scale = (theta/pi) * (1.0 + d_lambda/lam0)
+        w_axis = w0 * exp(-1j * phi_eff)
+        if d_omega != 0:
+            t = centered_time_array
+            w_axis *= exp(1j * d_omega * t)
+        w_new = amp_scale * w_axis
     """
     theta: float
     phi: float
-    b_x180_pulse: str = "x180_pulse"
-    b_y180_pulse: str = "y180_pulse"
+    ref_x180_pulse: str = "x180_pulse"
+    d_lambda: float = 0.0
+    d_alpha: float = 0.0
+    d_omega: float = 0.0
     target: str | None = None
 
     gate_type: str = "QubitRotation"
@@ -27,13 +53,13 @@ class QubitRotationHardware(GateHardware):
     def __post_init__(self):
         self.theta = float(self.theta)
         self.phi = float(self.phi)
+        self.d_lambda = float(self.d_lambda)
+        self.d_alpha = float(self.d_alpha)
+        self.d_omega = float(self.d_omega)
 
-        # default target from attributes if not provided
         if self.target is None:
             self.target = "qubit"
 
-        # Op name: keep simple & reproducible (avoid huge float repr)
-        # If you want exact old naming, use f"Rotation_{self.theta}_{self.phi}"
         self.op = f"Rotation_th{self.theta:.12g}_ph{self.phi:.12g}"
 
     # --------------------
@@ -46,8 +72,10 @@ class QubitRotationHardware(GateHardware):
             "params": {
                 "theta": float(self.theta),
                 "phi": float(self.phi),
-                "b_x180_pulse": self.b_x180_pulse,
-                "b_y180_pulse": self.b_y180_pulse,
+                "ref_x180_pulse": self.ref_x180_pulse,
+                "d_lambda": float(self.d_lambda),
+                "d_alpha": float(self.d_alpha),
+                "d_omega": float(self.d_omega),
                 "op": getattr(self, "op", None),
             },
         }
@@ -60,14 +88,18 @@ class QubitRotationHardware(GateHardware):
             attr = getattr(hw_ctx, "attributes", None)
             target = getattr(attr, "qb_el", "qubit") if attr is not None else "qubit"
 
+        # Support legacy serialized keys
+        ref_pulse = str(P.get("ref_x180_pulse", P.get("b_x180_pulse", "x180_pulse")))
+
         obj = cls(
             theta=float(P["theta"]),
             phi=float(P["phi"]),
-            b_x180_pulse=str(P.get("b_x180_pulse", "x180_pulse")),
-            b_y180_pulse=str(P.get("b_y180_pulse", "y180_pulse")),
+            ref_x180_pulse=ref_pulse,
+            d_lambda=float(P.get("d_lambda", 0.0)),
+            d_alpha=float(P.get("d_alpha", 0.0)),
+            d_omega=float(P.get("d_omega", 0.0)),
             target=target,
         )
-        # preserve op if present
         if P.get("op"):
             obj.op = str(P["op"])
         return obj
@@ -77,37 +109,47 @@ class QubitRotationHardware(GateHardware):
     # --------------------
     def waveforms(self, *, hw_ctx) -> tuple[np.ndarray, np.ndarray, int, bool | str]:
         mgr = hw_ctx.mgr
-        xid = self.b_x180_pulse
-        yid = self.b_y180_pulse
+        att = hw_ctx.attributes
 
+        dt = float(getattr(att, "dt_s", 1e-9))
+
+        xid = self.ref_x180_pulse
         I_x, Q_x = mgr.get_pulse_waveforms(xid)
-        I_y, Q_y = mgr.get_pulse_waveforms(yid)
 
         base = mgr._perm.pulses[xid]
-        length = int(base["length"])
         marker = base.get("digital_marker", "ON")
 
-        I_x = np.broadcast_to(np.asarray(I_x, dtype=float), (length,))
-        Q_x = np.broadcast_to(np.asarray(Q_x, dtype=float), (length,))
-        I_y = np.broadcast_to(np.asarray(I_y, dtype=float), (length,))
-        Q_y = np.broadcast_to(np.asarray(Q_y, dtype=float), (length,))
+        # Build padded complex template
+        w0 = _as_padded_complex(I_x, Q_x, pad_to_4=True)
+        N = len(w0)
+        T = N * dt
 
-        # mix X and Y bases
-        a = self.theta / np.pi
-        cx = a * np.cos(self.phi)
-        cy = a * np.sin(self.phi)
+        # Amplitude scaling with d_lambda correction
+        lam0 = (np.pi / (2.0 * T)) if T != 0.0 else 1.0
+        amp_scale = (self.theta / np.pi) * (1.0 + self.d_lambda / lam0)
 
-        I_new = cx * I_x + cy * I_y
-        Q_new = cx * Q_x + cy * Q_y
+        # Phase rotation
+        phi_eff = self.phi + self.d_alpha
+        w_axis = w0 * np.exp(-1j * phi_eff)
 
-        # clip protection
+        # Frequency modulation via d_omega (centered time array)
+        if self.d_omega != 0.0:
+            t = (np.arange(N) - (N - 1) / 2.0) * dt
+            w_axis = w_axis * np.exp(1j * self.d_omega * t)
+
+        w_new = amp_scale * w_axis
+
+        I_new = np.real(w_new).astype(float)
+        Q_new = np.imag(w_new).astype(float)
+
+        # Clip protection
         amp = np.maximum(np.abs(I_new), np.abs(Q_new))
         if np.any(amp > MAX_AMPLITUDE):
             scale = MAX_AMPLITUDE / float(np.max(amp))
             I_new *= scale
             Q_new *= scale
 
-        return I_new, Q_new, length, marker
+        return I_new, Q_new, N, marker
 
     def build(self, *, hw_ctx) -> None:
         mgr = hw_ctx.mgr
@@ -140,4 +182,3 @@ class QubitRotationHardware(GateHardware):
         qua.play(self.op, self.target)
         if align_after:
             qua.align()
-

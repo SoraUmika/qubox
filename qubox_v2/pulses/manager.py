@@ -986,6 +986,14 @@ class PulseOperationManager:
                 pulse_name = maybe_ops[op]
 
         if pulse_name is None:
+            # Fallback: check wildcard "*" element for baseline ops (const, zero, readout)
+            for _store in ((self._volatile,) if include_volatile else ()) + (self._perm,):
+                wc_ops = _store.el_ops.get("*", {})
+                if op in wc_ops:
+                    pulse_name = wc_ops[op]
+                    break
+
+        if pulse_name is None:
             if strict:
                 raise KeyError(f"(element={element!r}, op={op!r}) not mapped to any pulse.")
             return None

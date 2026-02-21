@@ -82,16 +82,27 @@ class AnalysisResult:
         fit: FitResult | None = None,
         fits: dict[str, FitResult] | None = None,
         metrics: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> "AnalysisResult":
-        """Create an AnalysisResult from a RunResult."""
+        """Create an AnalysisResult from a RunResult.
+
+        Parameters
+        ----------
+        metadata : dict, optional
+            Additional metadata to merge with the RunResult's own metadata.
+            Keys supplied here take precedence over RunResult.metadata.
+        """
         data = dict(run_result.output) if run_result.output else {}
+        base_metadata = dict(run_result.metadata) if run_result.metadata else {}
+        if metadata:
+            base_metadata.update(metadata)
         return cls(
             data=data,
             fit=fit,
             fits=fits or {},
             metrics=metrics or {},
             source=run_result,
-            metadata=run_result.metadata or {},
+            metadata=base_metadata,
         )
 
     def get(self, key: str, default: Any = None) -> Any:

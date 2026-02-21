@@ -1,6 +1,33 @@
 import numpy as np
 import pandas as pd
 from .output import Output
+
+
+def wilson_interval(p: float, n: int, z: float = 1.96) -> tuple[float, float]:
+    """Wilson score confidence interval for a binomial proportion.
+
+    Parameters
+    ----------
+    p : float
+        Observed proportion (0 to 1).
+    n : int
+        Number of trials.
+    z : float
+        Z-score for desired confidence level (1.96 = 95% CI).
+
+    Returns
+    -------
+    (lower, upper) : tuple[float, float]
+        Confidence interval bounds, clipped to [0, 1].
+    """
+    if n <= 0:
+        return (0.0, 1.0)
+    denom = 1.0 + z ** 2 / n
+    centre = (p + z ** 2 / (2.0 * n)) / denom
+    spread = z * np.sqrt((p * (1.0 - p) + z ** 2 / (4.0 * n)) / n) / denom
+    return (max(0.0, centre - spread), min(1.0, centre + spread))
+
+
 def gaussianity_score(x: np.ndarray) -> float:
     """
     Non-Gaussianity diagnostic along 1D:

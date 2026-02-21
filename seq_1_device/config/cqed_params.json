@@ -14,7 +14,7 @@
     "st_K": -28844,
     "st_K2": 1406,
     "ro_therm_clks": 1000,
-    "qb_therm_clks": 15000,
+    "qb_therm_clks": 25000,
     "st_therm_clks": 400000.0,
     "qb_T1_relax": 5542.192178492562,
     "qb_T2_ramsey": 6324.73112712837,

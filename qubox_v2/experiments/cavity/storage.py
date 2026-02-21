@@ -80,7 +80,7 @@ class StorageSpectroscopy(ExperimentBase):
 
         if update_calibration and self.calibration_store and fit.params:
             self.calibration_store.set_frequencies(
-                self.attr.st_el, lo_freq=0.0, if_freq=0.0,
+                self.attr.st_el,
                 qubit_freq=fit.params["f0"],
                 kappa=fit.params["kappa"],
             )
@@ -254,7 +254,7 @@ class NumSplittingSpectroscopy(ExperimentBase):
         prog = cQED_programs.num_splitting_spectroscopy(
             state_prep, attr.qb_el, attr.st_el,
             sel_r180, if_frequencies,
-            attr.qb_therm_clks, n_avg,
+            attr.st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
@@ -313,10 +313,10 @@ class StorageRamsey(ExperimentBase):
         self.set_standard_frequencies()
 
         prog = cQED_programs.storage_ramsey(
-            attr.st_el, attr.qb_el,
+            attr.ro_el, attr.qb_el, attr.st_el,
+            disp_pulse, sel_r180,
             np.asarray(delay_ticks, dtype=int),
-            st_detune, disp_pulse, sel_r180,
-            attr.qb_therm_clks, n_avg,
+            attr.st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
@@ -403,7 +403,7 @@ class StorageChiRamsey(ExperimentBase):
             attr.ro_el, attr.qb_el, attr.st_el,
             disp_pulse, x90_pulse,
             np.asarray(delay_ticks, dtype=int),
-            attr.qb_therm_clks, n_avg,
+            attr.st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
@@ -492,26 +492,30 @@ class StoragePhaseEvolution(ExperimentBase):
 
     def run(
         self,
-        n: int,
         fock_probe_fqs: list[float] | np.ndarray,
-        theta_np_array: np.ndarray,
-        snap_np_list: list,
+        snap_list: list,
         delay_clks: np.ndarray | list[int],
-        max_n_drive: int = 12,
-        disp_alpha: float | None = None,
-        disp_epsilon: float | None = None,
+        disp_alpha_pulse: str = "disp_alpha",
+        disp_eps_pulse: str = "disp_epsilon",
         sel_r180_pulse: str = "sel_x180",
         n_avg: int = 200,
     ) -> RunResult:
         attr = self.attr
         self.set_standard_frequencies()
 
+        # Convert absolute Fock probe frequencies to IFs relative to qubit LO
+        lo_freq = self.hw.get_element_lo(attr.qb_el)
+        fock_probe_ifs = np.array([int(fq - lo_freq) for fq in fock_probe_fqs], dtype=int)
+        fock0_if = int(attr.qb_fq - lo_freq)
+
         prog = cQED_programs.phase_evolution_prog(
-            attr.qb_el, attr.st_el,
-            n, fock_probe_fqs, theta_np_array,
-            snap_np_list, np.asarray(delay_clks, dtype=int),
-            max_n_drive, disp_alpha, disp_epsilon,
-            sel_r180_pulse, attr.qb_therm_clks, n_avg,
+            attr.ro_el, attr.qb_el, attr.st_el,
+            disp_alpha_pulse, disp_eps_pulse,
+            sel_r180_pulse,
+            fock0_if, fock_probe_ifs,
+            np.asarray(delay_clks, dtype=int),
+            snap_list,
+            attr.st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
