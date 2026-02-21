@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "qubox"
+version = "2.0.0"
+description = "Quantum Box: cQED experiment orchestration for OPX+ / Octave hardware"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "pydantic>=2.0",
+    "qm-qua>=1.1",
+    "qualang-tools>=0.15",
+    "tqdm>=4.65",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+simulation = ["qutip>=5.0"]
+gpu = ["jax[cuda12]>=0.4", "jaxlib>=0.4"]
+gui = ["PyQt5>=5.15"]
+dev = ["pytest>=7.0", "pytest-cov", "ruff"]
+
+[tool.setuptools.packages.find]
+include = ["qubox_v2*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"

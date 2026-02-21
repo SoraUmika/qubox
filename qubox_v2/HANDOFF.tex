@@ -1,0 +1,277 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\lstset{basicstyle=\ttfamily\small, breaklines=true}
+
+\title{QuBox v3 Architecture Refactoring\\[0.3em]\large Agent Handoff \& Status Document}
+\author{Auto-generated during refactoring session}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ============================================================
+\section{Project Goal}
+% ============================================================
+
+Refactor the \textbf{QuBox} cQED experiment-control library (at \texttt{E:\textbackslash qubox\_v2})
+into a \textbf{clean, modular, extensible} architecture.
+The library controls superconducting circuit-QED experiments on the
+Quantum Machines OPX+ platform (SDK~1.2.x).
+
+% ============================================================
+\section{Three Codebases}
+% ============================================================
+
+\begin{tabular}{lp{10cm}}
+\toprule
+\textbf{Location} & \textbf{Role} \\
+\midrule
+\texttt{E:\textbackslash qubox\_v2} &
+  Working copy --- this is what is being refactored in-place. \\
+\texttt{C:\textbackslash Users\textbackslash jl82323\textbackslash Box\textbackslash Shyam Shankar
+  Quantum Circuits Group\textbackslash Users\textbackslash Users\_JianJun\textbackslash
+  JJL\_Experiments\textbackslash qubox} &
+  Legacy monolithic qubox (for feature-parity reference). \\
+\texttt{E:\textbackslash qubox\_v2\textbackslash API\_REFERENCE.md} &
+  Existing v2 API reference (needs updating to v3). \\
+\bottomrule
+\end{tabular}
+
+% ============================================================
+\section{Approved Architecture (11 Layers)}
+% ============================================================
+
+\begin{lstlisting}
+qubox_v2/
+  core/             # L0  Config, errors, logging, protocols, types, utils
+  calibration/      # L1  NEW - CalibrationStore (JSON-backed typed storage)
+  hardware/         # L2  ConfigEngine, HardwareController, ProgramRunner, QueueManager
+  devices/          # L3  DeviceManager (QCoDeS / InstrumentServer bridge)
+  pulses/           # L4  PulseRegistry (simplified), IntegrationWeights, Waveforms
+  programs/         # L5  QUA program factories (TO BE SPLIT from monolith)
+    macros/         #     measureMacro, sequenceMacros (kept)
+  experiments/      # L6  ExperimentBase + SessionManager + per-experiment classes
+    spectroscopy/   #     ResonatorSpectroscopy, QubitSpectroscopy, ...
+    time_domain/    #     TemporalRabi, PowerRabi, T1, T2Ramsey, T2Echo, ...
+    calibration/    #     AllXY, DRAG, RB, ReadoutDiscrimination, ...
+    cavity/         #     StorageSpectroscopy, FockResolved, ...
+    tomography/     #     QubitStateTomo, FockTomo, WignerTomo
+    spa/            #     SPAFluxOpt, SPAPumpFreqOpt
+  analysis/         # L7  Fitting, plotting, discriminator, metrics
+  simulation/       # L8  QuTiP cQED simulation
+  gates/            # L9  Gate model + hardware abstraction
+  compile/          # L10 Gate compilation / optimization
+  optimization/     # L11 Parameter optimization
+  tools/            #     Waveform generators, sweep builders
+  gui/              #     Optional program GUI
+  compat/           #     Backward-compatibility import shims
+\end{lstlisting}
+
+% ============================================================
+\section{User-Approved Design Decisions}
+% ============================================================
+
+\begin{enumerate}
+  \item \textbf{Overwrite} \texttt{E:\textbackslash qubox\_v2} in-place.
+  \item \textbf{Break experiments} into individual classes
+        (not keep monolith).
+  \item \textbf{JSON files + Pydantic v2} for calibration persistence.
+  \item \textbf{Target QM SDK 1.x only} (OPX+, not OPX1000).
+  \item \textbf{Keep \texttt{manager.py}} (original PulseOperationManager)
+        for backward compatibility alongside new \texttt{PulseRegistry}.
+\end{enumerate}
+
+% ============================================================
+\section{Current Status --- What Is Done}
+% ============================================================
+
+\subsection{New files created (with real implementations, not stubs)}
+
+\begin{longtable}{lrl}
+\toprule
+\textbf{File} & \textbf{Lines} & \textbf{Description} \\
+\midrule
+\endhead
+\texttt{core/types.py}                       &  74 & Shared enums (ExecMode, DemodMode, PulseType, WaveformType) \\
+\texttt{calibration/\_\_init\_\_.py}          &  24 & Package init \\
+\texttt{calibration/models.py}               & 139 & Pydantic v2 models for calibration data \\
+\texttt{calibration/store.py}                & 186 & CalibrationStore class (JSON persistence, snapshots) \\
+\texttt{calibration/history.py}              &  54 & Timestamped calibration snapshots \\
+\texttt{pulses/pulse\_registry.py}           & 491 & PulseRegistry facade (dual permanent/volatile store) \\
+\texttt{pulses/integration\_weights.py}      & 195 & IntegrationWeightManager (extracted from POM) \\
+\texttt{pulses/waveforms.py}                 & 221 & Waveform factory functions \\
+\texttt{experiments/experiment\_base.py}     & 242 & New ExperimentBase ABC \\
+\texttt{experiments/spectroscopy/resonator.py}  & 200 & ResonatorSpectroscopy, ResonatorPowerSpectroscopy \\
+\texttt{experiments/spectroscopy/qubit.py}      & 139 & QubitSpectroscopy, QubitSpectroscopyEF \\
+\texttt{experiments/time\_domain/rabi.py}       & 113 & TemporalRabi, PowerRabi \\
+\texttt{experiments/time\_domain/coherence.py}  & 137 & T2Ramsey, T2Echo \\
+\texttt{experiments/time\_domain/relaxation.py} &  40 & T1Relaxation \\
+\texttt{experiments/time\_domain/chevron.py}    & 113 & RabiChevron, RamseyChevron \\
+\texttt{experiments/calibration/readout.py}     & 382 & ReadoutDiscrimination, ReadoutButterfly, WeightsOpt \\
+\texttt{experiments/calibration/gates.py}       & 181 & AllXY, DRAGCalibration, RandomizedBenchmarking \\
+\texttt{experiments/calibration/reset.py}       &  96 & ActiveReset, LeakageBenchmarking \\
+\texttt{experiments/cavity/storage.py}          & 230 & StorageSpectroscopy, NumSplitting, ChiRamsey \\
+\texttt{experiments/cavity/fock.py}             & 154 & FockResolvedSpectroscopy, FockResolvedRamsey \\
+\texttt{experiments/tomography/qubit\_tomo.py}  &  65 & QubitStateTomography \\
+\texttt{experiments/tomography/fock\_tomo.py}   &  52 & FockStateTomography \\
+\texttt{experiments/tomography/wigner\_tomo.py} &  91 & WignerTomography, SNAPOptimization \\
+\texttt{experiments/spa/flux\_optimization.py}  & 246 & SPAFluxOptimization, SPAPumpFreqOptimization \\
+\midrule
+\multicolumn{3}{l}{\textbf{Session 4 additions}} \\
+\midrule
+\texttt{experiments/session.py}              & $\sim$200 & SessionManager (service container) \\
+\texttt{experiments/result.py}               & $\sim$95  & AnalysisResult, FitResult dataclasses \\
+\texttt{programs/spectroscopy.py}            &  31 & Re-export facade for spectroscopy programs \\
+\texttt{programs/time\_domain.py}            &  34 & Re-export facade for time-domain programs \\
+\texttt{programs/calibration.py}             &  28 & Re-export facade for calibration programs \\
+\texttt{programs/readout.py}                 &  30 & Re-export facade for readout programs \\
+\texttt{programs/cavity.py}                  &  34 & Re-export facade for cavity programs \\
+\texttt{programs/tomography.py}              &  20 & Re-export facade for tomography programs \\
+\texttt{MIGRATION.md}                        & $\sim$180 & v2$\rightarrow$v3 migration guide \\
+\bottomrule
+\end{longtable}
+
+\subsection{Preserved files from v2 (unchanged)}
+
+All of:
+\texttt{core/} (config, errors, protocols, utils, logging),
+\texttt{hardware/} (config\_engine, controller, program\_runner, queue\_manager),
+\texttt{devices/} (device\_manager),
+\texttt{pulses/manager.py}, \texttt{pulses/models.py},
+\texttt{programs/cQED\_programs.py}, \texttt{programs/macros/} (measure, sequence),
+\texttt{experiments/base.py} (ExperimentRunner), \texttt{experiments/legacy\_experiment.py},
+\texttt{experiments/config\_builder.py}, \texttt{experiments/gates\_legacy.py},
+\texttt{analysis/} (all files), \texttt{simulation/} (all), \texttt{gates/} (all),
+\texttt{compile/} (all), \texttt{optimization/} (all), \texttt{tools/} (all),
+\texttt{gui/} (all), \texttt{compat/} (all).
+
+% ============================================================
+\section{Current Status --- What Remains}
+\label{sec:remaining}
+% ============================================================
+
+\textbf{All planned items are COMPLETE.}
+
+\begin{enumerate}[label=\textbf{R\arabic*}]
+  \item \label{R1} \textbf{\texttt{experiments/session.py}}
+        --- \textcolor{green!60!black}{DONE}.
+        \texttt{SessionManager} class created ($\sim$200 lines).
+        Wires ConfigEngine + HardwareController + ProgramRunner +
+        PulseRegistry + CalibrationStore + DeviceManager.
+
+  \item \label{R2} \textbf{\texttt{experiments/result.py}}
+        --- \textcolor{green!60!black}{DONE}.
+        \texttt{AnalysisResult}, \texttt{FitResult} dataclasses created ($\sim$95 lines).
+        Re-exports \texttt{RunResult} from \texttt{hardware.program\_runner}.
+
+  \item \label{R3} \textbf{\texttt{programs/} split}
+        --- \textcolor{green!60!black}{DONE}.
+        Created 6 category re-export modules:
+        \texttt{spectroscopy.py}, \texttt{time\_domain.py},
+        \texttt{calibration.py}, \texttt{readout.py},
+        \texttt{cavity.py}, \texttt{tomography.py}.
+        Updated \texttt{programs/\_\_init\_\_.py} to import all 6.
+
+  \item \label{R4} \textbf{\texttt{experiments/\_\_init\_\_.py}}
+        --- \textcolor{green!60!black}{DONE} (was already comprehensive).
+
+  \item \label{R5} \textbf{\texttt{pulses/\_\_init\_\_.py}}
+        --- \textcolor{green!60!black}{DONE} (was already updated with PulseRegistry export).
+
+  \item \label{R6} \textbf{\texttt{compat/\_\_init\_\_.py}}
+        --- \textcolor{green!60!black}{DONE}.
+        Added 30+ new redirect entries for v3 modules (calibration, program categories,
+        experiment subdirectories, pulse registry, session, result, core types).
+
+  \item \label{R7} \textbf{\texttt{API\_REFERENCE.md}}
+        --- \textcolor{green!60!black}{DONE}.
+        Updated to v3.0.0: added calibration layer (section 3.2),
+        PulseRegistry/IntegrationWeightManager/waveforms docs,
+        program category tables, SessionManager/ExperimentBase/AnalysisResult docs,
+        experiment class hierarchy table, updated directory layout,
+        updated migration guide with v3 SessionManager workflow,
+        new quick-start example, updated design principles.
+
+  \item \label{R8} \textbf{\texttt{MIGRATION.md}}
+        --- \textcolor{green!60!black}{DONE}.
+        Created comprehensive migration guide covering:
+        what's new, what's preserved, import path changes,
+        compat shim details, recommended migration path.
+
+  \item \label{R9} \textbf{Optional: \texttt{Lab} facade class}
+        --- NOT IMPLEMENTED (optional). Deferred for future work if needed.
+\end{enumerate}
+
+% ============================================================
+\section{Key Design Patterns}
+% ============================================================
+
+\subsection{Experiment class pattern}
+\begin{lstlisting}[language=Python]
+class QubitSpectroscopy(ExperimentBase):
+    def build_program(self, **params) -> qua.program: ...
+    def run(self, **params) -> RunResult: ...
+    def analyze(self, result, **kw) -> AnalysisResult: ...
+    def plot(self, result, **kw): ...
+\end{lstlisting}
+
+\subsection{SessionManager usage}
+\begin{lstlisting}[language=Python]
+with SessionManager("./cooldown_2025", qop_ip="10.0.0.1") as session:
+    spec = QubitSpectroscopy(session)
+    result = spec.run(pulse="x180", freq_start=6.13e9, ...)
+    analysis = spec.analyze(result)
+    spec.plot(analysis)
+\end{lstlisting}
+
+% ============================================================
+\section{File Statistics}
+% ============================================================
+
+\begin{itemize}
+  \item \textbf{107 Python files}, \textbf{34,988 total lines}
+  \item Largest remaining monoliths:
+    \begin{itemize}
+      \item \texttt{legacy\_experiment.py}: 5,200 lines
+      \item \texttt{cQED\_programs.py}: 2,898 lines
+      \item \texttt{manager.py}: 2,362 lines
+      \item \texttt{gates\_legacy.py}: 1,923 lines
+      \item \texttt{macros/measure.py}: 1,575 lines
+    \end{itemize}
+\end{itemize}
+
+% ============================================================
+\section{Progress Log}
+% ============================================================
+
+\begin{description}
+  \item[Session 1] Explored legacy qubox, v2 refactor, QM docs.
+        Created approved architecture plan.
+  \item[Session 2] Implemented core/types.py, calibration/ (models, store, history),
+        pulses/ (pulse\_registry, integration\_weights, waveforms),
+        experiment\_base.py, all 6 experiment subdirectories.
+        Stopped mid-edit of pulses/\_\_init\_\_.py.
+  \item[Session 3] Resumed. Created experiment subdirectory \texttt{\_\_init\_\_.py}
+        files, experiment classes in all 6 categories.
+        Stopped mid-edit of API\_REFERENCE.md.
+  \item[Session 4] Resumed. Created HANDOFF.tex.
+        Created \texttt{experiments/session.py} (SessionManager, $\sim$200 lines).
+        Created \texttt{experiments/result.py} (AnalysisResult, FitResult, $\sim$95 lines).
+        Split \texttt{programs/} into 6 category re-export modules.
+        Updated \texttt{programs/\_\_init\_\_.py}.
+        Updated \texttt{compat/\_\_init\_\_.py} with 30+ new v3 redirects.
+        Updated \texttt{API\_REFERENCE.md} to v3.0.0 (calibration, pulses, experiments, programs).
+        Created \texttt{MIGRATION.md} (comprehensive v2$\rightarrow$v3 guide).
+        Updated this HANDOFF.tex with final status.
+        \textbf{All R1--R8 items COMPLETE. R9 (Lab facade) deferred as optional.}
+\end{description}
+
+\end{document}
