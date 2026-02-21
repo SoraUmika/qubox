@@ -156,6 +156,7 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
         drive_frequency: float,
         weights: Any,
         num_div: int | None = None,
+        div_clks: int = 25,
         *,
         r180: str = "x180",
         ro_depl_clks: int | None = None,
@@ -167,7 +168,7 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
         self.set_standard_frequencies()
 
         prog = cQED_programs.readout_ge_integrated_trace(
-            attr.ro_el, attr.qb_el, ro_op, weights, num_div,
+            attr.qb_el, weights, num_div, div_clks,
             r180, ro_depl_clks or attr.ro_therm_clks, n_avg,
         )
         return self.run_program(

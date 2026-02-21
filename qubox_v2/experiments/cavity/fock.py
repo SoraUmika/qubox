@@ -31,7 +31,7 @@ class FockResolvedSpectroscopy(ExperimentBase):
         self,
         probe_fqs: list[float] | np.ndarray,
         *,
-        state_prep: Any,
+        state_prep: Any = None,
         sel_r180: str = "sel_x180",
         calibrate_ref_r180_S: bool = True,
         n_avg: int = 100,
@@ -39,12 +39,16 @@ class FockResolvedSpectroscopy(ExperimentBase):
         attr = self.attr
         self.set_standard_frequencies()
 
+        # Convert absolute RF probe frequencies to IFs relative to qubit LO
+        lo_freq = self.hw.get_element_lo(attr.qb_el)
+        fock_ifs = np.array([int(fq - lo_freq) for fq in probe_fqs], dtype=int)
+        qb_if = int(attr.qb_fq - lo_freq)
+
         prog = cQED_programs.fock_resolved_spectroscopy(
-            attr.qb_el, attr.st_el,
-            np.asarray(probe_fqs),
-            state_prep, sel_r180,
-            calibrate_ref_r180_S,
-            attr.qb_therm_clks, n_avg,
+            attr.qb_el, state_prep,
+            qb_if, fock_ifs,
+            sel_r180, attr.qb_therm_clks, n_avg,
+            sel_r180_transfer_calibration=calibrate_ref_r180_S,
         )
         result = self.run_program(
             prog, n_total=n_avg,
@@ -123,10 +127,14 @@ class FockResolvedT1(ExperimentBase):
 
         self.set_standard_frequencies()
 
+        # Convert absolute Fock frequencies to IFs relative to qubit LO
+        lo_freq = self.hw.get_element_lo(attr.qb_el)
+        fock_ifs = np.array([int(fq - lo_freq) for fq in fock_fqs], dtype=int)
+
         prog = cQED_programs.fock_resolved_T1_relaxation(
             attr.qb_el, attr.st_el,
-            np.asarray(fock_fqs), fock_disps,
-            delay_clks, sel_r180,
+            fock_disps, fock_ifs,
+            sel_r180, delay_clks,
             attr.qb_therm_clks, n_avg,
         )
         result = self.run_program(
@@ -259,10 +267,14 @@ class FockResolvedRamsey(ExperimentBase):
 
         self.set_standard_frequencies()
 
+        # Convert absolute Fock frequencies to IFs relative to qubit LO
+        lo_freq = self.hw.get_element_lo(attr.qb_el)
+        fock_ifs = np.array([int(fq - lo_freq) for fq in fock_fqs], dtype=int)
+
         prog = cQED_programs.fock_resolved_qb_ramsey(
             attr.qb_el, attr.st_el,
-            np.asarray(fock_fqs), np.asarray(detunings),
-            disps, delay_clks, sel_r90,
+            fock_ifs, np.asarray(detunings),
+            disps, sel_r90, delay_clks,
             attr.qb_therm_clks, n_avg,
         )
         result = self.run_program(
@@ -392,10 +404,14 @@ class FockResolvedPowerRabi(ExperimentBase):
         attr = self.attr
         self.set_standard_frequencies()
 
+        # Convert absolute Fock frequencies to IFs relative to qubit LO
+        lo_freq = self.hw.get_element_lo(attr.qb_el)
+        fock_ifs = np.array([int(fq - lo_freq) for fq in fock_fqs], dtype=int)
+
         prog = cQED_programs.fock_resolved_power_rabi(
             attr.qb_el, attr.st_el,
-            np.asarray(fock_fqs), np.asarray(gains),
-            sel_qb_pulse, disp_n_list,
+            np.asarray(gains), disp_n_list,
+            fock_ifs, sel_qb_pulse,
             attr.qb_therm_clks, n_avg,
         )
         result = self.run_program(

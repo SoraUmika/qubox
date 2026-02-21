@@ -43,8 +43,8 @@ class StorageSpectroscopy(ExperimentBase):
         self.set_standard_frequencies()
 
         prog = cQED_programs.storage_spectroscopy(
-            attr.st_el, attr.qb_el, disp, if_freqs,
-            sel_r180, storage_therm_time, n_avg,
+            attr.qb_el, attr.st_el, disp, sel_r180,
+            if_freqs, storage_therm_time, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
@@ -142,8 +142,8 @@ class StorageSpectroscopyCoarse(ExperimentBase):
             ifs = if_freqs_for_segment(LO, rf_end, df)
 
             prog = cQED_programs.storage_spectroscopy(
-                attr.st_el, attr.qb_el, "const_alpha", ifs,
-                "sel_x180", storage_therm_time, n_avg,
+                attr.qb_el, attr.st_el, "const_alpha", "sel_x180",
+                ifs, storage_therm_time, n_avg,
             )
             rr = self.run_program(
                 prog, n_total=n_avg,
@@ -233,7 +233,6 @@ class NumSplittingSpectroscopy(ExperimentBase):
         rf_centers: list[float] | np.ndarray,
         rf_spans: list[float] | np.ndarray,
         df: float,
-        disp_pulses: str = "const_alpha",
         sel_r180: str = "sel_x180",
         state_prep: Any = None,
         n_avg: int = 1000,
@@ -241,15 +240,28 @@ class NumSplittingSpectroscopy(ExperimentBase):
         attr = self.attr
         self.set_standard_frequencies()
 
+        # Build IF frequency list from RF centers/spans/df relative to qubit LO
+        lo_freq = self.hw.get_element_lo(attr.qb_el)
+        if_list: list[int] = []
+        rf_list: list[float] = []
+        for center, span in zip(rf_centers, rf_spans):
+            fqs = np.arange(center - span / 2, center + span / 2 + df / 2, df)
+            for fq in fqs:
+                if_list.append(int(fq - lo_freq))
+                rf_list.append(float(fq))
+        if_frequencies = np.array(if_list, dtype=int)
+
         prog = cQED_programs.num_splitting_spectroscopy(
-            attr.qb_el, attr.st_el,
-            rf_centers, rf_spans, df,
-            disp_pulses, sel_r180,
-            state_prep, attr.qb_therm_clks, n_avg,
+            state_prep, attr.qb_el, attr.st_el,
+            sel_r180, if_frequencies,
+            attr.qb_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
-            processors=[pp.proc_default],
+            processors=[
+                pp.proc_default,
+                pp.proc_attach("frequencies", np.array(rf_list)),
+            ],
         )
         self.save_output(result.output, "numSplittingSpectroscopy")
         return result
@@ -388,9 +400,9 @@ class StorageChiRamsey(ExperimentBase):
         self.set_standard_frequencies()
 
         prog = cQED_programs.storage_chi_ramsey(
-            attr.qb_el, attr.st_el,
-            fock_fq, np.asarray(delay_ticks, dtype=int),
+            attr.ro_el, attr.qb_el, attr.st_el,
             disp_pulse, x90_pulse,
+            np.asarray(delay_ticks, dtype=int),
             attr.qb_therm_clks, n_avg,
         )
         result = self.run_program(

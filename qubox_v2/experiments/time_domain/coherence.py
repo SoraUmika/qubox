@@ -245,12 +245,10 @@ class ResidualPhotonRamsey(ExperimentBase):
         self.set_standard_frequencies(qb_fq=attr.qb_fq + qb_detuning)
 
         prog = cQED_programs.residual_photon_ramsey(
-            attr.qb_el, attr.ro_el,
-            r90, r180, delay_clks,
-            test_ro_op, test_ro_amp,
+            attr.qb_el, test_ro_op, delay_clks,
             int(t_relax / 4), int(t_buffer / 4),
-            prep_e, measure_ro_op,
-            attr.qb_therm_clks, n_avg,
+            prep_e, test_ro_amp,
+            r90, r180, attr.qb_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
