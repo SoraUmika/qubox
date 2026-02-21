@@ -164,7 +164,7 @@ class ExperimentRunner:
 
     def burn_pulses(self, include_volatile: bool = True) -> None:
         """Push all registered pulses into the QM config."""
-        self.pulse_mgr.burn(include_volatile=include_volatile)
+        self.config_engine.merge_pulses(self.pulse_mgr, include_volatile=include_volatile)
         self.hw.apply_changes()
 
     # ------------------------------------------------------------------

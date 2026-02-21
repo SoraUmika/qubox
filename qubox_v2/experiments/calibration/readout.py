@@ -358,7 +358,10 @@ class ReadoutGEDiscrimination(ExperimentBase):
                 # Additional metrics for post-selection
                 for key in ("rot_mu_g", "rot_mu_e", "sigma_g", "sigma_e"):
                     if key in disc_out:
-                        metrics[key] = float(disc_out[key])
+                        val = disc_out[key]
+                        if isinstance(val, (complex, np.complexfloating)):
+                            val = val.real
+                        metrics[key] = float(val)
 
                 _logger.info(
                     "GE discrimination fidelity=%.2f%%, angle=%.4f rad, threshold=%.4g",
@@ -527,8 +530,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
             )
 
         if burn_rot_weights:
-            pm.burn(include_volatile=True)
-            self.hw.apply_changes()
+            self.burn_pulses(include_volatile=True)
 
     def plot(self, analysis: AnalysisResult, *, ax=None,
              show_rotated: bool = True, interactive: bool = False, **kwargs):
@@ -879,8 +881,7 @@ class ReadoutWeightsOptimization(ExperimentBase):
                 [[opt_cos_key, opt_sin_key], [opt_m_sin_key, opt_cos_key]],
                 weight_len=int(div_clks * 4),
             )
-            pm.burn(include_volatile=True)
-            self.hw.apply_changes()
+            self.burn_pulses(include_volatile=True)
             _logger.info("measureMacro updated with optimised weights")
 
     @staticmethod

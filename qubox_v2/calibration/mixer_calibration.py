@@ -18,6 +18,7 @@ ManualMixerCalibrator
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import time
@@ -26,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from tqdm import tqdm
 
 from ..programs import cQED_programs
 
@@ -37,28 +39,39 @@ _logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────────
 @dataclass
 class MixerCalibrationConfig:
-    """All tunable parameters for manual mixer calibration."""
+    """All tunable parameters for manual mixer calibration.
+
+    Parameter groups
+    ----------------
+    **SA measurement** — spectrum analyser sweep configuration.
+    **DC offset grid** — coarse + fine 2-D grid over (I0, Q0) to minimise LO leakage.
+    **IQ correction grid** — coarse + fine 2-D grid over (gain, phase) to minimise image.
+    **Minimiser** — Nelder-Mead derivative-free optimiser settings.
+    **CW tone** — continuous-wave probe signal parameters.
+    **Settle times** — hardware settle delays after parameter changes.
+    """
 
     # SA measurement
-    sa_span_hz: float = 2e6
-    sa_rbw: float = 1e3
-    sa_vbw: float = 1e3
-    sa_level: float = 0.0
-    sa_avg: int = 5
+    sa_span_hz: float = 2e6       # narrow span around each tone (Hz)
+    sa_rbw: float = 1e3           # resolution bandwidth (Hz)
+    sa_vbw: float = 1e3           # video bandwidth (Hz)
+    sa_level: float = 0.0         # reference level (dBm)
+    sa_avg: int = 5               # number of sweeps to average
+    sa_settle: float = 0.0        # settle time after SA reconfigure (seconds)
 
     # DC offset grid search
-    dc_coarse_range: float = 0.1    # ±V
-    dc_coarse_n: int = 11
-    dc_fine_range: float = 0.02
-    dc_fine_n: int = 11
+    dc_coarse_range: float = 0.1    # ±V half-range for coarse grid
+    dc_coarse_n: int = 11           # points per axis (coarse)
+    dc_fine_range: float = 0.02     # ±V half-range for fine grid
+    dc_fine_n: int = 11             # points per axis (fine)
 
     # IQ correction grid search
-    iq_gain_range: float = 0.1
-    iq_phase_range: float = 0.2     # rad
-    iq_coarse_n: int = 9
-    iq_fine_range_gain: float = 0.02
-    iq_fine_range_phase: float = 0.04
-    iq_fine_n: int = 9
+    iq_gain_range: float = 0.1      # ±gain half-range
+    iq_phase_range: float = 0.2     # ±phase half-range (rad)
+    iq_coarse_n: int = 9            # points per axis (coarse)
+    iq_fine_range_gain: float = 0.02   # ±gain half-range (fine)
+    iq_fine_range_phase: float = 0.04  # ±phase half-range (fine, rad)
+    iq_fine_n: int = 9              # points per axis (fine)
 
     # Minimiser
     minimizer_maxiter: int = 60
@@ -83,6 +96,10 @@ class SAMeasurementHelper:
     def __init__(self, sa_device: Any, config: MixerCalibrationConfig):
         self._sa = sa_device
         self._cfg = config
+        if config.sa_rbw <= 0 or config.sa_vbw <= 0:
+            raise ValueError("SA RBW and VBW must be positive")
+        if config.sa_avg < 1:
+            raise ValueError("SA averages must be >= 1")
 
     # ── single-tone measurement ────────────────────────────────
     def measure_peak_power(self, center_hz: float) -> float:
@@ -95,6 +112,8 @@ class SAMeasurementHelper:
             level=self._cfg.sa_level,
             force=True,
         )
+        if self._cfg.sa_settle > 0:
+            time.sleep(self._cfg.sa_settle)
         _freq, _tr_min, tr_max = self._sa.sweep(average_num=self._cfg.sa_avg)
         return float(np.max(tr_max))
 
@@ -203,31 +222,47 @@ class ManualMixerCalibrator:
         f_if: float,
         *,
         save_to_db: bool = True,
+        **config_overrides,
     ) -> dict:
         """Two-stage coarse→fine grid search: DC offsets then IQ correction.
 
         Returns a dict with optimal parameters + measured tone powers.
+
+        Any keyword argument matching a ``MixerCalibrationConfig`` field
+        overrides the corresponding value for this run only.
         """
+        cfg = self._cfg
+        if config_overrides:
+            cfg = dataclasses.replace(cfg, **config_overrides)
+
         _logger.info(
             "scan_2d: element=%s  LO=%.4f GHz  IF=%.2f MHz",
             element, f_lo / 1e9, f_if / 1e6,
         )
 
         # ── Stage A: DC offsets ───────────────────────────────
-        _logger.info("Stage A: DC offset optimisation (coarse)")
+        _logger.info(
+            "Stage A: DC offset optimisation (coarse %dx%d = %d points)",
+            cfg.dc_coarse_n, cfg.dc_coarse_n, cfg.dc_coarse_n ** 2,
+        )
         job = self._start_cw(element)
         best_i0, best_q0, _ = self._grid_search_dc(
             element, f_lo,
             center_i=0.0, center_q=0.0,
-            half_range=self._cfg.dc_coarse_range,
-            n_points=self._cfg.dc_coarse_n,
+            half_range=cfg.dc_coarse_range,
+            n_points=cfg.dc_coarse_n,
+            cfg=cfg,
         )
-        _logger.info("Stage A: DC offset optimisation (fine)")
+        _logger.info(
+            "Stage A: DC offset optimisation (fine %dx%d = %d points)",
+            cfg.dc_fine_n, cfg.dc_fine_n, cfg.dc_fine_n ** 2,
+        )
         best_i0, best_q0, best_P_LO = self._grid_search_dc(
             element, f_lo,
             center_i=best_i0, center_q=best_q0,
-            half_range=self._cfg.dc_fine_range,
-            n_points=self._cfg.dc_fine_n,
+            half_range=cfg.dc_fine_range,
+            n_points=cfg.dc_fine_n,
+            cfg=cfg,
         )
         self._set_dc_offsets(element, best_i0, best_q0)
         self._stop_cw(job)
@@ -237,23 +272,31 @@ class ManualMixerCalibrator:
         )
 
         # ── Stage B: IQ correction ────────────────────────────
-        _logger.info("Stage B: IQ correction optimisation (coarse)")
+        _logger.info(
+            "Stage B: IQ correction optimisation (coarse %dx%d = %d points)",
+            cfg.iq_coarse_n, cfg.iq_coarse_n, cfg.iq_coarse_n ** 2,
+        )
         best_g, best_p, _ = self._grid_search_iq(
             element, f_lo, f_if,
             best_i0, best_q0,
             center_gain=0.0, center_phase=0.0,
-            half_range_gain=self._cfg.iq_gain_range,
-            half_range_phase=self._cfg.iq_phase_range,
-            n_points=self._cfg.iq_coarse_n,
+            half_range_gain=cfg.iq_gain_range,
+            half_range_phase=cfg.iq_phase_range,
+            n_points=cfg.iq_coarse_n,
+            cfg=cfg,
         )
-        _logger.info("Stage B: IQ correction optimisation (fine)")
+        _logger.info(
+            "Stage B: IQ correction optimisation (fine %dx%d = %d points)",
+            cfg.iq_fine_n, cfg.iq_fine_n, cfg.iq_fine_n ** 2,
+        )
         best_g, best_p, best_P_img = self._grid_search_iq(
             element, f_lo, f_if,
             best_i0, best_q0,
             center_gain=best_g, center_phase=best_p,
-            half_range_gain=self._cfg.iq_fine_range_gain,
-            half_range_phase=self._cfg.iq_fine_range_phase,
-            n_points=self._cfg.iq_fine_n,
+            half_range_gain=cfg.iq_fine_range_gain,
+            half_range_phase=cfg.iq_fine_range_phase,
+            n_points=cfg.iq_fine_n,
+            cfg=cfg,
         )
         _logger.info(
             "Stage B done: gain=%.6f  phase=%.6f  P_img=%.1f dBm",
@@ -287,8 +330,13 @@ class ManualMixerCalibrator:
         f_if: float,
         *,
         save_to_db: bool = True,
+        **config_overrides,
     ) -> dict:
-        """Coordinate-descent optimiser: DC offsets then IQ correction."""
+        """Coordinate-descent optimiser: DC offsets then IQ correction.
+
+        Any keyword argument matching a ``MixerCalibrationConfig`` field
+        overrides the corresponding value for this run only.
+        """
         from scipy.optimize import minimize
 
         _logger.info(
@@ -296,9 +344,11 @@ class ManualMixerCalibrator:
             element, f_lo / 1e9, f_if / 1e6,
         )
         cfg = self._cfg
+        if config_overrides:
+            cfg = dataclasses.replace(cfg, **config_overrides)
 
         # ── Stage A: DC offsets (fast, CW stays running) ──────
-        _logger.info("Stage A: DC offset minimisation")
+        _logger.info("Stage A: DC offset minimisation (maxiter=%d)", cfg.minimizer_maxiter)
         job = self._start_cw(element)
 
         eval_count_dc = [0]
@@ -312,10 +362,14 @@ class ManualMixerCalibrator:
                 _logger.debug("  DC eval %d: I0=%.5f Q0=%.5f  P_LO=%.1f", eval_count_dc[0], x[0], x[1], p)
             return p
 
+        def _dc_callback(xk):
+            _logger.info("  DC opt step: I0=%.5f Q0=%.5f  (%d evals)", xk[0], xk[1], eval_count_dc[0])
+
         res_dc = minimize(
             _cost_dc,
             x0=[0.0, 0.0],
             method="Nelder-Mead",
+            callback=_dc_callback,
             options={
                 "maxiter": cfg.minimizer_maxiter,
                 "xatol": cfg.minimizer_xtol,
@@ -332,7 +386,7 @@ class ManualMixerCalibrator:
         )
 
         # ── Stage B: IQ correction (slower, QM reopen per eval) ─
-        _logger.info("Stage B: IQ correction minimisation")
+        _logger.info("Stage B: IQ correction minimisation (maxiter=%d)", cfg.minimizer_maxiter)
         f_img = f_lo + abs(f_if)
         eval_count_iq = [0]
 
@@ -347,10 +401,14 @@ class ManualMixerCalibrator:
             _logger.debug("  IQ eval %d: g=%.5f ph=%.5f  P_img=%.1f", eval_count_iq[0], x[0], x[1], p)
             return p
 
+        def _iq_callback(xk):
+            _logger.info("  IQ opt step: gain=%.5f phase=%.5f  (%d evals)", xk[0], xk[1], eval_count_iq[0])
+
         res_iq = minimize(
             _cost_iq,
             x0=[0.0, 0.0],
             method="Nelder-Mead",
+            callback=_iq_callback,
             options={
                 "maxiter": cfg.minimizer_maxiter,
                 "xatol": cfg.minimizer_xtol,
@@ -392,18 +450,20 @@ class ManualMixerCalibrator:
         center_q: float,
         half_range: float,
         n_points: int,
+        cfg: MixerCalibrationConfig | None = None,
     ) -> tuple[float, float, float]:
         """2-D grid over (I0, Q0); minimise P_LO.  CW must be running."""
+        cfg = cfg or self._cfg
         i_vals = np.linspace(center_i - half_range, center_i + half_range, n_points)
         q_vals = np.linspace(center_q - half_range, center_q + half_range, n_points)
         best_P: float = np.inf
         best_i, best_q = center_i, center_q
         total = n_points * n_points
         done = 0
-        for i0 in i_vals:
+        for i0 in tqdm(i_vals, desc="DC offset scan", unit="row", leave=False):
             for q0 in q_vals:
                 self._set_dc_offsets(element, float(i0), float(q0))
-                time.sleep(self._cfg.dc_settle)
+                time.sleep(cfg.dc_settle)
                 P_lo = self._sa.measure_peak_power(f_lo)
                 if P_lo < best_P:
                     best_P, best_i, best_q = P_lo, float(i0), float(q0)
@@ -423,8 +483,10 @@ class ManualMixerCalibrator:
         half_range_gain: float,
         half_range_phase: float,
         n_points: int,
+        cfg: MixerCalibrationConfig | None = None,
     ) -> tuple[float, float, float]:
         """2-D grid over (gain, phase); minimise P_img.  Requires QM reopen per point."""
+        cfg = cfg or self._cfg
         g_vals = np.linspace(center_gain - half_range_gain, center_gain + half_range_gain, n_points)
         p_vals = np.linspace(center_phase - half_range_phase, center_phase + half_range_phase, n_points)
         f_img = f_lo + abs(f_if)
@@ -432,12 +494,12 @@ class ManualMixerCalibrator:
         best_g, best_p = center_gain, center_phase
         total = n_points * n_points
         done = 0
-        for g in g_vals:
+        for g in tqdm(g_vals, desc="IQ correction scan", unit="row", leave=False):
             for p in p_vals:
                 self._apply_iq_correction(element, float(g), float(p), i0, q0)
                 job = self._start_cw(element)
                 self._set_dc_offsets(element, i0, q0)
-                time.sleep(self._cfg.iq_settle)
+                time.sleep(cfg.iq_settle)
                 P_img = self._sa.measure_peak_power(f_img)
                 self._stop_cw(job)
                 if P_img < best_P:

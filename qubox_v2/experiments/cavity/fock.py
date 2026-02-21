@@ -114,15 +114,27 @@ class FockResolvedT1(ExperimentBase):
 
     def run(
         self,
-        fock_fqs: list[float] | np.ndarray,
-        fock_disps: list[str],
-        delay_end: int,
-        dt: int,
+        fock_fqs: list[float] | np.ndarray | None = None,
+        fock_disps: list[str] | None = None,
+        delay_end: int = 40000,
+        dt: int = 200,
         delay_begin: int = 4,
         sel_r180: str = "sel_x180",
         n_avg: int = 1000,
     ) -> RunResult:
         attr = self.attr
+
+        if fock_fqs is None:
+            if attr.fock_fqs is None:
+                raise ValueError(
+                    "fock_fqs not provided and not found in cqed_params.json. "
+                    "Run NumSplittingSpectroscopy first."
+                )
+            fock_fqs = attr.fock_fqs
+
+        if fock_disps is None:
+            fock_disps = [f"disp_n{n}" for n in range(len(fock_fqs))]
+
         delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
 
         self.set_standard_frequencies()
@@ -253,16 +265,31 @@ class FockResolvedRamsey(ExperimentBase):
 
     def run(
         self,
-        fock_fqs: list[float] | np.ndarray,
-        detunings: list[float] | np.ndarray,
-        disps: list[str],
-        delay_end: int,
-        dt: int,
+        fock_fqs: list[float] | np.ndarray | None = None,
+        detunings: list[float] | np.ndarray | None = None,
+        disps: list[str] | None = None,
+        delay_end: int = 40000,
+        dt: int = 100,
         delay_begin: int = 4,
         sel_r90: str = "sel_x90",
         n_avg: int = 1000,
     ) -> RunResult:
         attr = self.attr
+
+        if fock_fqs is None:
+            if attr.fock_fqs is None:
+                raise ValueError(
+                    "fock_fqs not provided and not found in cqed_params.json. "
+                    "Run NumSplittingSpectroscopy first."
+                )
+            fock_fqs = attr.fock_fqs
+
+        if detunings is None:
+            detunings = [0.2e6]
+
+        if disps is None:
+            disps = [f"disp_n{n}" for n in range(len(fock_fqs))]
+
         delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
 
         self.set_standard_frequencies()
@@ -395,14 +422,28 @@ class FockResolvedPowerRabi(ExperimentBase):
 
     def run(
         self,
-        fock_fqs: list[float] | np.ndarray,
-        gains: list[float] | np.ndarray,
-        sel_qb_pulse: str,
-        disp_n_list: list[str],
+        fock_fqs: list[float] | np.ndarray | None = None,
+        gains: list[float] | np.ndarray | None = None,
+        sel_qb_pulse: str = "sel_x180",
+        disp_n_list: list[str] | None = None,
         n_avg: int = 1000,
     ) -> RunResult:
         attr = self.attr
         self.set_standard_frequencies()
+
+        if fock_fqs is None:
+            if attr.fock_fqs is None:
+                raise ValueError(
+                    "fock_fqs not provided and not found in cqed_params.json. "
+                    "Run NumSplittingSpectroscopy first."
+                )
+            fock_fqs = attr.fock_fqs
+
+        if gains is None:
+            gains = np.linspace(0, 1.5, 50)
+
+        if disp_n_list is None:
+            disp_n_list = [f"disp_n{n}" for n in range(len(fock_fqs))]
 
         # Convert absolute Fock frequencies to IFs relative to qubit LO
         lo_freq = self.hw.get_element_lo(attr.qb_el)

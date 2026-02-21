@@ -231,6 +231,14 @@ class ExperimentBase:
     def get_qubit_lo(self) -> float:
         return self.hw.get_element_lo(self.attr.qb_el)
 
+    def burn_pulses(self, include_volatile: bool = True) -> None:
+        """Push registered pulses into QM config via context."""
+        ctx_burn = getattr(self._ctx, "burn_pulses", None)
+        if callable(ctx_burn):
+            ctx_burn(include_volatile=include_volatile)
+        else:
+            raise RuntimeError("Experiment context has no burn_pulses method.")
+
     def run_program(
         self, prog, *, n_total: int, processors: list | None = None,
         process_in_sim: bool = False, **kw,

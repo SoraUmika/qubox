@@ -240,6 +240,12 @@ class NumSplittingSpectroscopy(ExperimentBase):
         attr = self.attr
         self.set_standard_frequencies()
 
+        # Default to a no-op QUA macro if no state preparation given
+        if state_prep is None:
+            from qm.qua import wait
+            def state_prep():
+                wait(1)
+
         # Build IF frequency list from RF centers/spans/df relative to qubit LO
         lo_freq = self.hw.get_element_lo(attr.qb_el)
         if_list: list[int] = []
@@ -398,6 +404,14 @@ class StorageChiRamsey(ExperimentBase):
     ) -> RunResult:
         attr = self.attr
         self.set_standard_frequencies()
+
+        # Guard: measureMacro must be configured before running chi Ramsey
+        from ...programs.macros.measure import measureMacro
+        if not measureMacro._demod_weight_sets:
+            raise RuntimeError(
+                "measureMacro has no outputs configured. "
+                "Run CalibrateReadoutFull (or measureMacro.set_outputs()) first."
+            )
 
         prog = cQED_programs.storage_chi_ramsey(
             attr.ro_el, attr.qb_el, attr.st_el,
