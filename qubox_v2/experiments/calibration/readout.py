@@ -14,6 +14,7 @@ from ...analysis import post_process as pp
 from ...analysis.analysis_tools import two_state_discriminator
 from ...analysis.output import Output
 from ...analysis.metrics import butterfly_metrics, gaussian2D_score, wilson_interval
+from ...analysis.post_selection import PostSelectionConfig
 from ...core.logging import get_logger
 from ...hardware.program_runner import RunResult
 from ...programs import cQED_programs
@@ -185,7 +186,6 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
         drive_frequency: float,
         weights: Any,
         num_div: int | None = None,
-        div_clks: int = 25,
         *,
         r180: str = "x180",
         ro_depl_clks: int | None = None,
@@ -206,13 +206,86 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
                 "[cos, sin, m_sin, cos]. Pass 4 weights explicitly to silence this warning."
             )
 
+        # Resolve pulse length and compute div_clks (legacy parity)
+        pulseOp = self.pulse_mgr.get_pulseOp_by_element_op(attr.ro_el, ro_op)
+        if pulseOp is None:
+            raise RuntimeError(
+                f"No pulse registered for (element={attr.ro_el!r}, op={ro_op!r}). "
+                "Register the readout operation before running integrated trace."
+            )
+        pulse_len = int(pulseOp.length)  # in ns
+
+        # Pre-compute valid (num_div, div_clks) pairs (legacy parity):
+        #   pulse_len % d == 0  AND  (pulse_len // d) % 4 == 0
+        valid_pairs = [
+            (d, pulse_len // d // 4)
+            for d in range(1, pulse_len + 1)
+            if pulse_len % d == 0 and ((pulse_len // d) % 4 == 0)
+        ]
+        if not valid_pairs:
+            raise ValueError(
+                f"readout_ge_integrated_trace: no valid num_div for pulse_len={pulse_len} ns. "
+                "pulse_len must be tileable into slices that are integer multiples of 4 ns."
+            )
+
+        if num_div is None:
+            num_div = max(d for d, _ in valid_pairs)
+        if num_div <= 0:
+            raise ValueError(f"num_div must be > 0, got {num_div}")
+        if not any(d == num_div for d, _ in valid_pairs):
+            raise ValueError(
+                f"readout_ge_integrated_trace: invalid num_div={num_div} for "
+                f"pulse_len={pulse_len} ns. "
+                f"Valid (num_div, div_clks): {valid_pairs}"
+            )
+
+        div_clks = (pulse_len // num_div) // 4
+
+        # Legacy parity: push/restore measureMacro around program construction
+        measureMacro.push_settings()
+        measureMacro.set_pulse_op(pulseOp, active_op=ro_op)
+
         prog = cQED_programs.readout_ge_integrated_trace(
             attr.qb_el, resolved_weights, num_div, div_clks,
             r180, ro_depl_clks or ro_therm_clks, n_avg,
         )
+
+        # Legacy parity: post-processing to create g_trace/e_trace from II/IQ/QI/QQ
+        def _divide_array_in_half(arr):
+            split_index = len(arr) // 2
+            return arr[:split_index], arr[split_index:]
+
+        def _post_proc(out, **_):
+            II = out.get("II")
+            IQ = out.get("IQ")
+            QI = out.get("QI")
+            QQ = out.get("QQ")
+            if II is None or IQ is None or QI is None or QQ is None:
+                return out
+
+            IIg, IIe = _divide_array_in_half(np.asarray(II))
+            IQg, IQe = _divide_array_in_half(np.asarray(IQ))
+            QIg, QIe = _divide_array_in_half(np.asarray(QI))
+            QQg, QQe = _divide_array_in_half(np.asarray(QQ))
+
+            Ig = IIg + IQg
+            Ie = IIe + IQe
+            Qg = QIg + QQg
+            Qe = QIe + QQe
+
+            out["g_trace"] = Ig + 1j * Qg
+            out["e_trace"] = Ie + 1j * Qe
+            out["div_clks"] = div_clks
+            out["num_div"] = num_div
+            time_list = np.arange(div_clks * 4, pulse_len + 1, 4 * div_clks)
+            out["time_list"] = time_list
+            return out
+
+        measureMacro.restore_settings()
+
         return self.run_program(
             prog, n_total=n_avg, process_in_sim=process_in_sim,
-            processors=[pp.proc_default],
+            processors=[_post_proc],
         )
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
@@ -471,6 +544,20 @@ class ReadoutGEDiscrimination(ExperimentBase):
                     "but NOT applied (apply_rotated_weights=False)",
                     metrics["angle"],
                 )
+
+        # Auto-update post-selection config (legacy parity: auto_update_postsel)
+        if hasattr(self, "_run_params") and self._run_params.get("auto_update_postsel", False):
+            if all(k in metrics for k in ("threshold", "rot_mu_g", "rot_mu_e")):
+                try:
+                    blob_k_g = self._run_params.get("blob_k_g", 2.0)
+                    blob_k_e = self._run_params.get("blob_k_e", blob_k_g)
+                    ps_cfg = PostSelectionConfig.from_discrimination_results(
+                        metrics, blob_k_g=blob_k_g, blob_k_e=blob_k_e,
+                    )
+                    measureMacro.set_post_select_config(ps_cfg)
+                    _logger.info("Post-selection config updated from GE discrimination")
+                except Exception as exc:
+                    _logger.warning("Failed to build PostSelectionConfig: %s", exc)
 
         if update_calibration and self.calibration_store and "fidelity" in metrics:
             min_fidelity = float(kw.get("min_fidelity", 70.0))
@@ -1056,11 +1143,16 @@ class ReadoutWeightsOptimization(ExperimentBase):
             return AnalysisResult.from_run(result, metrics=metrics, metadata=metadata)
 
         # Build ge_diff_norm (ported from legacy_experiment.py:2289-2306)
-        ge_diff = np.asarray(e_trace) - np.asarray(g_trace)
+        g_trace = np.asarray(g_trace)
+        e_trace = np.asarray(e_trace)
+        ge_diff = e_trace - g_trace
         ge_diff_norm = self._normalize_complex_array(ge_diff)
 
         metrics["trace_length"] = int(len(ge_diff))
         metrics["ge_diff_norm_max"] = float(np.max(np.abs(ge_diff_norm)))
+        # Store computed traces for plotting (legacy parity)
+        metrics["ge_diff"] = ge_diff
+        metrics["ge_diff_norm"] = ge_diff_norm
 
         # Build segmented weights
         Re = ge_diff_norm.real
@@ -1088,6 +1180,13 @@ class ReadoutWeightsOptimization(ExperimentBase):
             except Exception as exc:
                 _logger.error("Weight registration failed: %s", exc)
                 metadata["diagnostics"] = f"Weight registration failed: {exc}"
+
+        # Store optimized weight keys in metrics (legacy parity)
+        if hasattr(self, "_run_params"):
+            params = self._run_params
+            metrics["opt_cos_key"] = f"opt_{params['cos_w_key']}"
+            metrics["opt_sin_key"] = f"opt_{params['sin_w_key']}"
+            metrics["opt_m_sin_key"] = f"opt_{params['m_sin_w_key']}"
 
         # Weight version tracking (Section 1D)
         if update_calibration and self.calibration_store:
@@ -1171,22 +1270,69 @@ class ReadoutWeightsOptimization(ExperimentBase):
         return [(a, int(4 * L_clks)) for a in vec]
 
     def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
-        S = analysis.data.get("S")
-        if S is None:
+        g_trace = analysis.data.get("g_trace")
+        e_trace = analysis.data.get("e_trace")
+        time_list = analysis.data.get("time_list")
+        ge_diff_norm = analysis.metrics.get("ge_diff_norm")
+        ge_diff = analysis.metrics.get("ge_diff")
+
+        if g_trace is None or e_trace is None:
             return None
 
+        g_trace = np.asarray(g_trace)
+        e_trace = np.asarray(e_trace)
+
+        # Build time axis: prefer stored time_list, else use index
+        if time_list is not None:
+            t = np.asarray(time_list)
+        else:
+            t = np.arange(len(g_trace))
+
         if ax is None:
-            fig, ax = plt.subplots(figsize=(10, 5))
+            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(14, 5))
         else:
             fig = ax.figure
+            ax1, ax2, ax3 = ax, fig.add_subplot(132), fig.add_subplot(133)
 
-        ax.plot(np.real(S), label="I (integrated)")
-        ax.plot(np.imag(S), label="Q (integrated)")
-        ax.set_xlabel("Time Slice")
-        ax.set_ylabel("Integrated Signal")
-        ax.set_title("Readout Weights Optimization")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        # Panel 1: ground trace (legacy parity)
+        ax1.plot(t, g_trace.real, label="real")
+        ax1.plot(t, g_trace.imag, label="imag")
+        ax1.set_title("ground trace")
+        ax1.set_xlabel("time [ns]")
+        ax1.set_ylabel("demod [a.u.]")
+        ax1.legend()
+
+        # Panel 2: excited trace (legacy parity)
+        ax2.plot(t, e_trace.real, label="real")
+        ax2.plot(t, e_trace.imag, label="imag")
+        ax2.set_title("excited trace")
+        ax2.set_xlabel("time [ns]")
+        ax2.set_ylabel("demod [a.u.]")
+        ax2.legend()
+
+        # Panel 3: normalized vs unnormalized ge_diff (legacy parity)
+        if ge_diff_norm is not None:
+            ge_diff_norm = np.asarray(ge_diff_norm)
+            l1 = ax3.plot(t, ge_diff_norm.real, label="Re (norm)")
+            l2 = ax3.plot(t, ge_diff_norm.imag, label="Im (norm)")
+            ax3.set_title(r"|e$\rangle$ $-$ |g$\rangle$ (normalized)")
+            ax3.set_xlabel("time [ns]")
+            ax3.set_ylabel("norm diff [a.u.]")
+
+            if ge_diff is not None:
+                ge_diff = np.asarray(ge_diff)
+                ax3b = ax3.twinx()
+                l3 = ax3b.plot(t, ge_diff.real, "--", label="Re (unnorm)")
+                l4 = ax3b.plot(t, ge_diff.imag, "--", label="Im (unnorm)")
+                ax3b.set_ylabel("unnorm diff [a.u.]")
+                lines = l1 + l2 + l3 + l4
+                labels = [ln.get_label() for ln in lines]
+                ax3.legend(lines, labels, loc="best")
+            else:
+                ax3.legend()
+        else:
+            ax3.set_title("ge diff (not available)")
+
         plt.tight_layout()
         plt.show()
         return fig
@@ -1223,6 +1369,8 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         else:
             post_sel_policy = prep_policy or "NONE"
             post_sel_kwargs = dict(prep_kwargs or {})
+
+        self._show_analysis = show_analysis
 
         _logger.info("Butterfly measurement: n_samples=%d, policy=%r", n_samples, post_sel_policy)
 
@@ -1337,8 +1485,9 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                 if "t10" in bfly_out:
                     metrics["t10"] = float(bfly_out["t10"])
                 if "confusion_matrix" in bfly_out:
-                    cm = bfly_out["confusion_matrix"]
-                    metrics["confusion_matrix"] = cm.tolist() if hasattr(cm, 'tolist') else cm
+                    metrics["confusion_matrix"] = bfly_out["confusion_matrix"]
+                if "transition_matrix" in bfly_out:
+                    metrics["transition_matrix"] = bfly_out["transition_matrix"]
 
                 # Propagate Lambda_M validity (Section 2E)
                 lm_valid = bfly_out.get("Lambda_M_valid", True)
@@ -1362,6 +1511,14 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             except Exception as exc:
                 _logger.error("Unexpected error in butterfly analysis: %s", exc)
                 metadata["diagnostics"] = f"Unexpected butterfly error: {exc}"
+
+            # Extract acceptance statistics (legacy parity)
+            acceptance_rate = result.output.get("acceptance_rate")
+            average_tries = result.output.get("average_tries")
+            if acceptance_rate is not None:
+                metrics["acceptance_rate"] = float(np.mean(acceptance_rate))
+            if average_tries is not None:
+                metrics["average_tries"] = float(np.mean(average_tries))
 
         analysis = AnalysisResult.from_run(result, metrics=metrics, metadata=metadata)
 
@@ -1407,94 +1564,82 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             except Exception:
                 pass  # T1 correction is optional, never fail on it
 
+        # Legacy parity: show_analysis prints metrics and triggers discriminator plots
+        show_analysis = kw.get("show_analysis", getattr(self, "_show_analysis", False))
+        if show_analysis:
+            # Print headline metrics (legacy parity)
+            if "F" in metrics:
+                print(f"Fidelity of M1: {metrics['F']:.4f}")
+            if "Q" in metrics:
+                print(f"QND-ness of M1: {metrics['Q']:.4f}")
+            if "V" in metrics:
+                print(f"Visibility of M1: {metrics['V']:.4f}")
+
+            # Print probability table (legacy parity)
+            if "butterfly_df" in metrics:
+                print("\nSingle-shot outcome probabilities P(m_k | state_i):")
+                try:
+                    print(metrics["butterfly_df"].to_markdown(floatfmt=".4f"))
+                except Exception:
+                    print(metrics["butterfly_df"])
+
+            # Print confusion matrix (legacy parity)
+            if "confusion_matrix" in metrics:
+                print("\nMeasurement confusion matrix Lambda_M = P(m1 | state_i):")
+                cm = metrics["confusion_matrix"]
+                try:
+                    print(cm.to_markdown(floatfmt=".4f") if hasattr(cm, "to_markdown") else cm)
+                except Exception:
+                    print(cm)
+
+            # Print transition matrix (legacy parity)
+            if "transition_matrix" in metrics:
+                print("\nPost-measurement transition matrix T = P(state_o | state_i):")
+                tm = metrics["transition_matrix"]
+                try:
+                    print(tm.to_markdown(floatfmt=".4f") if hasattr(tm, "to_markdown") else tm)
+                except Exception:
+                    print(tm)
+
+            # Print acceptance statistics (legacy parity)
+            if "acceptance_rate" in metrics:
+                print(f"\nacceptance rate: {metrics['acceptance_rate']:.4f}")
+            if "average_tries" in metrics:
+                print(f"average tries: {metrics['average_tries']:.2f}")
+
+            # M0/M1/M2 discriminator plots (legacy parity)
+            if all(k in metrics for k in ("S0_g", "S0_e", "S1_g", "S1_e", "S2_g", "S2_e")):
+                try:
+                    two_state_discriminator(
+                        metrics["S0_g"].real, metrics["S0_g"].imag,
+                        metrics["S0_e"].real, metrics["S0_e"].imag,
+                        b_plot=True, plots=("raw_blob", "hist"), fig_title="M0 analysis",
+                    )
+                    two_state_discriminator(
+                        metrics["S1_g"].real, metrics["S1_g"].imag,
+                        metrics["S1_e"].real, metrics["S1_e"].imag,
+                        b_plot=True, plots=("rot_blob", "hist", "info"), fig_title="M1 analysis",
+                    )
+                    two_state_discriminator(
+                        metrics["S2_g"].real, metrics["S2_g"].imag,
+                        metrics["S2_e"].real, metrics["S2_e"].imag,
+                        b_plot=True, plots=("rot_blob", "hist", "info"), fig_title="M2 analysis",
+                    )
+                except Exception as exc:
+                    _logger.warning("M0/M1/M2 discriminator plots skipped: %s", exc)
+
         return analysis
 
     def plot(self, analysis: AnalysisResult, *, ax=None,
-             show_histogram: bool = False,
-             show_discriminator: bool = False, **kwargs):
+             show_discriminator: bool = True, **kwargs):
+        """Plot M0/M1/M2 discriminator analysis.
+
+        Legacy parity: butterfly metrics (F, Q, V, tables) are printed
+        by ``analyze(show_analysis=True)``, not plotted here.
+        """
         metrics = analysis.metrics
-        if not any(k in metrics for k in ("F", "Q", "V")):
-            return None
 
-        n_plots = 2 if show_histogram else 1
-        if ax is None:
-            fig, axes = plt.subplots(1, n_plots, figsize=(8 * n_plots, 5))
-            if n_plots == 1:
-                axes = [axes]
-        else:
-            fig = ax.figure
-            axes = [ax]
-            if show_histogram:
-                axes.append(fig.add_subplot(1, 2, 2))
-
-        # Panel 0: F/Q/V bar chart with Wilson CI error bars (Section 4B)
-        labels_frac, values_frac = [], []
-        for key in ("F", "Q", "V"):
-            if key in metrics:
-                labels_frac.append(key)
-                values_frac.append(metrics[key])
-
-        values_pct = [v * 100 for v in values_frac]
-
-        # Compute Wilson CI error bars
-        n_shots = 0
-        states = analysis.data.get("states")
-        if states is not None:
-            n_shots = len(np.asarray(states))
-        elif analysis.source and analysis.source.metadata:
-            n_shots = analysis.source.metadata.get("n_total", 0)
-
-        if n_shots > 0:
-            errors_lo, errors_hi = [], []
-            for frac in values_frac:
-                lo, hi = wilson_interval(frac, n_shots)
-                errors_lo.append((frac - lo) * 100)
-                errors_hi.append((hi - frac) * 100)
-            bars = axes[0].bar(labels_frac, values_pct,
-                               yerr=[errors_lo, errors_hi], capsize=5,
-                               color=["steelblue", "coral", "seagreen"])
-        else:
-            bars = axes[0].bar(labels_frac, values_pct,
-                               color=["steelblue", "coral", "seagreen"])
-
-        for bar, val in zip(bars, values_pct):
-            axes[0].text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
-                         f"{val:.1f}%", ha="center", va="bottom", fontsize=12)
-
-        axes[0].set_ylim(0, 110)
-        axes[0].set_ylabel("Percentage (%)")
-        axes[0].set_title("Butterfly Measurement Metrics")
-        axes[0].grid(True, alpha=0.3, axis="y")
-
-        # Panel 1: 2D histogram of M1 vs M2 outcomes (Section 4C)
-        if show_histogram and len(axes) > 1 and states is not None:
-            states_arr = np.asarray(states)
-            if states_arr.ndim == 3 and states_arr.shape[1] == 2 and states_arr.shape[2] == 3:
-                # Build 2x2 contingency: M1 vs M2 for ground-prepared branch
-                m1 = states_arr[:, 0, 1]
-                m2 = states_arr[:, 0, 2]
-                contingency = np.zeros((2, 2))
-                for a in (0, 1):
-                    for b in (0, 1):
-                        contingency[a, b] = np.sum((m1 == a) & (m2 == b))
-                contingency /= max(1, len(m1))
-
-                im = axes[1].imshow(contingency * 100, cmap="Blues", vmin=0)
-                axes[1].set_xticks([0, 1])
-                axes[1].set_yticks([0, 1])
-                axes[1].set_xticklabels(["M2=0", "M2=1"])
-                axes[1].set_yticklabels(["M1=0", "M1=1"])
-                for i in range(2):
-                    for j in range(2):
-                        axes[1].text(j, i, f"{contingency[i, j] * 100:.1f}%",
-                                     ha="center", va="center", fontsize=12)
-                axes[1].set_title("M1 vs M2 (|g> prep)")
-                fig.colorbar(im, ax=axes[1], shrink=0.8, label="%")
-
-        plt.tight_layout()
-        plt.show()
-
-        # M0/M1/M2 two-state discriminator plots (legacy parity: show_analysis)
+        # M0/M1/M2 two-state discriminator plots (legacy parity)
         if show_discriminator:
             S0_g = metrics.get("S0_g")
             S0_e = metrics.get("S0_e")
@@ -1523,7 +1668,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                 except Exception as exc:
                     _logger.warning("M0/M1/M2 discriminator plots skipped: %s", exc)
 
-        return fig
+        return None
 
 
 class CalibrateReadoutFull(ExperimentBase):
@@ -1599,6 +1744,11 @@ class CalibrateReadoutFull(ExperimentBase):
 
         results: dict[str, Any] = {}
 
+        # Default weight keys (overwritten if weight optimization runs)
+        opt_cos_key = cfg.cos_weight_key
+        opt_sin_key = cfg.sin_weight_key
+        opt_m_sin_key = cfg.m_sin_weight_key
+
         # Step 1: Weights optimization (runs once)
         if not cfg.skip_weights_optimization:
             _logger.info("Step 1: Weight optimization")
@@ -1609,10 +1759,17 @@ class CalibrateReadoutFull(ExperimentBase):
                 cfg.cos_weight_key, cfg.sin_weight_key, cfg.m_sin_weight_key,
                 r180=cfg.r180, n_avg=cfg.n_avg_weights,
                 persist=cfg.persist_weights,
+                set_measure_macro=True,
                 revert_on_no_improvement=cfg.revert_on_no_improvement,
                 **wopt_kw,
             )
             results["weights_optimization"] = wopt_result
+
+            # Analyze to register optimized weights and extract opt_*_key (legacy parity)
+            wopt_analysis = wopt.analyze(wopt_result)
+            opt_cos_key = wopt_analysis.metrics.get("opt_cos_key", opt_cos_key)
+            opt_sin_key = wopt_analysis.metrics.get("opt_sin_key", opt_sin_key)
+            opt_m_sin_key = wopt_analysis.metrics.get("opt_m_sin_key", opt_m_sin_key)
 
         # Steps 2+3: Iterative discrimination + butterfly (Section 3)
         ge_kw = dict(cfg.ge_kwargs)
@@ -1646,24 +1803,33 @@ class CalibrateReadoutFull(ExperimentBase):
                 eff_ro_op, eff_drive_freq,
                 r180=cfg.r180,
                 n_samples=n_disc,
+                base_weight_keys=(opt_cos_key, opt_sin_key, opt_m_sin_key),
+                update_measure_macro=True,
+                persist=True,
                 burn_rot_weights=cfg.burn_rot_weights,
                 blob_k_g=cfg.blob_k_g,
                 blob_k_e=cfg.blob_k_e,
                 **ge_kw,
             )
 
+            # Analyze GE discrimination BEFORE butterfly so PostSelectionConfig is set
+            ge_analysis = ge_disc.analyze(ge_result)
+            current_fidelity = ge_analysis.metrics.get("fidelity", 0.0)
+
             # Step 3: Butterfly measurement
             _logger.info("Step 3: Butterfly measurement (n_shots=%d)", cfg.n_shots_butterfly)
             bfly = ReadoutButterflyMeasurement(self._ctx)
+            bfly_show = bfly_kw.pop("show_analysis", cfg.display_analysis)
             bfly_result = bfly.run(
                 r180=cfg.r180,
                 n_samples=cfg.n_shots_butterfly,
+                show_analysis=bfly_show,
                 **bfly_kw,
             )
 
-            # Extract fidelity for convergence check
-            ge_analysis = ge_disc.analyze(ge_result)
-            current_fidelity = ge_analysis.metrics.get("fidelity", 0.0)
+            # Legacy parity: run analysis immediately to trigger inline prints + plots
+            if bfly_show:
+                bfly.analyze(bfly_result)
 
             iteration_results.append({
                 "ge_result": ge_result,
@@ -1730,44 +1896,35 @@ class CalibrateReadoutFull(ExperimentBase):
         return AnalysisResult(data={}, metrics=metrics, metadata=metadata)
 
     def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
+        """Print summary metrics from the full calibration pipeline.
+
+        Legacy parity: individual sub-experiments handle their own
+        plots (GE discrimination scatter, butterfly discriminator).
+        The pipeline itself prints a text summary.
+        """
         metrics = analysis.metrics
         if not metrics:
             return None
 
-        if ax is None:
-            fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-        else:
-            fig = ax.figure
-            axes = [ax, fig.add_subplot(122)]
+        # Print GE discrimination summary
+        if "ge_fidelity" in metrics:
+            print(f"GE Discrimination fidelity: {metrics['ge_fidelity']:.2f}%")
+        if "ge_angle" in metrics:
+            print(f"GE Discrimination angle: {metrics['ge_angle']:.4f} rad")
+        if "ge_threshold" in metrics:
+            print(f"GE Discrimination threshold: {metrics['ge_threshold']:.4g}")
 
-        # Discrimination fidelity
-        fid_keys = [k for k in metrics if k.startswith("ge_")]
-        if fid_keys:
-            labels = [k.replace("ge_", "") for k in fid_keys]
-            vals = [metrics[k] for k in fid_keys]
-            axes[0].bar(labels, vals)
-            axes[0].set_title("Discrimination Metrics")
-            axes[0].set_ylabel("Value")
-            axes[0].grid(True, alpha=0.3, axis="y")
+        # Print butterfly summary
+        if "bfly_F" in metrics:
+            print(f"Butterfly F: {metrics['bfly_F']:.4f}")
+        if "bfly_Q" in metrics:
+            print(f"Butterfly Q: {metrics['bfly_Q']:.4f}")
+        if "bfly_V" in metrics:
+            print(f"Butterfly V: {metrics['bfly_V']:.4f}")
+        if "n_iterations" in metrics:
+            print(f"Iterations: {metrics['n_iterations']}")
 
-        # Butterfly metrics
-        bfly_keys = [k for k in ("bfly_F", "bfly_Q", "bfly_V") if k in metrics]
-        if bfly_keys:
-            labels = [k.replace("bfly_", "") for k in bfly_keys]
-            # butterfly_metrics returns fractions (0-1); convert to percentages
-            vals = [metrics[k] * 100 for k in bfly_keys]
-            bars = axes[1].bar(labels, vals, color=["steelblue", "coral", "seagreen"])
-            for bar, val in zip(bars, vals):
-                axes[1].text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
-                        f"{val:.1f}%", ha="center", va="bottom")
-            axes[1].set_ylim(0, 110)
-            axes[1].set_title("Butterfly Metrics")
-            axes[1].set_ylabel("Percentage (%)")
-            axes[1].grid(True, alpha=0.3, axis="y")
-
-        plt.tight_layout()
-        plt.show()
-        return fig
+        return None
 
 
 class ReadoutAmpLenOpt(ExperimentBase):
