@@ -35,6 +35,7 @@ from ..devices.device_manager import DeviceManager
 from ..calibration.store import CalibrationStore
 from ..analysis.cQED_attributes import cQED_attributes
 from ..analysis.output import Output
+from ..core.persistence_policy import split_output_for_persistence
 
 _logger = get_logger(__name__)
 
@@ -303,12 +304,12 @@ class SessionManager:
         path = target / f"{stem}.npz"
 
         data = dict(output) if isinstance(output, Mapping) else output
-        arrays, meta = {}, {}
-        for k, v in data.items():
-            if isinstance(v, np.ndarray):
-                arrays[k] = v
-            else:
-                meta[k] = v
+        arrays, meta, dropped = split_output_for_persistence(data)
+        if dropped:
+            meta["_persistence"] = {
+                "raw_data_policy": "drop_shot_level_arrays",
+                "dropped_fields": dropped,
+            }
 
         np.savez_compressed(path, **arrays)
 

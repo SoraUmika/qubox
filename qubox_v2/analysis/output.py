@@ -1,5 +1,10 @@
 import numpy as np
 import os
+import json
+from pathlib import Path
+
+from ..core.persistence_policy import split_output_for_persistence
+
 class Output(dict):
     """
     Output is a subclass of dict used to store and process experiment results.
@@ -67,7 +72,17 @@ class Output(dict):
         Inputs:
           path: the file path (including filename) where the data should be saved.
         """
-        np.savez_compressed(path, **self)
+        target = Path(path)
+        arrays, meta, dropped = split_output_for_persistence(self)
+        if dropped:
+            meta["_persistence"] = {
+                "raw_data_policy": "drop_shot_level_arrays",
+                "dropped_fields": dropped,
+            }
+
+        np.savez_compressed(target, **arrays)
+        with open(target.with_suffix(".meta.json"), "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2, default=str)
 
     def load(self, path):
         """

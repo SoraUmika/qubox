@@ -33,6 +33,7 @@ from ..programs import cQED_programs
 from ..analysis import post_process as pp
 from ..analysis.output import Output
 from ..core.logging import get_logger
+from ..core.persistence_policy import sanitize_mapping_for_json
 from ..hardware.program_runner import RunResult
 
 if TYPE_CHECKING:
@@ -436,8 +437,14 @@ class ExperimentBase:
             "run_metadata": dict(getattr(run_result, "metadata", {}) or {}),
             "extra_metadata": extra_metadata or {},
         }
+        payload_sanitized, dropped = sanitize_mapping_for_json(payload)
+        if dropped:
+            payload_sanitized["_persistence"] = {
+                "raw_data_policy": "drop_shot_level_arrays",
+                "dropped_fields": dropped,
+            }
         with open(artifact_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, default=str)
+            json.dump(payload_sanitized, f, indent=2, default=str)
 
         if errors:
             _logger.warning(

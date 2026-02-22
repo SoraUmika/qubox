@@ -36,7 +36,7 @@ Strict separation between **source of truth** (human-authored or calibration-com
 | Config snapshots | `artifacts/` | `save_config_snapshot()` | Point-in-time session state |
 | Run summaries | `artifacts/` | `save_run_summary()` | Per-experiment execution records |
 | Calibration candidates | `artifacts/calibration_candidates/` | `guarded_calibration_commit()` | Rejected calibration proposals |
-| Calibration run logs | `artifacts/calibration_runs/` | Experiment classes | Per-calibration raw data |
+| Calibration run logs | `artifacts/calibration_runs/` | Experiment classes | Per-calibration processed summaries (no shot-level raw buffers) |
 
 ---
 
@@ -67,10 +67,18 @@ Strict separation between **source of truth** (human-authored or calibration-com
 │       └── reports/
 │           └── legacy_parity_*.md
 │
-└── data/                          # RAW EXPERIMENT DATA
+└── data/                          # EXPERIMENT OUTPUT (sanitized)
     └── <experiment_name>/
         └── <timestamp>/
-            └── output.npz
+                        ├── output.npz          # bounded-size arrays only
+                        └── output.meta.json    # derived metrics + metadata
+
+### Raw Data Persistence Rule
+
+- Raw shot-level arrays are **transient** and must not be serialized into
+    artifacts, calibration files, or session state.
+- Any payload field that scales with shot count is dropped by persistence
+    policy unless explicitly enabled in debug mode.
 ```
 
 ---

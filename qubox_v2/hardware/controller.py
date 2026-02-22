@@ -22,6 +22,7 @@ from octave_sdk import RFOutputMode, OctaveLOSource
 from qm import QuantumMachine, QuantumMachinesManager
 
 from ..core.errors import ConfigError, ConnectionError
+from ..core.persistence_policy import sanitize_mapping_for_json
 from ..core.utils import get_nested, key_like, numeric_keys_to_ints, require, with_retries
 from .config_engine import ConfigEngine, QM_TOPLEVEL_WHITELIST
 
@@ -477,8 +478,14 @@ class HardwareController:
             },
             "results": sa_results,
         }
+        payload_sanitized, dropped = sanitize_mapping_for_json(payload)
+        if dropped:
+            payload_sanitized["_persistence"] = {
+                "raw_data_policy": "drop_shot_level_arrays",
+                "dropped_fields": dropped,
+            }
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, default=str)
+            json.dump(payload_sanitized, f, indent=2, default=str)
         _logger.info("Saved auto mixer SA validation artifact: %s", path)
 
     # ── Manual calibration loop ───────────────────────────────

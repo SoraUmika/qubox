@@ -37,6 +37,7 @@ from ..devices.device_manager import DeviceManager
 from ..analysis.cQED_attributes import cQED_attributes
 from ..analysis.output import Output
 from ..analysis.post_selection import PostSelectionConfig
+from ..core.persistence_policy import split_output_for_persistence
 
 _logger = get_logger(__name__)
 
@@ -201,14 +202,14 @@ class ExperimentRunner:
         stem = f"{tag}_{ts}" if tag else ts
         path = target_folder / f"{stem}.npz"
 
-        # Separate numpy arrays from scalars
-        arrays, meta = {}, {}
+        # Separate persistable arrays from metadata and drop raw/large buffers
         data = dict(output) if isinstance(output, Mapping) else output
-        for k, v in data.items():
-            if isinstance(v, np.ndarray):
-                arrays[k] = v
-            else:
-                meta[k] = v
+        arrays, meta, dropped = split_output_for_persistence(data)
+        if dropped:
+            meta["_persistence"] = {
+                "raw_data_policy": "drop_shot_level_arrays",
+                "dropped_fields": dropped,
+            }
 
         np.savez_compressed(path, **arrays)
 

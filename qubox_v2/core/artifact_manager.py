@@ -15,6 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .persistence_policy import sanitize_mapping_for_json
+
 _logger = logging.getLogger(__name__)
 
 
@@ -161,8 +163,14 @@ class ArtifactManager:
 
     def _write_json(self, path: Path, data: dict) -> None:
         """Write JSON with consistent formatting."""
+        payload, dropped = sanitize_mapping_for_json(data)
+        if dropped:
+            payload["_persistence"] = {
+                "raw_data_policy": "drop_shot_level_arrays",
+                "dropped_fields": dropped,
+            }
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, default=_json_default, ensure_ascii=False)
+            json.dump(payload, f, indent=2, default=_json_default, ensure_ascii=False)
             f.write("\n")
 
 

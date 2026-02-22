@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from .persistence_policy import sanitize_mapping_for_json
+
 if TYPE_CHECKING:
     from ..experiments.session import SessionManager
     from ..hardware.program_runner import RunResult
@@ -146,8 +148,14 @@ def save_config_snapshot(
     except Exception as exc:
         snapshot["calibration_error"] = str(exc)
 
+    payload, dropped = sanitize_mapping_for_json(snapshot)
+    if dropped:
+        payload["_persistence"] = {
+            "raw_data_policy": "drop_shot_level_arrays",
+            "dropped_fields": dropped,
+        }
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(snapshot, f, indent=2, default=_json_serialiser)
+        json.dump(payload, f, indent=2, default=_json_serialiser)
 
     _logger.info("Config snapshot saved to %s", path)
     return path
@@ -214,8 +222,14 @@ def save_run_summary(
     if extra:
         summary["extra"] = extra
 
+    payload, dropped = sanitize_mapping_for_json(summary)
+    if dropped:
+        payload["_persistence"] = {
+            "raw_data_policy": "drop_shot_level_arrays",
+            "dropped_fields": dropped,
+        }
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2, default=_json_serialiser)
+        json.dump(payload, f, indent=2, default=_json_serialiser)
 
     _logger.info("Run summary saved to %s", path)
     return path

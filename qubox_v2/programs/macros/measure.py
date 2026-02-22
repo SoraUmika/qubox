@@ -10,6 +10,7 @@ from ...analysis.analysis_tools import (
     compile_1d_kde_to_grid, compile_2d_kde_to_grid
 )
 from ...analysis.post_selection import PostSelectionConfig
+from ...core.persistence_policy import sanitize_mapping_for_json
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,7 @@ class measureMacro:
     _state_counter: int = 0             # for auto-generated IDs
 
     _drive_frequency = None
+    _save_raw_data = False
     
     _ro_disc_params = {
         "threshold": None,
@@ -786,11 +788,18 @@ class measureMacro:
         if kde_obj is None:
             return None
             
-        return {
-            "dataset": kde_obj.dataset.tolist(),  # shape (d, n) where d=dimension, n=points
+        include_dataset = bool(getattr(measureMacro, "_save_raw_data", False))
+        out = {
             "covariance": kde_obj.covariance.tolist(),
-            "bw_method": kde_obj.covariance_factor(),  # Store the actual factor used
+            "bw_method": kde_obj.covariance_factor(),
+            "n_samples": int(kde_obj.dataset.shape[1]),
+            "dimension": int(kde_obj.dataset.shape[0]),
+            "serialization": "summary_only",
         }
+        if include_dataset:
+            out["dataset"] = kde_obj.dataset.tolist()
+            out["serialization"] = "full"
+        return out
     
     @staticmethod
     def _dict_to_kde(kde_dict):
@@ -808,6 +817,9 @@ class measureMacro:
             The reconstructed KDE object.
         """
         if kde_dict is None:
+            return None
+
+        if "dataset" not in kde_dict:
             return None
             
         from scipy.stats import gaussian_kde
@@ -915,18 +927,30 @@ class measureMacro:
         return {
             "_version": 5,
             "current": current_json,
+            "raw_data_persistence": bool(cls._save_raw_data),
         }
 
     @classmethod
     def save_json(cls, path: str) -> None:
+        payload, dropped = sanitize_mapping_for_json(cls.to_json_dict())
+        if dropped:
+            payload["_persistence"] = {
+                "raw_data_policy": "drop_shot_level_arrays",
+                "dropped_fields": dropped,
+            }
         with open(path, "w") as f:
             json.dump(
-                cls.to_json_dict(),
+                payload,
                 f,
                 indent=2,
                 default=complex_encoder,  # <-- handle complex types
             )
         logger.info("measureMacro state (current only, no stack) saved to %s", path)
+
+    @classmethod
+    def set_save_raw_data(cls, enabled: bool) -> None:
+        """Enable/disable raw-data persistence for debug-only workflows."""
+        cls._save_raw_data = bool(enabled)
 
     @classmethod
     def load_json(cls, path: str) -> None:

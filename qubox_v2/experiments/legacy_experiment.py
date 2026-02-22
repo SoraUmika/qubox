@@ -24,6 +24,7 @@ from ..hardware.qua_program_manager import QuaProgramManager
 from ..pulses.manager import PulseOperationManager, PulseOp, MAX_AMPLITUDE
 from ..programs.macros.measure import measureMacro
 from ..core.logging import temporarily_set_levels
+from ..core.persistence_policy import split_output_for_persistence
 from ..devices.device_manager import DeviceManager
 from qualang_tools.config.waveform_tools import drag_gaussian_pulse_waveforms
 from qualang_tools.units import unit as qm_unit
@@ -484,8 +485,11 @@ class cQED_Experiment:
         return dst
         
     def save_output(self, output: Output, target_folder: str, save_cqed_attributes=True):
+        import json
+
+        data = dict(output)
         if save_cqed_attributes:
-            output["cQED_params"] = self.attributes.to_dict()
+            data["cQED_params"] = self.attributes.to_dict()
 
         folder_path = self.base_path / target_folder
         
@@ -496,7 +500,16 @@ class cQED_Experiment:
         filename_unique = f"{timestamp}.npz"
         save_path = folder_path / filename_unique
         
-        output.save(save_path)
+        arrays, meta, dropped = split_output_for_persistence(data)
+        if dropped:
+            meta["_persistence"] = {
+                "raw_data_policy": "drop_shot_level_arrays",
+                "dropped_fields": dropped,
+            }
+
+        np.savez_compressed(save_path, **arrays)
+        with open(save_path.with_suffix(".meta.json"), "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2, default=str)
 
     def save_attributes(self):
         self.attributes.to_json(self.base_path / 'cqed_params.json')

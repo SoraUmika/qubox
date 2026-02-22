@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.logging import get_logger
+from ..core.persistence_policy import sanitize_mapping_for_json
 from .models import (
     CalibrationData,
     CoherenceParams,
@@ -314,9 +315,15 @@ class CalibrationStore:
         tmp_fd, tmp_path = tempfile.mkstemp(
             dir=self._path.parent, prefix=".cal_tmp_", suffix=".json",
         )
+        payload, dropped = sanitize_mapping_for_json(data.model_dump())
+        if dropped:
+            payload["_persistence"] = {
+                "raw_data_policy": "drop_shot_level_arrays",
+                "dropped_fields": dropped,
+            }
         try:
             with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-                json.dump(data.model_dump(), f, indent=2, default=str)
+                json.dump(payload, f, indent=2, default=str)
             os.replace(tmp_path, self._path)
         except BaseException:
             try:
