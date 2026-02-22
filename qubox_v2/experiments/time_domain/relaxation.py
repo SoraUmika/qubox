@@ -68,8 +68,16 @@ class T1Relaxation(ExperimentBase):
         analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics)
 
         if update_calibration and self.calibration_store and fit.params:
-            self.calibration_store.set_coherence(
-                self.attr.qb_el, T1=fit.params["T1"],
+            min_r2 = float(kw.get("min_r2", 0.80))
+            self.guarded_calibration_commit(
+                analysis=analysis,
+                run_result=result,
+                calibration_tag="t1_relaxation",
+                min_r2=min_r2,
+                required_metrics={"T1": (1.0, None)},
+                apply_update=lambda: self.calibration_store.set_coherence(
+                    self.attr.qb_el, T1=fit.params["T1"],
+                ),
             )
 
         return analysis

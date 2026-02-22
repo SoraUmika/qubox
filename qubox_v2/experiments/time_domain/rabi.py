@@ -78,8 +78,19 @@ class TemporalRabi(ExperimentBase):
 
         if update_calibration and self.calibration_store and fit.params:
             if fit.params["f_Rabi"] != 0:
-                self.calibration_store.set_pulse_calibration(
-                    name="x180", pi_length=1.0 / (2 * fit.params["f_Rabi"]),
+                min_r2 = float(kw.get("min_r2", 0.80))
+                sweep_lo = float(np.min(durations))
+                sweep_hi = float(np.max(durations))
+                self.guarded_calibration_commit(
+                    analysis=analysis,
+                    run_result=result,
+                    calibration_tag="temporal_rabi_x180",
+                    min_r2=min_r2,
+                    required_metrics={"pi_length": (sweep_lo, sweep_hi)},
+                    extra_metadata={"sweep_min_ns": sweep_lo, "sweep_max_ns": sweep_hi},
+                    apply_update=lambda: self.calibration_store.set_pulse_calibration(
+                        name="x180", pi_length=1.0 / (2 * fit.params["f_Rabi"]),
+                    ),
                 )
 
         return analysis
@@ -187,8 +198,24 @@ class PowerRabi(ExperimentBase):
         analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics)
 
         if update_calibration and self.calibration_store and fit.params:
-            self.calibration_store.set_pulse_calibration(
-                name="x180", amplitude=fit.params["g_pi"],
+            min_r2 = float(kw.get("min_r2", 0.80))
+            required = {
+                "g_pi": (float(np.min(gains)), float(np.max(gains))),
+            }
+
+            self.guarded_calibration_commit(
+                analysis=analysis,
+                run_result=result,
+                calibration_tag="power_rabi_x180",
+                min_r2=min_r2,
+                required_metrics=required,
+                extra_metadata={
+                    "sweep_min": float(np.min(gains)),
+                    "sweep_max": float(np.max(gains)),
+                },
+                apply_update=lambda: self.calibration_store.set_pulse_calibration(
+                    name="x180", amplitude=fit.params["g_pi"],
+                ),
             )
 
         return analysis

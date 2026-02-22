@@ -84,6 +84,7 @@ class PulseOperationManager:
         self._perm      = _ResourceStore()
         self._volatile  = _ResourceStore()
         self.elements   = elements or []
+        self._pulse_definitions: Dict[str, Dict[str, Any]] = {}
         self._init_defaults()
 
     def _is_reserved_pulse_name(self, name: str) -> bool:
@@ -292,19 +293,111 @@ class PulseOperationManager:
     
     # ---------- save / load permanent part only -----------------
     def save_json(self, path: str):
-        json.dump(self._perm.as_dict(), open(path, "w"), indent=2)
+        payload = dict(self._perm.as_dict())
+        payload["_schema_version"] = 2
+        payload["pulse_definitions"] = dict(self._pulse_definitions)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
 
     @classmethod
     def from_json(cls, path: str) -> "PulseOperationManager":
         mgr = cls()
         mgr._perm.clear()
-        mgr._perm.load_from_dict(json.load(open(path)))
+        with open(path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        mgr._perm.load_from_dict(loaded)
+        mgr._pulse_definitions = dict(loaded.get("pulse_definitions", {}))
+        if mgr._pulse_definitions:
+            mgr.materialize_pulse_definitions(override=False, persist=True)
         mgr._volatile.clear()
         _logger.info(f"Loaded pulse files from: {path}")
         return mgr
 
     def clear_temporary(self):                 # toss volatile store
         self._volatile.clear()
+
+    # ---------- high-level pulse definitions (schema v2) ---------
+    def set_pulse_definition(self, name: str, definition: Dict[str, Any]) -> None:
+        """Store a high-level pulse definition for deterministic rebuild."""
+        if not isinstance(definition, dict):
+            raise TypeError("definition must be a dict")
+        self._pulse_definitions[str(name)] = dict(definition)
+
+    def get_pulse_definitions(self) -> Dict[str, Dict[str, Any]]:
+        return dict(self._pulse_definitions)
+
+    def materialize_pulse_definitions(self, *, override: bool = False, persist: bool = True) -> None:
+        """Build concrete waveform/pulse entries from stored high-level definitions.
+
+        Supported types:
+          - ``drag_gaussian``
+          - ``constant``
+        """
+        if not self._pulse_definitions:
+            return
+
+        for def_name, d in self._pulse_definitions.items():
+            d_type = str(d.get("type", "")).lower()
+            element = d.get("element")
+            op = d.get("op") or def_name
+            if not element:
+                continue
+
+            pulse_name = d.get("pulse_name", f"{op}_pulse")
+            I_wf_name = d.get("I_wf_name", f"{op}_I_wf")
+            Q_wf_name = d.get("Q_wf_name", f"{op}_Q_wf")
+
+            if d_type == "drag_gaussian":
+                from ..tools.waveforms import drag_gaussian_pulse_waveforms
+
+                amp = float(d.get("amplitude", BASE_AMPLITUDE))
+                length = int(d.get("length", 16))
+                sigma = float(d.get("sigma", length / 6))
+                alpha = float(d.get("drag_coeff", 0.0))
+                anh = float(d.get("anharmonicity", -200e6))
+                I, Q = drag_gaussian_pulse_waveforms(
+                    amplitude=amp,
+                    length=length,
+                    sigma=sigma,
+                    alpha=alpha,
+                    anharmonicity=anh,
+                )
+                try:
+                    self.create_control_pulse(
+                        element=element,
+                        op=str(op),
+                        length=length,
+                        pulse_name=pulse_name,
+                        I_wf_name=I_wf_name,
+                        Q_wf_name=Q_wf_name,
+                        I_samples=I,
+                        Q_samples=Q,
+                        persist=persist,
+                        override=override,
+                    )
+                except Exception:
+                    if override:
+                        raise
+            elif d_type == "constant":
+                length = int(d.get("length", 16))
+                amp_i = float(d.get("amplitude_I", d.get("amplitude", BASE_AMPLITUDE)))
+                amp_q = float(d.get("amplitude_Q", 0.0))
+                try:
+                    self.create_control_pulse(
+                        element=element,
+                        op=str(op),
+                        length=length,
+                        pulse_name=pulse_name,
+                        I_wf_name=I_wf_name,
+                        Q_wf_name=Q_wf_name,
+                        I_samples=[amp_i] * length,
+                        Q_samples=[amp_q] * length,
+                        persist=persist,
+                        override=override,
+                    )
+                except Exception:
+                    if override:
+                        raise
 
     # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     #  Low-level validators

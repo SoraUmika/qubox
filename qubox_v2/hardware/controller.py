@@ -8,6 +8,8 @@ provides methods to interact with hardware in real time.
 from __future__ import annotations
 
 import contextlib
+import datetime
+import json
 import logging
 import threading
 from copy import deepcopy
@@ -306,6 +308,9 @@ class HardwareController:
         method: Literal["auto", "manual_scan_2d", "manual_minimizer"] = "auto",
         sa_device_name: str = "sa124b",
         mixer_cal_config: Any = None,
+        auto_sa_validate: bool = False,
+        auto_sa_restart_qm: bool = False,
+        auto_sa_device_name: str = "sa124b",
     ) -> None:
         """Calibrate Octave IQ mixer for one or more elements.
 
@@ -324,7 +329,17 @@ class HardwareController:
 
         # ── Auto calibration (existing behaviour) ─────────────
         if method == "auto":
-            self._calibrate_auto(el, target_LO, target_IF, save_to_db, output_mode)
+            self._calibrate_auto(
+                el,
+                target_LO,
+                target_IF,
+                save_to_db,
+                output_mode,
+                auto_sa_validate=auto_sa_validate,
+                auto_sa_restart_qm=auto_sa_restart_qm,
+                auto_sa_device_name=auto_sa_device_name,
+                mixer_cal_config=mixer_cal_config,
+            )
             return
 
         # ── Manual calibration ────────────────────────────────
@@ -365,7 +380,31 @@ class HardwareController:
         target_IF: Optional[Union[float, list[float]]],
         save_to_db: bool,
         output_mode: RFOutputMode,
+        *,
+        auto_sa_validate: bool = False,
+        auto_sa_restart_qm: bool = False,
+        auto_sa_device_name: str = "sa124b",
+        mixer_cal_config: Any = None,
     ) -> None:
+        sa_helper = None
+        sa_results: list[dict[str, Any]] = []
+        cfg = None
+
+        if auto_sa_validate:
+            from ..calibration.mixer_calibration import MixerCalibrationConfig, SAMeasurementHelper
+
+            if self._device_manager is None:
+                raise ConfigError("DeviceManager required for auto SA validation. Set it via set_device_manager().")
+            sa_dev = self._device_manager.get(auto_sa_device_name)
+            if sa_dev is None:
+                raise ConfigError(f"SA device '{auto_sa_device_name}' not found in DeviceManager.")
+            cfg = (
+                mixer_cal_config
+                if isinstance(mixer_cal_config, MixerCalibrationConfig)
+                else MixerCalibrationConfig()
+            )
+            sa_helper = SAMeasurementHelper(sa_dev, cfg)
+
         def _calibrate_one(e: str, lo_val, if_val):
             if lo_val is None:
                 lo_val = float(self.get_element_lo(e))
@@ -375,12 +414,28 @@ class HardwareController:
             self.qm.calibrate_element(e, {lo_val: (if_val,)}, save_to_db=save_to_db)
             self.set_octave_output(e, output_mode)
 
-        if el is None:
-            for e in self.elements:
-                _calibrate_one(e, None, None)
-            return
+            if sa_helper is not None:
+                tones = sa_helper.measure_tones(float(lo_val), float(if_val))
+                sa_results.append(
+                    {
+                        "element": e,
+                        "lo_hz": float(lo_val),
+                        "if_hz": float(if_val),
+                        "sideband": tones.get("sideband"),
+                        "f_target_hz": float(tones.get("f_target", float("nan"))),
+                        "f_image_hz": float(tones.get("f_image", float("nan"))),
+                        "P_target_dBm": float(tones.get("P_des_dBm", float("nan"))),
+                        "P_lo_dBm": float(tones.get("P_LO_dBm", float("nan"))),
+                        "P_image_dBm": float(tones.get("P_img_dBm", float("nan"))),
+                        "lo_suppression_dBc": float(tones.get("LO_leak_dBc", float("nan"))),
+                        "irr_dBc": float(tones.get("IRR_dBc", float("nan"))),
+                    }
+                )
 
-        elements = [el] if isinstance(el, str) else list(el)
+        if el is None:
+            elements = list(self.elements.keys())
+        else:
+            elements = [el] if isinstance(el, str) else list(el)
         n = len(elements)
 
         lo_list = list(target_LO) if isinstance(target_LO, (list, tuple)) else [target_LO] * n
@@ -388,6 +443,43 @@ class HardwareController:
 
         for e, lo_val, if_val in zip(elements, lo_list, if_list):
             _calibrate_one(e, lo_val, if_val)
+
+        if auto_sa_validate:
+            self._write_auto_calibration_artifact(sa_results, cfg, auto_sa_device_name)
+
+        if auto_sa_restart_qm:
+            _logger.info("Restarting QM after auto mixer calibration.")
+            self.apply_changes()
+
+    def _write_auto_calibration_artifact(
+        self,
+        sa_results: list[dict[str, Any]],
+        cfg: Any,
+        sa_device_name: str,
+    ) -> None:
+        base = self._cal_db_dir or Path(".")
+        art_dir = base / "artifacts" / "calibration_runs"
+        art_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = art_dir / f"auto_mixer_sa_validation_{ts}.json"
+
+        payload = {
+            "timestamp": ts,
+            "method": "auto",
+            "sa_device": sa_device_name,
+            "sa_config": {
+                "sideband": getattr(cfg, "sideband", None),
+                "sa_span_hz": getattr(cfg, "sa_span_hz", None),
+                "sa_rbw": getattr(cfg, "sa_rbw", None),
+                "sa_vbw": getattr(cfg, "sa_vbw", None),
+                "sa_avg": getattr(cfg, "sa_avg", None),
+                "sa_level": getattr(cfg, "sa_level", None),
+            },
+            "results": sa_results,
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, default=str)
+        _logger.info("Saved auto mixer SA validation artifact: %s", path)
 
     # ── Manual calibration loop ───────────────────────────────
     def _manual_calibrate_elements(

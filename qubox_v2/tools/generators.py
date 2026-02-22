@@ -1,4 +1,6 @@
 
+import numpy as np
+
 from .waveforms import *
 from ..pulses.manager import PulseOperationManager
 from typing import Dict, Iterable, Tuple, Union, Optional
@@ -291,4 +293,166 @@ def register_rotations_from_ref_iq(
         created[alias_op] = (I_samp, Q_samp)
 
     return created
+
+
+def ensure_displacement_ops(
+    pom: PulseOperationManager,
+    *,
+    element: str = "storage",
+    n_list: list[int] | None = None,
+    n_max: int = 3,
+    alpha_list: list[complex] | None = None,
+    coherent_amp: float = 0.2,
+    coherent_len: int = 100,
+    b_alpha: complex = 1.0,
+    persist: bool = False,
+    override: bool = True,
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Generate displacement pulses ``disp_n0, disp_n1, ...`` for Fock-resolved experiments.
+
+    This is the canonical helper for creating displacement pulses that the
+    Fock-resolved experiment classes expect.  It registers each displacement
+    as a control pulse on the specified storage element.
+
+    Parameters
+    ----------
+    pom : PulseOperationManager
+        Pulse manager to register pulses into.
+    element : str
+        Storage cavity element name (default ``"storage"``).
+    n_list : list[int], optional
+        Fock numbers to generate displacements for.  Defaults to
+        ``range(n_max)``.
+    n_max : int
+        If *n_list* is None, generate ``disp_n0`` through ``disp_n{n_max-1}``.
+    alpha_list : list[complex], optional
+        Displacement amplitudes per Fock number.  Length must match *n_list*.
+        If None, uses linearly scaled amplitudes from ``b_alpha``:
+        ``alpha_n = b_alpha * sqrt(n+1) / sqrt(1)`` (placeholder scaling).
+    coherent_amp : float
+        Base waveform amplitude for the constant displacement pulse.
+    coherent_len : int
+        Pulse length in ns (must be >= 16 and divisible by 4).
+    b_alpha : complex
+        Reference displacement alpha for scaling.
+    persist : bool
+        If True, store in permanent POM store.
+    override : bool
+        If True, overwrite existing pulses.
+
+    Returns
+    -------
+    dict[str, tuple[np.ndarray, np.ndarray]]
+        Mapping from op name (e.g. ``"disp_n0"``) to ``(I_wf, Q_wf)``.
+
+    Example
+    -------
+    >>> from qubox_v2.tools.generators import ensure_displacement_ops
+    >>> created = ensure_displacement_ops(
+    ...     session.pulse_mgr,
+    ...     element="storage",
+    ...     n_max=3,
+    ...     coherent_amp=0.2,
+    ...     coherent_len=100,
+    ... )
+    >>> session.burn_pulses()
+    """
+    if n_list is None:
+        n_list = list(range(n_max))
+    if not n_list:
+        return {}
+
+    # Validate pulse length
+    if coherent_len < 16:
+        raise ValueError(f"coherent_len must be >= 16, got {coherent_len}")
+    # Pad to multiple of 4
+    pad_len = coherent_len + ((-coherent_len) % 4)
+
+    # Build alpha list if not provided
+    if alpha_list is None:
+        if abs(b_alpha) == 0:
+            raise ValueError("b_alpha must be nonzero for auto-scaling")
+        # Simple scaling: alpha_n proportional to sqrt(n+1)
+        alpha_list = [b_alpha * np.sqrt(n + 1) for n in n_list]
+
+    if len(alpha_list) != len(n_list):
+        raise ValueError(
+            f"alpha_list length ({len(alpha_list)}) must match "
+            f"n_list length ({len(n_list)})"
+        )
+
+    created: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+    # Reference template: constant amplitude I, zero Q
+    I_tpl = np.ones(pad_len, dtype=float) * float(coherent_amp)
+    Q_tpl = np.zeros(pad_len, dtype=float)
+
+    for n, alpha_n in zip(n_list, alpha_list):
+        alpha_n = complex(alpha_n)
+        op_name = f"disp_n{n}"
+
+        # Scale by ratio to reference
+        if abs(b_alpha) > 0:
+            ratio = alpha_n / complex(b_alpha)
+        else:
+            ratio = complex(1.0, 0.0)
+
+        c, s = float(np.real(ratio)), float(np.imag(ratio))
+        I_new = c * I_tpl - s * Q_tpl
+        Q_new = s * I_tpl + c * Q_tpl
+
+        # Clip to MAX_AMPLITUDE
+        from ..core.types import MAX_AMPLITUDE
+        amp_max = max(np.max(np.abs(I_new)), np.max(np.abs(Q_new)))
+        if amp_max > MAX_AMPLITUDE:
+            scale = MAX_AMPLITUDE / amp_max
+            I_new *= scale
+            Q_new *= scale
+
+        pom.create_control_pulse(
+            element=element,
+            op=op_name,
+            length=pad_len,
+            pulse_name=f"{op_name}_pulse",
+            I_wf_name=f"{op_name}_I_wf",
+            Q_wf_name=f"{op_name}_Q_wf",
+            I_samples=I_new,
+            Q_samples=Q_new,
+            persist=persist,
+            override=override,
+        )
+        created[op_name] = (I_new, Q_new)
+
+    return created
+
+
+def validate_displacement_ops(
+    pom: PulseOperationManager,
+    element: str,
+    disp_names: list[str],
+) -> list[str]:
+    """Check that displacement ops exist for an element.
+
+    Returns a list of missing operation names.  If the list is empty,
+    all required displacement pulses are registered.
+
+    Parameters
+    ----------
+    pom : PulseOperationManager
+        Pulse manager to check.
+    element : str
+        Storage element name.
+    disp_names : list[str]
+        Expected displacement operation names (e.g. ``["disp_n0", "disp_n1"]``).
+
+    Raises
+    ------
+    Nothing — returns missing names for the caller to handle.
+    """
+    missing = []
+    for name in disp_names:
+        info = pom.get_pulseOp_by_element_op(element, name, strict=False)
+        if info is None:
+            missing.append(name)
+    return missing
 

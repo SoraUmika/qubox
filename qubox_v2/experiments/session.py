@@ -18,6 +18,8 @@ Usage::
 from __future__ import annotations
 
 import logging
+import json
+import warnings
 from pathlib import Path
 from typing import Any, Optional
 
@@ -135,6 +137,7 @@ class SessionManager:
 
         # --- 7. Experiment attributes (cQED parameters) ---
         self.attributes = self._load_attributes()
+        self._runtime_settings = self._load_runtime_settings()
 
         _logger.info("SessionManager ready.")
 
@@ -188,6 +191,79 @@ class SessionManager:
             _logger.info("No cqed_params.json found — using default attributes")
             return cQED_attributes()
 
+    def _runtime_settings_path(self) -> Path:
+        return self.experiment_path / "config" / "session_runtime.json"
+
+    def _load_runtime_settings(self) -> dict[str, Any]:
+        """Load runtime/session-owned workflow settings.
+
+        Precedence policy for migrated workflow knobs:
+        1) ``config/session_runtime.json``
+        2) deprecated ``cqed_params.json`` fields (fallback with warning)
+        """
+        path = self._runtime_settings_path()
+        data: dict[str, Any] = {}
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    data = loaded
+                    _logger.info("Loaded runtime settings from %s", path)
+            except Exception as exc:
+                _logger.warning("Failed to load runtime settings from %s: %s", path, exc)
+
+        attr = self.attributes
+        defaults = {
+            "ro_therm_clks": getattr(attr, "ro_therm_clks", None),
+            "qb_therm_clks": getattr(attr, "qb_therm_clks", None),
+            "st_therm_clks": getattr(attr, "st_therm_clks", None),
+            "b_coherent_amp": getattr(attr, "b_coherent_amp", None),
+            "b_coherent_len": getattr(attr, "b_coherent_len", None),
+            "b_alpha": getattr(attr, "b_alpha", None),
+        }
+        for key, fallback in defaults.items():
+            if key not in data and fallback is not None:
+                data[key] = fallback
+                warnings.warn(
+                    f"Using deprecated cqed_params.json fallback for '{key}'. "
+                    "Move this setting to config/session_runtime.json.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
+        return data
+
+    def save_runtime_settings(self) -> Path:
+        path = self._runtime_settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self._runtime_settings, f, indent=2, default=str)
+        _logger.info("Saved runtime settings to %s", path)
+        return path
+
+    def get_runtime_setting(self, key: str, default: Any = None) -> Any:
+        return self._runtime_settings.get(key, default)
+
+    def set_runtime_setting(self, key: str, value: Any, *, persist: bool = True) -> None:
+        self._runtime_settings[key] = value
+        if persist:
+            self.save_runtime_settings()
+
+    def get_therm_clks(self, channel: str, default: int | None = None) -> int | None:
+        key = f"{channel}_therm_clks"
+        val = self.get_runtime_setting(key, None)
+        if val is None:
+            return default
+        return int(val)
+
+    def get_displacement_reference(self) -> dict[str, Any]:
+        return {
+            "coherent_amp": self.get_runtime_setting("b_coherent_amp", None),
+            "coherent_len": self.get_runtime_setting("b_coherent_len", None),
+            "b_alpha": self.get_runtime_setting("b_alpha", None),
+        }
+
     # ------------------------------------------------------------------
     # Pulse helpers
     # ------------------------------------------------------------------
@@ -204,6 +280,14 @@ class SessionManager:
         p = self.experiment_path / "config" / "cqed_params.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         self.attributes.save_json(p)
+
+    def save_pulses(self, path: str | Path | None = None) -> Path:
+        """Persist PulseOperationManager permanent store to pulses.json."""
+        dst = Path(path) if path is not None else (self.experiment_path / "config" / "pulses.json")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        self.pulse_mgr.save_json(str(dst))
+        _logger.info("Saved pulse manager state to %s", dst)
+        return dst
 
     def save_output(self, output: Output | dict, tag: str = "") -> Path:
         """Save experiment output data to disk."""
@@ -245,7 +329,134 @@ class SessionManager:
         self.config_engine.merge_pulses(self.pulse_mgr)
         self.hardware.open_qm()
         self._load_measure_config()
+        self.validate_runtime_elements(auto_map=True, verbose=True)
         return self
+
+    def validate_runtime_elements(self, *, auto_map: bool = True, verbose: bool = True) -> dict[str, Any]:
+        """Validate configured attributes against live QM element names.
+
+        Returns a summary with available/missing/mapped entries and applies safe
+        aliases when ``auto_map=True``.
+        """
+        qm_elements = set((self.hardware.elements or {}).keys())
+        attr = self.attributes
+        requested = {
+            "ro_el": getattr(attr, "ro_el", None),
+            "qb_el": getattr(attr, "qb_el", None),
+            "st_el": getattr(attr, "st_el", None),
+        }
+
+        mapped: dict[str, str] = {}
+        missing: dict[str, str] = {}
+        notes: list[str] = []
+
+        for field, name in requested.items():
+            if not name:
+                continue
+            if name in qm_elements:
+                mapped[field] = name
+                continue
+            low = str(name).lower()
+            candidate = None
+            if low == "readout" and "resonator" in qm_elements:
+                candidate = "resonator"
+            if candidate and auto_map:
+                setattr(attr, field, candidate)
+                mapped[field] = candidate
+                notes.append(f"{field}: '{name}' -> '{candidate}'")
+            else:
+                missing[field] = name
+
+        summary = {
+            "available": sorted(qm_elements),
+            "requested": requested,
+            "mapped": mapped,
+            "missing": missing,
+            "notes": notes,
+        }
+
+        if verbose:
+            _logger.info("Runtime element validation: available=%s", sorted(qm_elements))
+            for note in notes:
+                _logger.warning("Runtime element auto-map applied: %s", note)
+            for field, name in missing.items():
+                _logger.error(
+                    "Runtime element mismatch: %s='%s' not in QM config. Available=%s",
+                    field,
+                    name,
+                    sorted(qm_elements),
+                )
+        return summary
+
+    def override_readout_operation(
+        self,
+        *,
+        element: str,
+        operation: str,
+        weights: list | tuple | str | None = None,
+        drive_frequency: float | None = None,
+        demod: str | None = None,
+        threshold: float | None = None,
+        weight_len: int | None = None,
+        apply_to_attributes: bool = True,
+        persist_measure_config: bool = True,
+    ) -> dict[str, Any]:
+        """Override active readout op/weights at runtime via ``measureMacro``."""
+        from ..programs.macros.measure import measureMacro
+
+        pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
+        if pulse_info is None:
+            cfg = self.config_engine.build_qm_config()
+            available_ops = sorted((cfg.get("elements", {}).get(element, {}).get("operations", {}) or {}).keys())
+            raise ValueError(
+                f"No pulse mapping for element={element!r}, operation={operation!r}. "
+                f"Available operations for element: {available_ops}"
+            )
+
+        selected_weights = weights
+        if selected_weights is None:
+            iw_map = pulse_info.int_weights_mapping or {}
+            if all(k in iw_map for k in ("cos", "sin", "minus_sin")):
+                selected_weights = [["cos", "sin"], ["minus_sin", "cos"]]
+            else:
+                selected_weights = [["cos", "sin"], ["minus_sin", "cos"]]
+
+        measureMacro.set_pulse_op(
+            pulse_info,
+            active_op=operation,
+            weights=selected_weights,
+            weight_len=(weight_len or pulse_info.length),
+        )
+
+        if drive_frequency is not None:
+            measureMacro.set_drive_frequency(drive_frequency)
+
+        if demod:
+            from qm.qua import dual_demod
+            if demod == "dual_demod.full":
+                measureMacro.set_demodulator(dual_demod.full)
+
+        if threshold is not None and hasattr(measureMacro, "_ro_disc_params"):
+            measureMacro._ro_disc_params["threshold"] = float(threshold)
+
+        if apply_to_attributes:
+            self.attributes.ro_el = element
+
+        dst = None
+        if persist_measure_config:
+            dst = self.experiment_path / "config" / "measureConfig.json"
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            measureMacro.save_json(str(dst))
+
+        return {
+            "element": element,
+            "operation": operation,
+            "pulse": pulse_info.pulse,
+            "weights": selected_weights,
+            "attributes_ro_el": self.attributes.ro_el,
+            "measure_config_path": str(dst) if dst else None,
+            "qm_config_entry": f"elements.{element}.operations.{operation} -> {pulse_info.pulse}",
+        }
 
     def _load_measure_config(self) -> None:
         """Load measureMacro state from measureConfig.json if it exists."""
@@ -275,6 +486,14 @@ class SessionManager:
                 handle.disconnect()
             except Exception as e:
                 _logger.warning("Error disconnecting device '%s': %s", name, e)
+        try:
+            self.save_pulses()
+        except Exception as e:
+            _logger.warning("Error saving pulses: %s", e)
+        try:
+            self.save_runtime_settings()
+        except Exception as e:
+            _logger.warning("Error saving runtime settings: %s", e)
         self.calibration.save()
         _logger.info("SessionManager closed.")
 

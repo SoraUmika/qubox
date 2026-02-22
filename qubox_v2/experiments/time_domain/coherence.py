@@ -82,8 +82,16 @@ class T2Ramsey(ExperimentBase):
         analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics)
 
         if update_calibration and self.calibration_store and fit.params:
-            self.calibration_store.set_coherence(
-                self.attr.qb_el, T2_ramsey=fit.params["T2"],
+            min_r2 = float(kw.get("min_r2", 0.75))
+            self.guarded_calibration_commit(
+                analysis=analysis,
+                run_result=result,
+                calibration_tag="t2_ramsey",
+                min_r2=min_r2,
+                required_metrics={"T2_star": (1.0, None)},
+                apply_update=lambda: self.calibration_store.set_coherence(
+                    self.attr.qb_el, T2_ramsey=fit.params["T2"],
+                ),
             )
 
         return analysis
@@ -176,8 +184,16 @@ class T2Echo(ExperimentBase):
         analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics)
 
         if update_calibration and self.calibration_store and fit.params:
-            self.calibration_store.set_coherence(
-                self.attr.qb_el, T2_echo=fit.params["T2_echo"],
+            min_r2 = float(kw.get("min_r2", 0.75))
+            self.guarded_calibration_commit(
+                analysis=analysis,
+                run_result=result,
+                calibration_tag="t2_echo",
+                min_r2=min_r2,
+                required_metrics={"T2_echo": (1.0, None)},
+                apply_update=lambda: self.calibration_store.set_coherence(
+                    self.attr.qb_el, T2_echo=fit.params["T2_echo"],
+                ),
             )
 
         return analysis

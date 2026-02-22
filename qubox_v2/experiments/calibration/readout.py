@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 from typing import Any, Mapping, Tuple
 
 import numpy as np
@@ -37,9 +38,10 @@ class IQBlob(ExperimentBase):
     ) -> RunResult:
         attr = self.attr
         self.set_standard_frequencies()
+        qb_therm_clks = self.get_therm_clks("qb", fallback=0) or 0
 
         prog = cQED_programs.iq_blobs(
-            attr.ro_el, attr.qb_el, r180, attr.qb_therm_clks, n_runs,
+            attr.ro_el, attr.qb_el, r180, qb_therm_clks, n_runs,
         )
         return self.run_program(
             prog, n_total=n_runs,
@@ -72,6 +74,7 @@ class IQBlob(ExperimentBase):
                 disc_out = two_state_discriminator(I_g, Q_g, I_e, Q_e)
                 metrics["fidelity"] = float(disc_out["fidelity"])
                 metrics["angle"] = float(disc_out["angle"])
+                metrics["rotation_convention"] = "S_rot = S * exp(+1j*angle)"
                 metrics["threshold"] = float(disc_out["threshold"])
                 metrics["confusion_matrix"] = [
                     [float(disc_out["gg"]), float(disc_out["ge"])],
@@ -127,9 +130,10 @@ class ReadoutGERawTrace(ExperimentBase):
         attr = self.attr
         self.hw.set_element_fq(attr.ro_el, ro_freq)
         self.set_standard_frequencies()
+        qb_therm_clks = self.get_therm_clks("qb", fallback=0) or 0
 
         prog = cQED_programs.readout_ge_raw_trace(
-            attr.qb_el, r180, attr.qb_therm_clks, ro_depl_clks, n_avg,
+            attr.qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg,
         )
         return self.run_program(
             prog, n_total=n_avg,
@@ -191,10 +195,20 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
         attr = self.attr
         self.hw.set_element_fq(attr.ro_el, drive_frequency)
         self.set_standard_frequencies()
+        ro_therm_clks = self.get_therm_clks("ro", fallback=0) or 0
+
+        resolved_weights = weights
+        if isinstance(weights, (list, tuple)) and len(weights) == 3 and all(isinstance(w, str) for w in weights):
+            cos_w, sin_w, m_sin_w = weights
+            resolved_weights = [cos_w, sin_w, m_sin_w, cos_w]
+            _logger.warning(
+                "ReadoutGEIntegratedTrace.run received 3 weights; expanding to legacy 4-output form "
+                "[cos, sin, m_sin, cos]. Pass 4 weights explicitly to silence this warning."
+            )
 
         prog = cQED_programs.readout_ge_integrated_trace(
-            attr.qb_el, weights, num_div, div_clks,
-            r180, ro_depl_clks or attr.ro_therm_clks, n_avg,
+            attr.qb_el, resolved_weights, num_div, div_clks,
+            r180, ro_depl_clks or ro_therm_clks, n_avg,
         )
         return self.run_program(
             prog, n_total=n_avg, process_in_sim=process_in_sim,
@@ -241,10 +255,12 @@ class ReadoutGEDiscrimination(ExperimentBase):
         self,
         measure_op: str,
         drive_frequency: float,
+        ro_element: str | None = None,
         r180: str = "x180",
         gain: float = 1.0,
         update_measure_macro: bool = False,
         burn_rot_weights: bool = True,
+        apply_rotated_weights: bool = True,
         persist: bool = False,
         n_samples: int = 10_000,
         base_weight_keys: tuple[str, str, str] | None = None,
@@ -254,6 +270,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
         **kwargs: Any,
     ) -> RunResult:
         attr = self.attr
+        readout_element = ro_element or attr.ro_el
 
         k_g = float(kwargs.pop("k_g", 2.0))
         k_e = float(kwargs.pop("k_e", k_g))
@@ -261,10 +278,10 @@ class ReadoutGEDiscrimination(ExperimentBase):
             blob_k_e = blob_k_g
 
         # Resolve pulse and integration weight mapping
-        pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(attr.ro_el, measure_op, strict=False)
+        pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(readout_element, measure_op, strict=False)
         if pulse_info is None:
             raise RuntimeError(
-                f"No pulse registered for (element={attr.ro_el!r}, op={measure_op!r}). "
+                f"No pulse registered for (element={readout_element!r}, op={measure_op!r}). "
                 "Register the measure operation before running GE discrimination."
             )
         weight_mapping = pulse_info.int_weights_mapping or {}
@@ -282,10 +299,23 @@ class ReadoutGEDiscrimination(ExperimentBase):
         base_sin_name = weight_mapping[sin_key]
         base_m_sin_name = weight_mapping[m_sin_key]
 
+        # Ensure measure macro uses the resolved readout element/op mapping for this run.
+        measureMacro.set_pulse_op(
+            pulse_info,
+            active_op=measure_op,
+            weights=[[cos_key, sin_key], [m_sin_key, cos_key]],
+            weight_len=pulse_info.length,
+        )
+        measureMacro.set_drive_frequency(drive_frequency)
+
         # Store params so analyze() can build rotated weights
         self._run_params = {
+            "readout_element": readout_element,
             "measure_op": measure_op,
             "burn_rot_weights": burn_rot_weights,
+            "apply_rotated_weights": apply_rotated_weights,
+            "update_measure_macro": update_measure_macro,
+            "drive_frequency": drive_frequency,
             "persist": persist,
             "base_cos_name": base_cos_name,
             "base_sin_name": base_sin_name,
@@ -299,12 +329,24 @@ class ReadoutGEDiscrimination(ExperimentBase):
         }
 
         _logger.info("GE discrimination: n_samples=%d, measure_op=%r", n_samples, measure_op)
+        cfg_engine = getattr(self._ctx, "config_engine", None)
+        qm_ops = {}
+        if cfg_engine is not None:
+            cfg = cfg_engine.build_qm_config()
+            qm_ops = (cfg.get("elements", {}).get(readout_element, {}).get("operations", {}) or {})
+        _logger.info(
+            "GE discrimination mapping: element=%s op=%s pulse=%s available_ops=%s",
+            readout_element,
+            measure_op,
+            qm_ops.get(measure_op) if qm_ops else None,
+            sorted(qm_ops.keys()),
+        )
 
         self.set_standard_frequencies()
-        self.hw.set_element_fq(attr.ro_el, drive_frequency)
+        self.hw.set_element_fq(readout_element, drive_frequency)
 
         prog = cQED_programs.iq_blobs(
-            attr.ro_el, attr.qb_el, r180, attr.qb_therm_clks, n_samples,
+            readout_element, attr.qb_el, r180, attr.qb_therm_clks, n_samples,
         )
         result = self.run_program(
             prog, n_total=n_samples,
@@ -349,19 +391,30 @@ class ReadoutGEDiscrimination(ExperimentBase):
                 disc_out = two_state_discriminator(I_g, Q_g, I_e, Q_e)
                 metrics["fidelity"] = float(disc_out["fidelity"])
                 metrics["angle"] = float(disc_out["angle"])
+                metrics["rotation_convention"] = "S_rot = S * exp(+1j*angle)"
                 metrics["threshold"] = float(disc_out["threshold"])
                 metrics["gg"] = float(disc_out["gg"])
                 metrics["ge"] = float(disc_out["ge"])
                 metrics["eg"] = float(disc_out["eg"])
                 metrics["ee"] = float(disc_out["ee"])
 
+                # Legacy-compatible rotation coefficients (phi=-angle)
+                phi = -metrics["angle"]
+                C = float(np.cos(phi))
+                S_ = float(np.sin(phi))
+                metrics["w_plus_cos"] = C
+                metrics["w_plus_sin"] = -S_
+                metrics["w_minus_sin"] = -S_
+                metrics["w_minus_cos"] = -C
+
                 # Additional metrics for post-selection
-                for key in ("rot_mu_g", "rot_mu_e", "sigma_g", "sigma_e"):
+                for key in ("rot_mu_g", "rot_mu_e", "unrot_mu_g", "unrot_mu_e", "sigma_g", "sigma_e"):
                     if key in disc_out:
                         val = disc_out[key]
                         if isinstance(val, (complex, np.complexfloating)):
-                            val = val.real
-                        metrics[key] = float(val)
+                            metrics[key] = complex(val)
+                        else:
+                            metrics[key] = float(val)
 
                 _logger.info(
                     "GE discrimination fidelity=%.2f%%, angle=%.4f rad, threshold=%.4g",
@@ -390,23 +443,63 @@ class ReadoutGEDiscrimination(ExperimentBase):
 
         # Build rotated integration weights if run() stored params
         if hasattr(self, "_run_params") and "angle" in metrics:
-            try:
-                self._build_rotated_weights(metrics)
-                _logger.info("Rotated integration weights built and registered")
-            except Exception as exc:
-                _logger.warning("Rotated weight construction failed: %s", exc)
-                warnings.warn(f"Rotated weight construction failed: {exc}")
+            apply = self._run_params.get("apply_rotated_weights", True)
+            if apply:
+                try:
+                    self._build_rotated_weights(metrics)
+                    if self._run_params.get("update_measure_macro", False):
+                        self._apply_rotated_measure_macro(metrics)
+                        if self._run_params.get("persist", False):
+                            self._persist_measure_macro_state()
+                    _logger.info("Rotated integration weights computed AND applied")
+                    # Post-check: validate weights are present in config
+                    validation = self.verify_rotated_weights()
+                    metadata["rotated_weights_validation"] = validation
+                    if validation.get("all_valid"):
+                        _logger.info("Rotated weights validation PASSED")
+                    else:
+                        _logger.warning(
+                            "Rotated weights validation FAILED: %s",
+                            validation.get("errors", []),
+                        )
+                except Exception as exc:
+                    _logger.warning("Rotated weight construction failed: %s", exc)
+                    warnings.warn(f"Rotated weight construction failed: {exc}")
+            else:
+                _logger.info(
+                    "Rotated integration weights computed (angle=%.4f rad) "
+                    "but NOT applied (apply_rotated_weights=False)",
+                    metrics["angle"],
+                )
 
         if update_calibration and self.calibration_store and "fidelity" in metrics:
-            self.calibration_store.set_discrimination(
-                self.attr.ro_el,
-                angle=metrics.get("angle"),
-                threshold=metrics.get("threshold"),
-                fidelity=metrics.get("fidelity"),
-                mu_g=[metrics.get("rot_mu_g", 0.0), 0.0],
-                mu_e=[metrics.get("rot_mu_e", 0.0), 0.0],
-                sigma_g=metrics.get("sigma_g"),
-                sigma_e=metrics.get("sigma_e"),
+            min_fidelity = float(kw.get("min_fidelity", 70.0))
+            max_abs_angle = float(kw.get("max_abs_angle", np.pi))
+            self.guarded_calibration_commit(
+                analysis=analysis,
+                run_result=result,
+                calibration_tag="readout_ge_discrimination",
+                require_fit=False,
+                required_metrics={
+                    "fidelity": (min_fidelity, 100.0),
+                    "angle": (-max_abs_angle, max_abs_angle),
+                },
+                apply_update=lambda: self.calibration_store.set_discrimination(
+                    self.attr.ro_el,
+                    angle=metrics.get("angle"),
+                    threshold=metrics.get("threshold"),
+                    fidelity=metrics.get("fidelity"),
+                    mu_g=[
+                        float(np.real(metrics.get("rot_mu_g", 0.0 + 0.0j))),
+                        float(np.imag(metrics.get("rot_mu_g", 0.0 + 0.0j))),
+                    ],
+                    mu_e=[
+                        float(np.real(metrics.get("rot_mu_e", 0.0 + 0.0j))),
+                        float(np.imag(metrics.get("rot_mu_e", 0.0 + 0.0j))),
+                    ],
+                    sigma_g=metrics.get("sigma_g"),
+                    sigma_e=metrics.get("sigma_e"),
+                ),
             )
 
         return analysis
@@ -447,7 +540,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
             threshold = train_disc["threshold"]
 
             # Evaluate on held-out test set
-            C, S = np.cos(-angle), np.sin(-angle)
+            C, S = np.cos(angle), np.sin(angle)
             test_Ig = I_g[idx_g[:n_test_g]]
             test_Qg = Q_g[idx_g[:n_test_g]]
             test_Ie = I_e[idx_e[:n_test_e]]
@@ -532,6 +625,161 @@ class ReadoutGEDiscrimination(ExperimentBase):
         if burn_rot_weights:
             self.burn_pulses(include_volatile=True)
 
+    def _apply_rotated_measure_macro(self, metrics: dict) -> None:
+        """Update measureMacro with legacy-compatible rotated labels."""
+        params = self._run_params
+        pulse_info = params["pulse_info"]
+        measure_op = params["measure_op"]
+        drive_frequency = params["drive_frequency"]
+        op_prefix = params["op_prefix"]
+
+        def _name(prefix, suffix):
+            return suffix if not prefix else f"{prefix}{suffix}"
+
+        map_rot_cos = _name(op_prefix, "rot_cos")
+        map_rot_sin = _name(op_prefix, "rot_sin")
+        map_rot_m_sin = _name(op_prefix, "rot_m_sin")
+
+        try:
+            mm = measureMacro
+            mm.set_pulse_op(
+                pulse_info,
+                active_op=measure_op,
+                weights=([map_rot_cos, map_rot_sin], [map_rot_m_sin, map_rot_cos]),
+                weight_len=pulse_info.length,
+            )
+            mm.set_drive_frequency(drive_frequency)
+            if hasattr(mm, "_update_readout_discrimination"):
+                mm._update_readout_discrimination(metrics)
+            _logger.info("measureMacro updated with rotated readout weights")
+        except Exception as exc:
+            _logger.warning("Failed to update measureMacro with rotated weights: %s", exc)
+
+    def _persist_measure_macro_state(self) -> None:
+        """Persist measureMacro so rotated-weight config reloads on future sessions."""
+        exp_path = Path(getattr(self._ctx, "experiment_path", "."))
+        dst = exp_path / "config" / "measureConfig.json"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        measureMacro.save_json(str(dst))
+        _logger.info("Persisted measureMacro state to %s", dst)
+
+    def verify_rotated_weights(self) -> dict[str, Any]:
+        """Validate that rotated integration weights are properly applied.
+
+        Checks:
+        1. Weight definitions exist in the PulseOperationManager store.
+        2. The measurement pulse mapping references the rotated labels.
+        3. The built QM config includes the weight definitions.
+
+        Returns
+        -------
+        dict
+            Validation report with keys:
+            - ``all_valid`` (bool): True if all checks pass.
+            - ``weights_in_store`` (dict[str, bool]): per-weight existence.
+            - ``weights_in_mapping`` (dict[str, bool]): per-label in pulse mapping.
+            - ``weights_in_config`` (dict[str, bool]): per-weight in QM config.
+            - ``errors`` (list[str]): human-readable error descriptions.
+            - ``before_labels`` / ``after_labels``: base vs rotated label names.
+        """
+        if not hasattr(self, "_run_params"):
+            return {"all_valid": False, "errors": ["No _run_params: run() was not called"]}
+
+        params = self._run_params
+        op_prefix = params["op_prefix"]
+        pulse_info = params["pulse_info"]
+
+        def _name(prefix, suffix):
+            return suffix if not prefix else f"{prefix}{suffix}"
+
+        rot_names = {
+            "rot_cos": _name(op_prefix, "rot_cos"),
+            "rot_sin": _name(op_prefix, "rot_sin"),
+            "rot_m_sin": _name(op_prefix, "rot_m_sin"),
+        }
+        base_names = {
+            "cos": params["base_cos_name"],
+            "sin": params["base_sin_name"],
+            "m_sin": params["base_m_sin_name"],
+        }
+
+        pm = self.pulse_mgr
+        errors: list[str] = []
+
+        # 1. Check weights exist in pulse manager store
+        weights_in_store = {}
+        for label, wname in rot_names.items():
+            try:
+                segs = pm.get_integration_weights(wname, strict=True)
+                weights_in_store[wname] = True
+            except (KeyError, Exception):
+                weights_in_store[wname] = False
+                errors.append(f"Weight '{wname}' not found in PulseOperationManager store")
+
+        # 2. Check pulse mapping includes rotated labels
+        weights_in_mapping = {}
+        current_info = pm.get_pulseOp_by_element_op(
+            self.attr.ro_el, params["measure_op"], strict=False,
+        )
+        if current_info and current_info.int_weights_mapping:
+            mapping = current_info.int_weights_mapping
+            for label, wname in rot_names.items():
+                lbl = _name(op_prefix, label)
+                found = lbl in mapping and mapping[lbl] == wname
+                weights_in_mapping[lbl] = found
+                if not found:
+                    errors.append(
+                        f"Pulse mapping missing or mismatched for label '{lbl}' "
+                        f"(expected -> '{wname}')"
+                    )
+        else:
+            errors.append("Could not retrieve pulse info to check mapping")
+
+        # 3. Check compiled QM config (if available)
+        weights_in_config = {}
+        config = getattr(self.hw, "_config", None)
+        if config is None:
+            ce = getattr(self._ctx, "config_engine", None)
+            if ce:
+                config = getattr(ce, "config", None)
+        if config and isinstance(config, dict):
+            iw_section = config.get("integration_weights", {})
+            for label, wname in rot_names.items():
+                found = wname in iw_section
+                weights_in_config[wname] = found
+                if not found:
+                    errors.append(
+                        f"Weight '{wname}' not found in compiled QM config"
+                    )
+        else:
+            # Config not accessible — not an error per se
+            for wname in rot_names.values():
+                weights_in_config[wname] = None  # unknown
+
+        all_valid = len(errors) == 0
+        report = {
+            "all_valid": all_valid,
+            "before_labels": base_names,
+            "after_labels": rot_names,
+            "weights_in_store": weights_in_store,
+            "weights_in_mapping": weights_in_mapping,
+            "weights_in_config": weights_in_config,
+            "errors": errors,
+        }
+
+        if all_valid:
+            _logger.info(
+                "Rotated weight verification: PASSED. "
+                "Active weights: %s", rot_names,
+            )
+        else:
+            _logger.warning(
+                "Rotated weight verification: %d issue(s). %s",
+                len(errors), "; ".join(errors),
+            )
+
+        return report
+
     def plot(self, analysis: AnalysisResult, *, ax=None,
              show_rotated: bool = True, interactive: bool = False, **kwargs):
         S_g = analysis.data.get("S_g")
@@ -595,7 +843,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
             Sg_rot = analysis.data.get("Sg_rot")
             Se_rot = analysis.data.get("Se_rot")
             if Sg_rot is None or Se_rot is None:
-                rot = np.exp(-1j * angle)
+                rot = np.exp(1j * angle)
                 Sg_rot = np.asarray(S_g) * rot
                 Se_rot = np.asarray(S_e) * rot
 
@@ -645,7 +893,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
         if "angle" in analysis.metrics:
             angle = analysis.metrics["angle"]
             threshold = analysis.metrics.get("threshold", 0.0)
-            rot = np.exp(-1j * angle)
+            rot = np.exp(1j * angle)
             Sg_rot = np.asarray(S_g) * rot
             Se_rot = np.asarray(S_e) * rot
 
@@ -760,8 +1008,9 @@ class ReadoutWeightsOptimization(ExperimentBase):
 
         # First get integrated traces
         trace_exp = ReadoutGEIntegratedTrace(self._ctx)
+        trace_weights = [cos_w_key, sin_w_key, m_sin_w_key, cos_w_key]
         result = trace_exp.run(
-            ro_op, drive_frequency, (cos_w_key, sin_w_key, m_sin_w_key),
+            ro_op, drive_frequency, trace_weights,
             num_div=num_div, r180=r180,
             ro_depl_clks=ro_depl_clks, n_avg=n_avg,
         )
@@ -1036,13 +1285,24 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         analysis = AnalysisResult.from_run(result, metrics=metrics, metadata=metadata)
 
         if update_calibration and self.calibration_store and "F" in metrics:
-            self.calibration_store.set_readout_quality(
-                self.attr.ro_el,
-                F=metrics.get("F"),
-                Q=metrics.get("Q"),
-                V=metrics.get("V"),
-                t01=metrics.get("t01"),
-                t10=metrics.get("t10"),
+            min_F = float(kw.get("min_F", 0.50))
+            min_Q = float(kw.get("min_Q", 0.50))
+            self.guarded_calibration_commit(
+                analysis=analysis,
+                run_result=result,
+                calibration_tag="readout_butterfly",
+                required_metrics={
+                    "F": (min_F, 1.0),
+                    "Q": (min_Q, 1.0),
+                },
+                apply_update=lambda: self.calibration_store.set_readout_quality(
+                    self.attr.ro_el,
+                    F=metrics.get("F"),
+                    Q=metrics.get("Q"),
+                    V=metrics.get("V"),
+                    t01=metrics.get("t01"),
+                    t10=metrics.get("t10"),
+                ),
             )
 
         # T1 decay correction (Section 6D)

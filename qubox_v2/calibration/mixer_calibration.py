@@ -21,10 +21,13 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import os
+import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from tqdm import tqdm
@@ -32,6 +35,10 @@ from tqdm import tqdm
 from ..programs import cQED_programs
 
 _logger = logging.getLogger(__name__)
+
+# Maximum retry attempts for atomic file replacement on Windows
+_DB_WRITE_MAX_RETRIES = 5
+_DB_WRITE_RETRY_BASE_DELAY = 0.1  # seconds (exponential backoff)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -58,6 +65,7 @@ class MixerCalibrationConfig:
     sa_level: float = 0.0         # reference level (dBm)
     sa_avg: int = 5               # number of sweeps to average
     sa_settle: float = 0.0        # settle time after SA reconfigure (seconds)
+    sa_extra_config: dict[str, Any] = field(default_factory=dict)  # optional driver kwargs
 
     # DC offset grid search
     dc_coarse_range: float = 0.1    # ±V half-range for coarse grid
@@ -86,6 +94,26 @@ class MixerCalibrationConfig:
     dc_settle: float = 0.01
     iq_settle: float = 0.05
 
+    # DB write frequency control
+    # "final_only"  — write calibration_db.json only after calibration completes
+    # "per_stage"   — write at the end of each stage (DC coarse, DC fine, IQ coarse, IQ fine)
+    # "per_point"   — write at every grid/minimiser evaluation (legacy behaviour, slowest)
+    write_db_mode: Literal["final_only", "per_stage", "per_point"] = "final_only"
+
+    # Sideband objective (explicit target/image/carrier handling)
+    # sideband="lsb" => target=LO-|IF|, image=LO+|IF|
+    # sideband="usb" => target=LO+|IF|, image=LO-|IF|
+    sideband: Literal["lsb", "usb"] = "lsb"
+    objective_mode: Literal["weighted_sum", "ratio_db"] = "weighted_sum"
+    w_carrier: float = 1.0
+    w_image: float = 1.0
+    w_target: float = 1.0
+
+    # Notebook UX controls
+    quiet_qm_logs: bool = False
+    live_plot: bool = False
+    live_plot_every: int = 1
+
 
 # ──────────────────────────────────────────────────────────────────
 # SA Measurement Helper
@@ -104,14 +132,20 @@ class SAMeasurementHelper:
     # ── single-tone measurement ────────────────────────────────
     def measure_peak_power(self, center_hz: float) -> float:
         """Return peak power (dBm) in a narrow span around *center_hz*."""
-        self._sa.configure(
-            center=center_hz,
-            span=self._cfg.sa_span_hz,
-            rbw=self._cfg.sa_rbw,
-            vbw=self._cfg.sa_vbw,
-            level=self._cfg.sa_level,
-            force=True,
-        )
+        base_cfg = {
+            "center": center_hz,
+            "span": self._cfg.sa_span_hz,
+            "rbw": self._cfg.sa_rbw,
+            "vbw": self._cfg.sa_vbw,
+            "level": self._cfg.sa_level,
+            "force": True,
+        }
+        extra_cfg = dict(self._cfg.sa_extra_config or {})
+        try:
+            self._sa.configure(**base_cfg, **extra_cfg)
+        except TypeError:
+            # Backward-compatible fallback for drivers that do not accept extras.
+            self._sa.configure(**base_cfg)
         if self._cfg.sa_settle > 0:
             time.sleep(self._cfg.sa_settle)
         _freq, _tr_min, tr_max = self._sa.sweep(average_num=self._cfg.sa_avg)
@@ -121,19 +155,26 @@ class SAMeasurementHelper:
     def measure_tones(self, f_lo: float, f_if: float) -> dict[str, float]:
         """Measure desired, LO-leak, and image tones; compute dBc metrics.
 
-        Assumes LSB convention: f_des = f_LO − |f_IF|.
+        Sideband is selected by ``MixerCalibrationConfig.sideband``.
         """
-        f_des = f_lo - abs(f_if)
-        f_img = f_lo + abs(f_if)
+        if self._cfg.sideband == "usb":
+            f_target = f_lo + abs(f_if)
+            f_image = f_lo - abs(f_if)
+        else:
+            f_target = f_lo - abs(f_if)
+            f_image = f_lo + abs(f_if)
 
-        P_des = self.measure_peak_power(f_des)
+        P_des = self.measure_peak_power(f_target)
         P_lo = self.measure_peak_power(f_lo)
-        P_img = self.measure_peak_power(f_img)
+        P_img = self.measure_peak_power(f_image)
 
         return {
             "P_des_dBm": P_des,
             "P_LO_dBm": P_lo,
             "P_img_dBm": P_img,
+            "f_target": f_target,
+            "f_image": f_image,
+            "sideband": self._cfg.sideband,
             "LO_leak_dBc": P_des - P_lo,
             "IRR_dBc": P_des - P_img,
         }
@@ -168,6 +209,143 @@ class ManualMixerCalibrator:
         self._sa = sa_helper
         self._db_path = Path(calibration_db_path)
         self._cfg = config or MixerCalibrationConfig()
+        # In-memory DB cache used during calibration to avoid per-point writes
+        self._db_cache: dict | None = None
+
+    @contextmanager
+    def _maybe_quiet_qm_logs(self, enabled: bool):
+        """Temporarily suppress QM INFO noise while keeping WARN/ERROR visible."""
+        if not enabled:
+            yield
+            return
+        names = ("qm", "qm.grpc", "qm.octave", "qm.api")
+        loggers = [logging.getLogger(n) for n in names]
+        prev_levels = [lg.level for lg in loggers]
+        try:
+            for lg in loggers:
+                lg.setLevel(logging.WARNING)
+            yield
+        finally:
+            for lg, lvl in zip(loggers, prev_levels):
+                lg.setLevel(lvl)
+
+    @staticmethod
+    def _objective_cost(
+        *,
+        p_target_dbm: float,
+        p_carrier_dbm: float,
+        p_image_dbm: float,
+        cfg: MixerCalibrationConfig,
+    ) -> float:
+        """Compute explicit sideband objective cost."""
+        wc, wi, wt = float(cfg.w_carrier), float(cfg.w_image), float(cfg.w_target)
+        if cfg.objective_mode == "ratio_db":
+            eps_mw = 1e-15
+            carrier_mw = 10 ** (p_carrier_dbm / 10.0)
+            image_mw = 10 ** (p_image_dbm / 10.0)
+            target_mw = max(eps_mw, 10 ** (p_target_dbm / 10.0))
+            num = wc * carrier_mw + wi * image_mw
+            den = max(eps_mw, wt * target_mw)
+            return float(10.0 * np.log10(max(eps_mw, num / den)))
+        return float(wc * p_carrier_dbm + wi * p_image_dbm - wt * p_target_dbm)
+
+    @staticmethod
+    def _init_live_heatmap(x_vals: np.ndarray, y_vals: np.ndarray, *, title: str):
+        try:
+            import matplotlib.pyplot as plt
+            from IPython.display import clear_output, display
+        except Exception:
+            return None
+        fig, ax = plt.subplots(figsize=(6, 5))
+        z = np.full((len(y_vals), len(x_vals)), np.nan, dtype=float)
+        im = ax.imshow(
+            z,
+            origin="lower",
+            aspect="auto",
+            extent=[x_vals[0], x_vals[-1], y_vals[0], y_vals[-1]],
+            interpolation="nearest",
+        )
+        ax.set_title(title)
+        cb = fig.colorbar(im, ax=ax)
+        cb.set_label("Cost (dBm metric)")
+        display(fig)
+        return {
+            "fig": fig,
+            "ax": ax,
+            "im": im,
+            "z": z,
+            "display": display,
+            "clear_output": clear_output,
+            "best_scatter": None,
+        }
+
+    @staticmethod
+    def _update_live_heatmap(state: dict | None, *, ix: int, iy: int, value: float, best_x: float, best_y: float, every: int, counter: int):
+        if not state:
+            return
+        state["z"][iy, ix] = value
+        if every > 1 and (counter % every) != 0:
+            return
+        im = state["im"]
+        im.set_data(state["z"])
+        finite = np.isfinite(state["z"])
+        if np.any(finite):
+            vmin = float(np.nanmin(state["z"]))
+            vmax = float(np.nanmax(state["z"]))
+            if vmin < vmax:
+                im.set_clim(vmin=vmin, vmax=vmax)
+        ax = state["ax"]
+        if state["best_scatter"] is not None:
+            state["best_scatter"].remove()
+        state["best_scatter"] = ax.scatter([best_x], [best_y], c="w", s=45, edgecolors="k", label="best")
+        ax.legend(loc="upper right")
+        state["clear_output"](wait=True)
+        state["display"](state["fig"])
+
+    @staticmethod
+    def _init_live_history(*, title: str, ylabel: str = "Cost"):
+        try:
+            import matplotlib.pyplot as plt
+            from IPython.display import clear_output, display
+        except Exception:
+            return None
+        fig, ax = plt.subplots(figsize=(7, 4))
+        line_cost, = ax.plot([], [], "b.-", label="cost")
+        line_best, = ax.plot([], [], "r-", label="best-so-far")
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best")
+        display(fig)
+        return {
+            "fig": fig,
+            "ax": ax,
+            "line_cost": line_cost,
+            "line_best": line_best,
+            "cost": [],
+            "best": [],
+            "display": display,
+            "clear_output": clear_output,
+        }
+
+    @staticmethod
+    def _update_live_history(state: dict | None, value: float, *, every: int = 1):
+        if not state:
+            return
+        state["cost"].append(float(value))
+        prev_best = state["best"][-1] if state["best"] else float(value)
+        state["best"].append(min(prev_best, float(value)))
+        n = len(state["cost"])
+        if every > 1 and (n % every) != 0:
+            return
+        x = np.arange(1, n + 1)
+        state["line_cost"].set_data(x, np.asarray(state["cost"], dtype=float))
+        state["line_best"].set_data(x, np.asarray(state["best"], dtype=float))
+        state["ax"].relim()
+        state["ax"].autoscale_view()
+        state["clear_output"](wait=True)
+        state["display"](state["fig"])
 
     # ────────── CW tone management ────────────────────────────
     def _start_cw(self, element: str):
@@ -197,9 +375,20 @@ class ManualMixerCalibrator:
         phase: float,
         i0: float,
         q0: float,
+        *,
+        write_db: bool = True,
     ) -> None:
-        """Write trial gain/phase + DC offsets to the calibration DB and reopen QM."""
-        db = self._read_db()
+        """Write trial gain/phase + DC offsets to the calibration DB and reopen QM.
+
+        Parameters
+        ----------
+        write_db : bool
+            If False, update the in-memory cache and write to a temporary
+            scratch file instead of the canonical calibration_db.json.
+            The QM still reopens using the scratch file so corrections take
+            effect, but the canonical DB is not mutated.
+        """
+        db = self._get_db()
         lo_mode_id = self._resolve_lo_mode_id(db, element)
         if_mode_id = self._resolve_if_mode_id(db, element)
 
@@ -209,7 +398,14 @@ class ManualMixerCalibrator:
         db["if_cal"][str(if_mode_id)].update(
             {"gain": gain, "phase": phase, "timestamp": time.time(), "method": "manual_trial"}
         )
-        self._write_db(db)
+
+        if write_db:
+            self._write_db(db)
+        else:
+            # Write to a scratch file so QM can reopen with the trial values,
+            # but do NOT touch the canonical calibration_db.json.
+            self._write_scratch_db(db)
+
         self._hw.open_qm()
 
     # ══════════════════════════════════════════════════════════
@@ -230,81 +426,104 @@ class ManualMixerCalibrator:
 
         Any keyword argument matching a ``MixerCalibrationConfig`` field
         overrides the corresponding value for this run only.
+
+        When ``save_to_db=False``, the canonical ``calibration_db.json`` is
+        never written.  Trial IQ corrections use a scratch file so QM can
+        reopen with trial values without mutating the persistent DB.
         """
         cfg = self._cfg
         if config_overrides:
             cfg = dataclasses.replace(cfg, **config_overrides)
 
+        # Pre-load the DB into cache to avoid per-point reads
+        self._db_cache = self._read_db()
+
+        # Determine per-point write behaviour
+        write_db_mode = cfg.write_db_mode if save_to_db else "final_only"
+        # For IQ grid, whether each point writes the canonical DB
+        iq_write_per_point = (write_db_mode == "per_point") and save_to_db
+
         _logger.info(
-            "scan_2d: element=%s  LO=%.4f GHz  IF=%.2f MHz",
-            element, f_lo / 1e9, f_if / 1e6,
+            "scan_2d: element=%s  LO=%.4f GHz  IF=%.2f MHz  sideband=%s  objective=%s  save_to_db=%s  write_mode=%s",
+            element, f_lo / 1e9, f_if / 1e6, cfg.sideband, cfg.objective_mode, save_to_db, write_db_mode,
         )
 
-        # ── Stage A: DC offsets ───────────────────────────────
-        _logger.info(
-            "Stage A: DC offset optimisation (coarse %dx%d = %d points)",
-            cfg.dc_coarse_n, cfg.dc_coarse_n, cfg.dc_coarse_n ** 2,
-        )
-        job = self._start_cw(element)
-        best_i0, best_q0, _ = self._grid_search_dc(
-            element, f_lo,
-            center_i=0.0, center_q=0.0,
-            half_range=cfg.dc_coarse_range,
-            n_points=cfg.dc_coarse_n,
-            cfg=cfg,
-        )
-        _logger.info(
-            "Stage A: DC offset optimisation (fine %dx%d = %d points)",
-            cfg.dc_fine_n, cfg.dc_fine_n, cfg.dc_fine_n ** 2,
-        )
-        best_i0, best_q0, best_P_LO = self._grid_search_dc(
-            element, f_lo,
-            center_i=best_i0, center_q=best_q0,
-            half_range=cfg.dc_fine_range,
-            n_points=cfg.dc_fine_n,
-            cfg=cfg,
-        )
-        self._set_dc_offsets(element, best_i0, best_q0)
-        self._stop_cw(job)
-        _logger.info(
-            "Stage A done: I0=%.6f  Q0=%.6f  P_LO=%.1f dBm",
-            best_i0, best_q0, best_P_LO,
-        )
+        with self._maybe_quiet_qm_logs(cfg.quiet_qm_logs):
+            # ── Stage A: DC offsets ───────────────────────────────
+            _logger.info(
+                "Stage A: DC offset optimisation (coarse %dx%d = %d points)",
+                cfg.dc_coarse_n, cfg.dc_coarse_n, cfg.dc_coarse_n ** 2,
+            )
+            job = self._start_cw(element)
+            best_i0, best_q0, _ = self._grid_search_dc(
+                element, f_lo,
+                center_i=0.0, center_q=0.0,
+                half_range=cfg.dc_coarse_range,
+                n_points=cfg.dc_coarse_n,
+                cfg=cfg,
+            )
+            _logger.info(
+                "Stage A: DC offset optimisation (fine %dx%d = %d points)",
+                cfg.dc_fine_n, cfg.dc_fine_n, cfg.dc_fine_n ** 2,
+            )
+            best_i0, best_q0, best_P_LO = self._grid_search_dc(
+                element, f_lo,
+                center_i=best_i0, center_q=best_q0,
+                half_range=cfg.dc_fine_range,
+                n_points=cfg.dc_fine_n,
+                cfg=cfg,
+            )
+            self._set_dc_offsets(element, best_i0, best_q0)
+            self._stop_cw(job)
+            _logger.info(
+                "Stage A done: I0=%.6f  Q0=%.6f  P_LO=%.1f dBm",
+                best_i0, best_q0, best_P_LO,
+            )
 
-        # ── Stage B: IQ correction ────────────────────────────
-        _logger.info(
-            "Stage B: IQ correction optimisation (coarse %dx%d = %d points)",
-            cfg.iq_coarse_n, cfg.iq_coarse_n, cfg.iq_coarse_n ** 2,
-        )
-        best_g, best_p, _ = self._grid_search_iq(
-            element, f_lo, f_if,
-            best_i0, best_q0,
-            center_gain=0.0, center_phase=0.0,
-            half_range_gain=cfg.iq_gain_range,
-            half_range_phase=cfg.iq_phase_range,
-            n_points=cfg.iq_coarse_n,
-            cfg=cfg,
-        )
-        _logger.info(
-            "Stage B: IQ correction optimisation (fine %dx%d = %d points)",
-            cfg.iq_fine_n, cfg.iq_fine_n, cfg.iq_fine_n ** 2,
-        )
-        best_g, best_p, best_P_img = self._grid_search_iq(
-            element, f_lo, f_if,
-            best_i0, best_q0,
-            center_gain=best_g, center_phase=best_p,
-            half_range_gain=cfg.iq_fine_range_gain,
-            half_range_phase=cfg.iq_fine_range_phase,
-            n_points=cfg.iq_fine_n,
-            cfg=cfg,
-        )
-        _logger.info(
-            "Stage B done: gain=%.6f  phase=%.6f  P_img=%.1f dBm",
-            best_g, best_p, best_P_img,
-        )
+            # ── Stage B: IQ correction ────────────────────────────
+            _logger.info(
+                "Stage B: IQ correction optimisation (coarse %dx%d = %d points)",
+                cfg.iq_coarse_n, cfg.iq_coarse_n, cfg.iq_coarse_n ** 2,
+            )
+            best_g, best_p, _ = self._grid_search_iq(
+                element, f_lo, f_if,
+                best_i0, best_q0,
+                center_gain=0.0, center_phase=0.0,
+                half_range_gain=cfg.iq_gain_range,
+                half_range_phase=cfg.iq_phase_range,
+                n_points=cfg.iq_coarse_n,
+                cfg=cfg,
+                write_db=iq_write_per_point,
+            )
+            # per_stage write after IQ coarse
+            if save_to_db and write_db_mode == "per_stage":
+                self._write_db(self._get_db())
+                _logger.info("Stage B (coarse) DB snapshot saved.")
+
+            _logger.info(
+                "Stage B: IQ correction optimisation (fine %dx%d = %d points)",
+                cfg.iq_fine_n, cfg.iq_fine_n, cfg.iq_fine_n ** 2,
+            )
+            best_g, best_p, best_P_img = self._grid_search_iq(
+                element, f_lo, f_if,
+                best_i0, best_q0,
+                center_gain=best_g, center_phase=best_p,
+                half_range_gain=cfg.iq_fine_range_gain,
+                half_range_phase=cfg.iq_fine_range_phase,
+                n_points=cfg.iq_fine_n,
+                cfg=cfg,
+                write_db=iq_write_per_point,
+            )
+            _logger.info(
+                "Stage B done: gain=%.6f  phase=%.6f  objective=%.3f",
+                best_g, best_p, best_P_img,
+            )
 
         # ── Final measurement ─────────────────────────────────
-        final = self._measure_final(element, f_lo, f_if, best_i0, best_q0, best_g, best_p)
+        final = self._measure_final(
+            element, f_lo, f_if, best_i0, best_q0, best_g, best_p,
+            write_db=save_to_db,
+        )
         result = {
             "element": element,
             "f_lo": f_lo,
@@ -317,6 +536,11 @@ class ManualMixerCalibrator:
         }
         if save_to_db:
             self._persist(result, method="manual_scan_2d")
+
+        # Cleanup scratch file and cache
+        self._cleanup_scratch()
+        self._db_cache = None
+
         self._print_summary(result, saved=save_to_db)
         return result
 
@@ -336,94 +560,126 @@ class ManualMixerCalibrator:
 
         Any keyword argument matching a ``MixerCalibrationConfig`` field
         overrides the corresponding value for this run only.
+
+        When ``save_to_db=False``, the canonical ``calibration_db.json`` is
+        never written.  Trial IQ corrections use a scratch file.
         """
         from scipy.optimize import minimize
 
         _logger.info(
-            "minimizer: element=%s  LO=%.4f GHz  IF=%.2f MHz",
-            element, f_lo / 1e9, f_if / 1e6,
+            "minimizer: element=%s  LO=%.4f GHz  IF=%.2f MHz  sideband=%s  objective=%s  save_to_db=%s",
+            element, f_lo / 1e9, f_if / 1e6, self._cfg.sideband, self._cfg.objective_mode, save_to_db,
         )
         cfg = self._cfg
         if config_overrides:
             cfg = dataclasses.replace(cfg, **config_overrides)
 
-        # ── Stage A: DC offsets (fast, CW stays running) ──────
-        _logger.info("Stage A: DC offset minimisation (maxiter=%d)", cfg.minimizer_maxiter)
-        job = self._start_cw(element)
+        # Pre-load the DB into cache
+        self._db_cache = self._read_db()
+        write_per_point = (cfg.write_db_mode == "per_point") and save_to_db
 
-        eval_count_dc = [0]
+        with self._maybe_quiet_qm_logs(cfg.quiet_qm_logs):
+            # ── Stage A: DC offsets (fast, CW stays running) ──────
+            _logger.info("Stage A: DC offset minimisation (maxiter=%d)", cfg.minimizer_maxiter)
+            job = self._start_cw(element)
 
-        def _cost_dc(x):
-            self._set_dc_offsets(element, x[0], x[1])
-            time.sleep(cfg.dc_settle)
-            p = self._sa.measure_peak_power(f_lo)
-            eval_count_dc[0] += 1
-            if eval_count_dc[0] % 10 == 0:
-                _logger.debug("  DC eval %d: I0=%.5f Q0=%.5f  P_LO=%.1f", eval_count_dc[0], x[0], x[1], p)
-            return p
+            dc_hist = self._init_live_history(
+                title=f"{element}: DC minimizer history",
+                ylabel="P_LO (dBm)",
+            ) if cfg.live_plot else None
+            eval_count_dc = [0]
 
-        def _dc_callback(xk):
-            _logger.info("  DC opt step: I0=%.5f Q0=%.5f  (%d evals)", xk[0], xk[1], eval_count_dc[0])
+            def _cost_dc(x):
+                self._set_dc_offsets(element, x[0], x[1])
+                time.sleep(cfg.dc_settle)
+                p = self._sa.measure_peak_power(f_lo)
+                eval_count_dc[0] += 1
+                self._update_live_history(dc_hist, p, every=max(1, int(cfg.live_plot_every)))
+                if eval_count_dc[0] % 10 == 0:
+                    _logger.debug("  DC eval %d: I0=%.5f Q0=%.5f  P_LO=%.1f", eval_count_dc[0], x[0], x[1], p)
+                return p
 
-        res_dc = minimize(
-            _cost_dc,
-            x0=[0.0, 0.0],
-            method="Nelder-Mead",
-            callback=_dc_callback,
-            options={
-                "maxiter": cfg.minimizer_maxiter,
-                "xatol": cfg.minimizer_xtol,
-                "fatol": 0.5,
-                "adaptive": True,
-            },
-        )
-        best_i0, best_q0 = float(res_dc.x[0]), float(res_dc.x[1])
-        self._set_dc_offsets(element, best_i0, best_q0)
-        self._stop_cw(job)
-        _logger.info(
-            "Stage A done (%d evals): I0=%.6f  Q0=%.6f  P_LO=%.1f dBm",
-            res_dc.nfev, best_i0, best_q0, float(res_dc.fun),
-        )
+            def _dc_callback(xk):
+                _logger.info("  DC opt step: I0=%.5f Q0=%.5f  (%d evals)", xk[0], xk[1], eval_count_dc[0])
 
-        # ── Stage B: IQ correction (slower, QM reopen per eval) ─
-        _logger.info("Stage B: IQ correction minimisation (maxiter=%d)", cfg.minimizer_maxiter)
-        f_img = f_lo + abs(f_if)
-        eval_count_iq = [0]
-
-        def _cost_iq(x):
-            self._apply_iq_correction(element, x[0], x[1], best_i0, best_q0)
-            job_inner = self._start_cw(element)
+            res_dc = minimize(
+                _cost_dc,
+                x0=[0.0, 0.0],
+                method="Nelder-Mead",
+                callback=_dc_callback,
+                options={
+                    "maxiter": cfg.minimizer_maxiter,
+                    "xatol": cfg.minimizer_xtol,
+                    "fatol": 0.5,
+                    "adaptive": True,
+                },
+            )
+            best_i0, best_q0 = float(res_dc.x[0]), float(res_dc.x[1])
             self._set_dc_offsets(element, best_i0, best_q0)
-            time.sleep(cfg.iq_settle)
-            p = self._sa.measure_peak_power(f_img)
-            self._stop_cw(job_inner)
-            eval_count_iq[0] += 1
-            _logger.debug("  IQ eval %d: g=%.5f ph=%.5f  P_img=%.1f", eval_count_iq[0], x[0], x[1], p)
-            return p
+            self._stop_cw(job)
+            _logger.info(
+                "Stage A done (%d evals): I0=%.6f  Q0=%.6f  P_LO=%.1f dBm",
+                res_dc.nfev, best_i0, best_q0, float(res_dc.fun),
+            )
 
-        def _iq_callback(xk):
-            _logger.info("  IQ opt step: gain=%.5f phase=%.5f  (%d evals)", xk[0], xk[1], eval_count_iq[0])
+            # ── Stage B: IQ correction (slower, QM reopen per eval) ─
+            _logger.info("Stage B: IQ correction minimisation (maxiter=%d)", cfg.minimizer_maxiter)
+            eval_count_iq = [0]
+            iq_hist = self._init_live_history(
+                title=f"{element}: IQ minimizer objective history",
+                ylabel="Objective",
+            ) if cfg.live_plot else None
 
-        res_iq = minimize(
-            _cost_iq,
-            x0=[0.0, 0.0],
-            method="Nelder-Mead",
-            callback=_iq_callback,
-            options={
-                "maxiter": cfg.minimizer_maxiter,
-                "xatol": cfg.minimizer_xtol,
-                "fatol": 0.5,
-                "adaptive": True,
-            },
-        )
-        best_g, best_p = float(res_iq.x[0]), float(res_iq.x[1])
-        _logger.info(
-            "Stage B done (%d evals): gain=%.6f  phase=%.6f  P_img=%.1f dBm",
-            res_iq.nfev, best_g, best_p, float(res_iq.fun),
-        )
+            def _cost_iq(x):
+                self._apply_iq_correction(
+                    element, x[0], x[1], best_i0, best_q0,
+                    write_db=write_per_point,
+                )
+                job_inner = self._start_cw(element)
+                self._set_dc_offsets(element, best_i0, best_q0)
+                time.sleep(cfg.iq_settle)
+                tones = self._sa.measure_tones(f_lo, f_if)
+                self._stop_cw(job_inner)
+                cost = self._objective_cost(
+                    p_target_dbm=float(tones["P_des_dBm"]),
+                    p_carrier_dbm=float(tones["P_LO_dBm"]),
+                    p_image_dbm=float(tones["P_img_dBm"]),
+                    cfg=cfg,
+                )
+                eval_count_iq[0] += 1
+                self._update_live_history(iq_hist, cost, every=max(1, int(cfg.live_plot_every)))
+                _logger.debug(
+                    "  IQ eval %d: g=%.5f ph=%.5f  P_target=%.1f P_lo=%.1f P_img=%.1f cost=%.3f",
+                    eval_count_iq[0], x[0], x[1], tones["P_des_dBm"], tones["P_LO_dBm"], tones["P_img_dBm"], cost,
+                )
+                return cost
 
-        # ── Final measurement ─────────────────────────────────
-        final = self._measure_final(element, f_lo, f_if, best_i0, best_q0, best_g, best_p)
+            def _iq_callback(xk):
+                _logger.info("  IQ opt step: gain=%.5f phase=%.5f  (%d evals)", xk[0], xk[1], eval_count_iq[0])
+
+            res_iq = minimize(
+                _cost_iq,
+                x0=[0.0, 0.0],
+                method="Nelder-Mead",
+                callback=_iq_callback,
+                options={
+                    "maxiter": cfg.minimizer_maxiter,
+                    "xatol": cfg.minimizer_xtol,
+                    "fatol": 0.5,
+                    "adaptive": True,
+                },
+            )
+            best_g, best_p = float(res_iq.x[0]), float(res_iq.x[1])
+            _logger.info(
+                "Stage B done (%d evals): gain=%.6f  phase=%.6f  objective=%.3f",
+                res_iq.nfev, best_g, best_p, float(res_iq.fun),
+            )
+
+            # ── Final measurement ─────────────────────────────────
+            final = self._measure_final(
+                element, f_lo, f_if, best_i0, best_q0, best_g, best_p,
+                write_db=save_to_db,
+            )
         result = {
             "element": element,
             "f_lo": f_lo,
@@ -436,6 +692,11 @@ class ManualMixerCalibrator:
         }
         if save_to_db:
             self._persist(result, method="manual_minimizer")
+
+        # Cleanup scratch file and cache
+        self._cleanup_scratch()
+        self._db_cache = None
+
         self._print_summary(result, saved=save_to_db)
         return result
 
@@ -460,14 +721,29 @@ class ManualMixerCalibrator:
         best_i, best_q = center_i, center_q
         total = n_points * n_points
         done = 0
-        for i0 in tqdm(i_vals, desc="DC offset scan", unit="row", leave=False):
-            for q0 in q_vals:
+        live = self._init_live_heatmap(
+            i_vals,
+            q_vals,
+            title=f"DC offset scan ({element})",
+        ) if cfg.live_plot else None
+        for ix, i0 in enumerate(tqdm(i_vals, desc="DC offset scan", unit="row", leave=False)):
+            for iy, q0 in enumerate(q_vals):
                 self._set_dc_offsets(element, float(i0), float(q0))
                 time.sleep(cfg.dc_settle)
                 P_lo = self._sa.measure_peak_power(f_lo)
                 if P_lo < best_P:
                     best_P, best_i, best_q = P_lo, float(i0), float(q0)
                 done += 1
+                self._update_live_heatmap(
+                    live,
+                    ix=ix,
+                    iy=iy,
+                    value=float(P_lo),
+                    best_x=float(best_i),
+                    best_y=float(best_q),
+                    every=max(1, int(cfg.live_plot_every)),
+                    counter=done,
+                )
             _logger.debug("  DC grid: %d/%d  best P_LO=%.1f dBm", done, total, best_P)
         return best_i, best_q, best_P
 
@@ -484,27 +760,58 @@ class ManualMixerCalibrator:
         half_range_phase: float,
         n_points: int,
         cfg: MixerCalibrationConfig | None = None,
+        write_db: bool = False,
     ) -> tuple[float, float, float]:
-        """2-D grid over (gain, phase); minimise P_img.  Requires QM reopen per point."""
+        """2-D grid over (gain, phase); minimise P_img.  Requires QM reopen per point.
+
+        Parameters
+        ----------
+        write_db : bool
+            If False (default), each per-point ``_apply_iq_correction`` call
+            writes to a scratch file instead of the canonical DB.
+        """
         cfg = cfg or self._cfg
         g_vals = np.linspace(center_gain - half_range_gain, center_gain + half_range_gain, n_points)
         p_vals = np.linspace(center_phase - half_range_phase, center_phase + half_range_phase, n_points)
-        f_img = f_lo + abs(f_if)
         best_P: float = np.inf
         best_g, best_p = center_gain, center_phase
         total = n_points * n_points
         done = 0
-        for g in tqdm(g_vals, desc="IQ correction scan", unit="row", leave=False):
-            for p in p_vals:
-                self._apply_iq_correction(element, float(g), float(p), i0, q0)
+        live = self._init_live_heatmap(
+            g_vals,
+            p_vals,
+            title=f"IQ correction scan ({element}, sideband={cfg.sideband})",
+        ) if cfg.live_plot else None
+        for ix, g in enumerate(tqdm(g_vals, desc="IQ correction scan", unit="row", leave=False)):
+            for iy, p in enumerate(p_vals):
+                self._apply_iq_correction(
+                    element, float(g), float(p), i0, q0,
+                    write_db=write_db,
+                )
                 job = self._start_cw(element)
                 self._set_dc_offsets(element, i0, q0)
                 time.sleep(cfg.iq_settle)
-                P_img = self._sa.measure_peak_power(f_img)
+                tones = self._sa.measure_tones(f_lo, f_if)
+                P_img = self._objective_cost(
+                    p_target_dbm=float(tones["P_des_dBm"]),
+                    p_carrier_dbm=float(tones["P_LO_dBm"]),
+                    p_image_dbm=float(tones["P_img_dBm"]),
+                    cfg=cfg,
+                )
                 self._stop_cw(job)
                 if P_img < best_P:
                     best_P, best_g, best_p = P_img, float(g), float(p)
                 done += 1
+                self._update_live_heatmap(
+                    live,
+                    ix=ix,
+                    iy=iy,
+                    value=float(P_img),
+                    best_x=float(best_g),
+                    best_y=float(best_p),
+                    every=max(1, int(cfg.live_plot_every)),
+                    counter=done,
+                )
             _logger.debug("  IQ grid: %d/%d  best P_img=%.1f dBm", done, total, best_P)
         return best_g, best_p, best_P
 
@@ -520,9 +827,11 @@ class ManualMixerCalibrator:
         q0: float,
         gain: float,
         phase: float,
+        *,
+        write_db: bool = True,
     ) -> dict[str, float]:
         """Apply final parameters, start CW, measure all three tones."""
-        self._apply_iq_correction(element, gain, phase, i0, q0)
+        self._apply_iq_correction(element, gain, phase, i0, q0, write_db=write_db)
         job = self._start_cw(element)
         self._set_dc_offsets(element, i0, q0)
         time.sleep(self._cfg.iq_settle)
@@ -531,17 +840,104 @@ class ManualMixerCalibrator:
         return tones
 
     # ══════════════════════════════════════════════════════════
-    #  calibration_db.json persistence
+    #  calibration_db.json persistence (Windows-safe)
     # ══════════════════════════════════════════════════════════
     def _read_db(self) -> dict:
-        with open(self._db_path) as f:
+        """Read calibration DB from disk (bypasses cache)."""
+        with open(self._db_path, encoding="utf-8") as f:
             return json.load(f)
 
+    def _get_db(self) -> dict:
+        """Return in-memory DB cache if available, else read from disk."""
+        if self._db_cache is not None:
+            return self._db_cache
+        return self._read_db()
+
     def _write_db(self, db: dict) -> None:
-        tmp = self._db_path.with_suffix(".tmp")
-        with open(tmp, "w") as f:
-            json.dump(db, f, indent=4)
-        tmp.replace(self._db_path)
+        """Atomically write *db* to ``calibration_db.json``.
+
+        Uses a uniquely-named temp file in the same directory and
+        ``os.replace()`` for atomic semantics.  On Windows, includes a
+        retry loop with exponential backoff to handle transient
+        PermissionError from antivirus/indexer/editor locks.
+        """
+        parent = self._db_path.parent
+        parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=parent, prefix=".mixcal_tmp_", suffix=".json",
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(db, f, indent=4)
+            # fd is now closed — safe to rename
+            self._replace_with_retry(tmp_path, str(self._db_path))
+        except BaseException:
+            # Clean up temp file on any failure
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+        # Update cache
+        self._db_cache = db
+
+    @staticmethod
+    def _replace_with_retry(src: str, dst: str) -> None:
+        """``os.replace(src, dst)`` with retry on PermissionError (Windows)."""
+        for attempt in range(_DB_WRITE_MAX_RETRIES):
+            try:
+                os.replace(src, dst)
+                return
+            except PermissionError:
+                if attempt == _DB_WRITE_MAX_RETRIES - 1:
+                    _logger.error(
+                        "Failed to replace '%s' -> '%s' after %d attempts.",
+                        src, dst, _DB_WRITE_MAX_RETRIES,
+                    )
+                    raise
+                delay = _DB_WRITE_RETRY_BASE_DELAY * (2 ** attempt)
+                _logger.warning(
+                    "PermissionError replacing '%s' -> '%s' (attempt %d/%d), "
+                    "retrying in %.2fs...",
+                    src, dst, attempt + 1, _DB_WRITE_MAX_RETRIES, delay,
+                )
+                time.sleep(delay)
+
+    def _write_scratch_db(self, db: dict) -> None:
+        """Write *db* to a scratch file (not the canonical path).
+
+        Used when ``save_to_db=False`` so QM can reopen with trial
+        correction values without modifying the canonical DB.
+        The scratch file lives alongside the real DB with a ``.scratch``
+        extension.
+        """
+        scratch = self._db_path.with_suffix(".scratch.json")
+        fd, tmp_path = tempfile.mkstemp(
+            dir=self._db_path.parent, prefix=".mixcal_scratch_", suffix=".json",
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(db, f, indent=4)
+            self._replace_with_retry(tmp_path, str(scratch))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+        # Update cache so subsequent reads use the latest trial values
+        self._db_cache = db
+
+    def _cleanup_scratch(self) -> None:
+        """Remove the scratch DB file if it exists."""
+        scratch = self._db_path.with_suffix(".scratch.json")
+        try:
+            if scratch.exists():
+                scratch.unlink()
+        except OSError as e:
+            _logger.debug("Could not remove scratch file %s: %s", scratch, e)
 
     # ── element → mode ID resolution ──────────────────────────
     def _resolve_mode_id(self, db: dict, element: str) -> int:
@@ -605,6 +1001,13 @@ class ManualMixerCalibrator:
     def _print_summary(self, result: dict, *, saved: bool) -> None:
         f_lo = result["f_lo"]
         f_if = result["f_if"]
+        sideband = result.get("sideband", self._cfg.sideband)
+        if sideband == "usb":
+            f_target = f_lo + abs(f_if)
+            f_image = f_lo - abs(f_if)
+        else:
+            f_target = f_lo - abs(f_if)
+            f_image = f_lo + abs(f_if)
         lines = [
             "",
             "=" * 60,
@@ -612,11 +1015,12 @@ class ManualMixerCalibrator:
             "=" * 60,
             f"  LO:  {f_lo / 1e9:.6f} GHz",
             f"  IF:  {f_if / 1e6:.2f} MHz",
+            f"  Sideband target: {sideband.upper()}",
             "-" * 60,
-            f"  P_des  @ {(f_lo - abs(f_if)) / 1e9:.6f} GHz : {result.get('P_des_dBm', float('nan')):+.1f} dBm",
+            f"  P_target  @ {f_target / 1e9:.6f} GHz : {result.get('P_des_dBm', float('nan')):+.1f} dBm",
             f"  P_LO   @ {f_lo / 1e9:.6f} GHz : {result.get('P_LO_dBm', float('nan')):+.1f} dBm"
             f"   (LO leak {result.get('LO_leak_dBc', float('nan')):+.1f} dBc)",
-            f"  P_img  @ {(f_lo + abs(f_if)) / 1e9:.6f} GHz : {result.get('P_img_dBm', float('nan')):+.1f} dBm"
+            f"  P_image  @ {f_image / 1e9:.6f} GHz : {result.get('P_img_dBm', float('nan')):+.1f} dBm"
             f"   (IRR {result.get('IRR_dBc', float('nan')):+.1f} dBc)",
             "-" * 60,
             f"  DC offsets:  I0 = {result['i0']:+.6f}   Q0 = {result['q0']:+.6f}",

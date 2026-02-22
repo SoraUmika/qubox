@@ -868,9 +868,21 @@ def readout_ge_integrated_trace(qb_el, weights, num_div, div_clks, r180, ro_depl
         n_avg : number of averages
         target_save_rate_khz : target save rate in kHz (default=2.0, meaning 2000 saves/sec)
     """
-    measureMacro.set_outputs(weights)
+    if not isinstance(weights, (list, tuple)):
+        raise TypeError(
+            "weights must be a list/tuple of four integration-weight labels for "
+            "[II, IQ, QI, QQ]."
+        )
+    if len(weights) != 4:
+        raise ValueError(
+            "readout_ge_integrated_trace requires 4 weights for [II, IQ, QI, QQ], "
+            f"got {len(weights)}: {weights!r}."
+        )
+
+    measureMacro.set_outputs(list(weights))
     measureMacro.set_demodulator(demod.sliced, div_clks)
-    measureMacro.set_output_ports(["out1", "out2", "out1", "out2"])
+    output_ports = ["out1" if (i % 2 == 0) else "out2" for i in range(len(weights))]
+    measureMacro.set_output_ports(output_ports)
     with program() as readout_ge_integrated_trace:
         n   = declare(int)
         ind = declare(int)
@@ -883,9 +895,6 @@ def readout_ge_integrated_trace(qb_el, weights, num_div, div_clks, r180, ro_depl
         n_st  = declare_stream()
         II_st = declare_stream(); IQ_st = declare_stream()
         QI_st = declare_stream(); QQ_st = declare_stream()
-
-        if len(weights) != 4:
-            raise ValueError("weights mismatch, must be length four for this experiment!")
 
         # ===== Dynamic safety wait calculation =====
         # Each iteration saves: 8 * num_div variables (4 IQ pairs Ã— 2 states Ã— num_div)

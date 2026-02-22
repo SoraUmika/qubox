@@ -194,8 +194,17 @@ class DRAGCalibration(ExperimentBase):
         analysis = AnalysisResult.from_run(result, metrics=metrics)
 
         if update_calibration and self.calibration_store:
-            self.calibration_store.set_pulse_calibration(
-                name="x180", drag_coeff=metrics["optimal_alpha"],
+            alpha_lo = float(np.min(amps)) if len(amps) else None
+            alpha_hi = float(np.max(amps)) if len(amps) else None
+            self.guarded_calibration_commit(
+                analysis=analysis,
+                run_result=result,
+                calibration_tag="drag_calibration_x180",
+                require_fit=False,
+                required_metrics={"optimal_alpha": (alpha_lo, alpha_hi)},
+                apply_update=lambda: self.calibration_store.set_pulse_calibration(
+                    name="x180", drag_coeff=metrics["optimal_alpha"],
+                ),
             )
 
         return analysis

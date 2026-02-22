@@ -1,6 +1,7 @@
 """Fock-manifold-resolved experiments."""
 from __future__ import annotations
 
+import logging
 from typing import Any, Union
 
 import numpy as np
@@ -18,6 +19,9 @@ from ...analysis.cQED_models import (
 )
 from ...hardware.program_runner import RunResult
 from ...programs import cQED_programs
+from ...tools.generators import validate_displacement_ops
+
+logger = logging.getLogger(__name__)
 
 
 class FockResolvedSpectroscopy(ExperimentBase):
@@ -35,9 +39,22 @@ class FockResolvedSpectroscopy(ExperimentBase):
         sel_r180: str = "sel_x180",
         calibrate_ref_r180_S: bool = True,
         n_avg: int = 100,
+        allow_default_state_prep: bool = False,
     ) -> RunResult:
         attr = self.attr
         self.set_standard_frequencies()
+        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+
+        if state_prep is None:
+            if not allow_default_state_prep:
+                raise ValueError(
+                    "state_prep is required for FockResolvedSpectroscopy. "
+                    "Provide an explicit notebook-defined preparation macro via state_prep=. "
+                    "Temporary compatibility path: set allow_default_state_prep=True to use legacy no-op prep."
+                )
+            from qm.qua import wait
+            def state_prep():
+                wait(1)
 
         # Convert absolute RF probe frequencies to IFs relative to qubit LO
         lo_freq = self.hw.get_element_lo(attr.qb_el)
@@ -47,7 +64,7 @@ class FockResolvedSpectroscopy(ExperimentBase):
         prog = cQED_programs.fock_resolved_spectroscopy(
             attr.qb_el, state_prep,
             qb_if, fock_ifs,
-            sel_r180, attr.st_therm_clks, n_avg,
+            sel_r180, st_therm_clks, n_avg,
             sel_r180_transfer_calibration=calibrate_ref_r180_S,
         )
         result = self.run_program(
@@ -123,6 +140,7 @@ class FockResolvedT1(ExperimentBase):
         n_avg: int = 1000,
     ) -> RunResult:
         attr = self.attr
+        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
 
         if fock_fqs is None:
             if attr.fock_fqs is None:
@@ -134,6 +152,17 @@ class FockResolvedT1(ExperimentBase):
 
         if fock_disps is None:
             fock_disps = [f"disp_n{n}" for n in range(len(fock_fqs))]
+
+        # ---- Fail-fast: verify displacement ops are registered ----
+        missing = validate_displacement_ops(self.pulse_mgr, attr.st_el, fock_disps)
+        if missing:
+            raise RuntimeError(
+                f"Missing displacement pulses on element {attr.st_el!r}: {missing}. "
+                f"Register them first via:\n"
+                f"  from qubox_v2.tools.generators import ensure_displacement_ops\n"
+                f"  ensure_displacement_ops(session.pulse_mgr, element={attr.st_el!r}, n_max={len(fock_fqs)})\n"
+                f"  session.burn_pulses()"
+            )
 
         delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
 
@@ -147,7 +176,7 @@ class FockResolvedT1(ExperimentBase):
             attr.qb_el, attr.st_el,
             fock_disps, fock_ifs,
             sel_r180, delay_clks,
-            attr.st_therm_clks, n_avg,
+            st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
@@ -275,6 +304,7 @@ class FockResolvedRamsey(ExperimentBase):
         n_avg: int = 1000,
     ) -> RunResult:
         attr = self.attr
+        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
 
         if fock_fqs is None:
             if attr.fock_fqs is None:
@@ -290,6 +320,17 @@ class FockResolvedRamsey(ExperimentBase):
         if disps is None:
             disps = [f"disp_n{n}" for n in range(len(fock_fqs))]
 
+        # ---- Fail-fast: verify displacement ops are registered ----
+        missing = validate_displacement_ops(self.pulse_mgr, attr.st_el, disps)
+        if missing:
+            raise RuntimeError(
+                f"Missing displacement pulses on element {attr.st_el!r}: {missing}. "
+                f"Register them first via:\n"
+                f"  from qubox_v2.tools.generators import ensure_displacement_ops\n"
+                f"  ensure_displacement_ops(session.pulse_mgr, element={attr.st_el!r}, n_max={len(fock_fqs)})\n"
+                f"  session.burn_pulses()"
+            )
+
         delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
 
         self.set_standard_frequencies()
@@ -302,7 +343,7 @@ class FockResolvedRamsey(ExperimentBase):
             attr.qb_el, attr.st_el,
             fock_ifs, np.asarray(detunings),
             disps, sel_r90, delay_clks,
-            attr.st_therm_clks, n_avg,
+            st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
@@ -430,6 +471,7 @@ class FockResolvedPowerRabi(ExperimentBase):
     ) -> RunResult:
         attr = self.attr
         self.set_standard_frequencies()
+        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
 
         if fock_fqs is None:
             if attr.fock_fqs is None:
@@ -445,6 +487,17 @@ class FockResolvedPowerRabi(ExperimentBase):
         if disp_n_list is None:
             disp_n_list = [f"disp_n{n}" for n in range(len(fock_fqs))]
 
+        # ---- Fail-fast: verify displacement ops are registered ----
+        missing = validate_displacement_ops(self.pulse_mgr, attr.st_el, disp_n_list)
+        if missing:
+            raise RuntimeError(
+                f"Missing displacement pulses on element {attr.st_el!r}: {missing}. "
+                f"Register them first via:\n"
+                f"  from qubox_v2.tools.generators import ensure_displacement_ops\n"
+                f"  ensure_displacement_ops(session.pulse_mgr, element={attr.st_el!r}, n_max={len(fock_fqs)})\n"
+                f"  session.burn_pulses()"
+            )
+
         # Convert absolute Fock frequencies to IFs relative to qubit LO
         lo_freq = self.hw.get_element_lo(attr.qb_el)
         fock_ifs = np.array([int(fq - lo_freq) for fq in fock_fqs], dtype=int)
@@ -453,7 +506,7 @@ class FockResolvedPowerRabi(ExperimentBase):
             attr.qb_el, attr.st_el,
             np.asarray(gains), disp_n_list,
             fock_ifs, sel_qb_pulse,
-            attr.st_therm_clks, n_avg,
+            st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,

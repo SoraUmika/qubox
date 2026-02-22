@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import warnings
 from typing import Optional
 from dataclasses import dataclass, asdict, field, fields
 import json
@@ -14,6 +15,15 @@ _logger = logging.getLogger(__name__)
 
 # Fields that must be non-None for a context to be usable
 _REQUIRED_FIELDS = ("ro_el", "qb_el", "ro_fq", "qb_fq")
+
+_DEPRECATED_WORKFLOW_FIELDS = (
+    "ro_therm_clks",
+    "qb_therm_clks",
+    "st_therm_clks",
+    "b_coherent_amp",
+    "b_coherent_len",
+    "b_alpha",
+)
 
 
 @dataclass
@@ -113,6 +123,21 @@ class cQED_attributes:
         # Filter to known fields only (ignore unknown keys in the JSON)
         known = {f.name for f in fields(cls) if not f.name.startswith("_")}
         filtered = {k: v for k, v in data.items() if k in known}
+
+        present_deprecated = [k for k in _DEPRECATED_WORKFLOW_FIELDS if filtered.get(k) is not None]
+        if present_deprecated:
+            warnings.warn(
+                "cqed_params.json contains deprecated workflow/calibration keys "
+                f"{present_deprecated}. Move these to calibration/session-level config; "
+                "cqed_params.json support is kept for backward compatibility.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            _logger.warning(
+                "Deprecated cqed_params keys loaded for backward compatibility: %s",
+                present_deprecated,
+            )
+
         unknown = set(data) - known
         if unknown:
             _logger.debug("Ignoring unknown fields in %s: %s", filepath, unknown)

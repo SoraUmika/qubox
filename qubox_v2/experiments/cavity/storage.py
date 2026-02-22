@@ -236,12 +236,21 @@ class NumSplittingSpectroscopy(ExperimentBase):
         sel_r180: str = "sel_x180",
         state_prep: Any = None,
         n_avg: int = 1000,
+        *,
+        allow_default_state_prep: bool = False,
     ) -> RunResult:
         attr = self.attr
         self.set_standard_frequencies()
+        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
 
-        # Default to a no-op QUA macro if no state preparation given
+        # Default no-op prep is deprecated; require explicit notebook-provided state_prep.
         if state_prep is None:
+            if not allow_default_state_prep:
+                raise ValueError(
+                    "state_prep is required for NumSplittingSpectroscopy. "
+                    "Define an explicit preparation macro in your notebook and pass it via state_prep=. "
+                    "Temporary compatibility path: set allow_default_state_prep=True to use legacy no-op prep."
+                )
             from qm.qua import wait
             def state_prep():
                 wait(1)
@@ -260,7 +269,7 @@ class NumSplittingSpectroscopy(ExperimentBase):
         prog = cQED_programs.num_splitting_spectroscopy(
             state_prep, attr.qb_el, attr.st_el,
             sel_r180, if_frequencies,
-            attr.st_therm_clks, n_avg,
+            st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
@@ -317,12 +326,13 @@ class StorageRamsey(ExperimentBase):
     ) -> RunResult:
         attr = self.attr
         self.set_standard_frequencies()
+        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
 
         prog = cQED_programs.storage_ramsey(
             attr.ro_el, attr.qb_el, attr.st_el,
             disp_pulse, sel_r180,
             np.asarray(delay_ticks, dtype=int),
-            attr.st_therm_clks, n_avg,
+            st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
@@ -404,6 +414,7 @@ class StorageChiRamsey(ExperimentBase):
     ) -> RunResult:
         attr = self.attr
         self.set_standard_frequencies()
+        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
 
         # Guard: measureMacro must be configured before running chi Ramsey
         from ...programs.macros.measure import measureMacro
@@ -417,7 +428,7 @@ class StorageChiRamsey(ExperimentBase):
             attr.ro_el, attr.qb_el, attr.st_el,
             disp_pulse, x90_pulse,
             np.asarray(delay_ticks, dtype=int),
-            attr.st_therm_clks, n_avg,
+            st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,
@@ -516,6 +527,7 @@ class StoragePhaseEvolution(ExperimentBase):
     ) -> RunResult:
         attr = self.attr
         self.set_standard_frequencies()
+        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
 
         # Convert absolute Fock probe frequencies to IFs relative to qubit LO
         lo_freq = self.hw.get_element_lo(attr.qb_el)
@@ -529,7 +541,7 @@ class StoragePhaseEvolution(ExperimentBase):
             fock0_if, fock_probe_ifs,
             np.asarray(delay_clks, dtype=int),
             snap_list,
-            attr.st_therm_clks, n_avg,
+            st_therm_clks, n_avg,
         )
         result = self.run_program(
             prog, n_total=n_avg,

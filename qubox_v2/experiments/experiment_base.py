@@ -21,7 +21,10 @@ Usage::
 """
 from __future__ import annotations
 
+import datetime
+import json
 import warnings
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -239,6 +242,49 @@ class ExperimentBase:
         else:
             raise RuntimeError("Experiment context has no burn_pulses method.")
 
+    def get_therm_clks(self, channel: str, *, fallback: int | None = None) -> int | None:
+        """Resolve thermalization clocks via session runtime settings first."""
+        getter = getattr(self._ctx, "get_therm_clks", None)
+        if callable(getter):
+            val = getter(channel, default=None)
+            if val is not None:
+                return int(val)
+
+        legacy_attr = f"{channel}_therm_clks"
+        legacy_val = getattr(self.attr, legacy_attr, None)
+        if legacy_val is not None:
+            warnings.warn(
+                f"Using deprecated cqed_params fallback for '{legacy_attr}'. "
+                "Prefer session runtime settings.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            return int(legacy_val)
+
+        return fallback
+
+    def get_displacement_reference(self) -> dict[str, Any]:
+        """Resolve displacement reference parameters from runtime settings first."""
+        getter = getattr(self._ctx, "get_displacement_reference", None)
+        if callable(getter):
+            ref = getter()
+            if isinstance(ref, dict):
+                return ref
+
+        out = {
+            "coherent_amp": getattr(self.attr, "b_coherent_amp", None),
+            "coherent_len": getattr(self.attr, "b_coherent_len", None),
+            "b_alpha": getattr(self.attr, "b_alpha", None),
+        }
+        if any(v is not None for v in out.values()):
+            warnings.warn(
+                "Using deprecated cqed_params displacement reference fields. "
+                "Prefer session runtime settings.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+        return out
+
     def run_program(
         self, prog, *, n_total: int, processors: list | None = None,
         process_in_sim: bool = False, **kw,
@@ -319,6 +365,90 @@ class ExperimentBase:
         raise NotImplementedError(
             f"{self.name}.plot() not implemented"
         )
+
+    def guarded_calibration_commit(
+        self,
+        *,
+        analysis,
+        run_result: RunResult,
+        calibration_tag: str,
+        apply_update,
+        require_fit: bool = True,
+        min_r2: float | None = None,
+        required_metrics: dict[str, tuple[float | None, float | None]] | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Two-phase calibration persistence: artifact first, then conditional commit.
+
+        Phase A: always persist a timestamped run artifact with validation summary.
+        Phase B: apply calibration update only if validation gates pass.
+        """
+        exp_path = Path(getattr(self._ctx, "experiment_path", "."))
+        art_dir = exp_path / "artifacts" / "calibration_runs"
+        art_dir.mkdir(parents=True, exist_ok=True)
+
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        artifact_path = art_dir / f"{calibration_tag}_{ts}.json"
+
+        errors: list[str] = []
+        fit = getattr(analysis, "fit", None)
+        metrics = dict(getattr(analysis, "metrics", {}) or {})
+
+        if require_fit:
+            if fit is None:
+                errors.append("No fit object available")
+            elif not getattr(fit, "params", None):
+                errors.append("Fit has no parameters")
+
+        if min_r2 is not None:
+            r2 = None if fit is None else getattr(fit, "r_squared", None)
+            if r2 is None or not np.isfinite(r2) or r2 < float(min_r2):
+                errors.append(f"Fit r_squared below threshold: {r2} < {min_r2}")
+
+        if required_metrics:
+            for key, (lo, hi) in required_metrics.items():
+                val = metrics.get(key)
+                if val is None or not np.isfinite(float(val)):
+                    errors.append(f"Metric '{key}' missing or non-finite")
+                    continue
+                fval = float(val)
+                if lo is not None and fval < lo:
+                    errors.append(f"Metric '{key}' below minimum: {fval} < {lo}")
+                if hi is not None and fval > hi:
+                    errors.append(f"Metric '{key}' above maximum: {fval} > {hi}")
+
+        payload = {
+            "timestamp": ts,
+            "experiment": self.name,
+            "calibration_tag": calibration_tag,
+            "validation_passed": len(errors) == 0,
+            "validation_errors": errors,
+            "fit": {
+                "model": getattr(fit, "model_name", None) if fit else None,
+                "params": getattr(fit, "params", None) if fit else None,
+                "uncertainties": getattr(fit, "uncertainties", None) if fit else None,
+                "r_squared": getattr(fit, "r_squared", None) if fit else None,
+            },
+            "metrics": metrics,
+            "run_metadata": dict(getattr(run_result, "metadata", {}) or {}),
+            "extra_metadata": extra_metadata or {},
+        }
+        with open(artifact_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, default=str)
+
+        if errors:
+            _logger.warning(
+                "Calibration commit skipped for %s. Artifact saved at %s. Errors: %s",
+                calibration_tag, artifact_path, errors,
+            )
+            return False
+
+        apply_update()
+        _logger.info(
+            "Calibration commit applied for %s. Artifact saved at %s",
+            calibration_tag, artifact_path,
+        )
+        return True
 
     @property
     def calibration_store(self):
