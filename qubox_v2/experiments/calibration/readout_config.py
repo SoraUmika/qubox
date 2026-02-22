@@ -35,7 +35,7 @@ class ReadoutConfig:
     cos_weight_key, sin_weight_key, m_sin_weight_key : str
         Integration-weight labels passed to the weight-optimisation and
         discrimination pipeline.  Changing these decouples the pipeline
-        from the hard-coded ``"cos"``/``"sin"``/``"m_sin"`` labels.
+        from the hard-coded ``"cos"``/``"sin"``/``"minus_sin"`` labels.
     n_samples_disc : int
         Number of IQ blob samples for the discrimination step.
     burn_rot_weights : bool
@@ -81,7 +81,7 @@ class ReadoutConfig:
     revert_on_no_improvement: bool = False
     cos_weight_key: str = "cos"
     sin_weight_key: str = "sin"
-    m_sin_weight_key: str = "m_sin"
+    m_sin_weight_key: str = "minus_sin"
 
     # Discrimination
     n_samples_disc: int = 250_000

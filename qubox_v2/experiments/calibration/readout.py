@@ -781,7 +781,8 @@ class ReadoutGEDiscrimination(ExperimentBase):
         return report
 
     def plot(self, analysis: AnalysisResult, *, ax=None,
-             show_rotated: bool = True, interactive: bool = False, **kwargs):
+             show_rotated: bool = True, show_histogram: bool = True,
+             interactive: bool = False, **kwargs):
         S_g = analysis.data.get("S_g")
         S_e = analysis.data.get("S_e")
         if S_g is None or S_e is None:
@@ -794,7 +795,12 @@ class ReadoutGEDiscrimination(ExperimentBase):
                 return fig
 
         has_rotation = show_rotated and "angle" in analysis.metrics
-        n_plots = 3 if has_rotation else 2
+        has_histogram = has_rotation and show_histogram
+        n_plots = 2  # always: scatter + confusion
+        if has_rotation:
+            n_plots += 1  # rotated scatter
+        if has_histogram:
+            n_plots += 1  # histogram
 
         if ax is None:
             fig, axes = plt.subplots(1, n_plots, figsize=(7 * n_plots, 6))
@@ -834,12 +840,12 @@ class ReadoutGEDiscrimination(ExperimentBase):
             axes[1].set_title("Confusion Matrix")
             fig.colorbar(im, ax=axes[1], shrink=0.8)
 
-        # Panel 2: Rotated IQ blobs with threshold line (Section 4A)
-        if has_rotation and n_plots == 3:
+        # Compute rotated blobs (shared by panels 2 and 3)
+        Sg_rot, Se_rot = None, None
+        if has_rotation:
             angle = analysis.metrics["angle"]
             threshold = analysis.metrics.get("threshold", 0.0)
 
-            # Use stored rotated data if available, otherwise recompute
             Sg_rot = analysis.data.get("Sg_rot")
             Se_rot = analysis.data.get("Se_rot")
             if Sg_rot is None or Se_rot is None:
@@ -847,15 +853,39 @@ class ReadoutGEDiscrimination(ExperimentBase):
                 Sg_rot = np.asarray(S_g) * rot
                 Se_rot = np.asarray(S_e) * rot
 
-            axes[2].scatter(np.real(Sg_rot), np.imag(Sg_rot), s=1, alpha=0.2, c="blue", label="|g>")
-            axes[2].scatter(np.real(Se_rot), np.imag(Se_rot), s=1, alpha=0.2, c="red", label="|e>")
-            axes[2].axvline(x=threshold, color="k", ls="--", lw=1.5, label=f"thr={threshold:.4g}")
-            axes[2].set_title("Rotated IQ + Threshold")
-            axes[2].set_xlabel("I_rot")
-            axes[2].set_ylabel("Q_rot")
-            axes[2].legend()
-            axes[2].set_aspect("equal", adjustable="datalim")
-            axes[2].grid(True, alpha=0.3)
+        # Panel 2: Rotated IQ blobs with threshold line (Section 4A)
+        panel_idx = 2
+        if has_rotation:
+            axes[panel_idx].scatter(np.real(Sg_rot), np.imag(Sg_rot), s=1, alpha=0.2, c="blue", label="|g>")
+            axes[panel_idx].scatter(np.real(Se_rot), np.imag(Se_rot), s=1, alpha=0.2, c="red", label="|e>")
+            axes[panel_idx].axvline(x=threshold, color="k", ls="--", lw=1.5, label=f"thr={threshold:.4g}")
+            axes[panel_idx].set_title("Rotated IQ + Threshold")
+            axes[panel_idx].set_xlabel("I_rot")
+            axes[panel_idx].set_ylabel("Q_rot")
+            axes[panel_idx].legend()
+            axes[panel_idx].set_aspect("equal", adjustable="datalim")
+            axes[panel_idx].grid(True, alpha=0.3)
+            panel_idx += 1
+
+        # Panel 3: Rotated-I histogram (legacy parity: two_state_discriminator hist)
+        if has_histogram and Sg_rot is not None and Se_rot is not None:
+            Ig_rot = np.real(Sg_rot)
+            Ie_rot = np.real(Se_rot)
+            mu_g = analysis.metrics.get("rot_mu_g")
+            mu_e = analysis.metrics.get("rot_mu_e")
+            mu_g_I = float(np.real(mu_g)) if mu_g is not None else float(np.mean(Ig_rot))
+            mu_e_I = float(np.real(mu_e)) if mu_e is not None else float(np.mean(Ie_rot))
+
+            axes[panel_idx].hist(Ig_rot, bins=100, alpha=0.75, color="blue", label=r"$|g\rangle$")
+            axes[panel_idx].hist(Ie_rot, bins=100, alpha=0.75, color="red", label=r"$|e\rangle$")
+            axes[panel_idx].axvline(x=threshold, ls="--", color="k", alpha=0.6, label=f"$I_{{thr}}={threshold:.4g}$")
+            axes[panel_idx].axvline(x=mu_g_I, ls="-.", color="blue", alpha=0.8, label=rf"$\mu_g={mu_g_I:.4g}$")
+            axes[panel_idx].axvline(x=mu_e_I, ls="-.", color="red", alpha=0.8, label=rf"$\mu_e={mu_e_I:.4g}$")
+            axes[panel_idx].set_xlabel(r"$I_\mathrm{rot}$")
+            axes[panel_idx].set_ylabel("Counts")
+            axes[panel_idx].set_title(r"$I_\mathrm{rot}$ Histogram")
+            axes[panel_idx].legend(loc="best")
+            axes[panel_idx].ticklabel_format(style="sci", axis="x", scilimits=(0, 0))
 
         plt.tight_layout()
         plt.show()
@@ -926,33 +956,23 @@ class ReadoutGEDiscrimination(ExperimentBase):
             return s if not p else f"{p}{s}"
 
         # Canonical, prefixed
-        cand = (_name(prefix, "cos"), _name(prefix, "sin"), _name(prefix, "m_sin"))
+        cand = (_name(prefix, "cos"), _name(prefix, "sin"), _name(prefix, "minus_sin"))
         if all(k in mapping for k in cand):
             return cand
 
         # Canonical, unprefixed
-        cand_un = ("cos", "sin", "m_sin")
+        cand_un = ("cos", "sin", "minus_sin")
         if all(k in mapping for k in cand_un):
             return cand_un
 
         # Legacy, prefixed
         legacy = (_name(prefix, "rot_cos"), _name(prefix, "rot_sin"), _name(prefix, "rot_m_sin"))
         if all(k in mapping for k in legacy):
-            warnings.warn(
-                "Using legacy 'rot_*' weight labels. "
-                "Please rename to 'cos', 'sin', 'm_sin'.",
-                DeprecationWarning, stacklevel=3,
-            )
             return legacy
 
         # Legacy, unprefixed
         legacy_un = ("rot_cos", "rot_sin", "rot_m_sin")
         if all(k in mapping for k in legacy_un):
-            warnings.warn(
-                "Using legacy 'rot_*' weight labels. "
-                "Please rename to 'cos', 'sin', 'm_sin'.",
-                DeprecationWarning, stacklevel=3,
-            )
             return legacy_un
 
         raise KeyError(
@@ -1222,6 +1242,8 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         return result
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        import pandas as pd
+
         states = result.output.get("states")
         metrics: dict[str, Any] = {}
         metadata: dict[str, Any] = {}
@@ -1241,12 +1263,71 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             # states shape: (n_shots, 2_branches, 3_measurements)
             # branch 0 = ground-prepared, branch 1 = excited-prepared
             # measurement 0=M0, 1=M1, 2=M2
-            try:
-                m1_g = states[:, 0, 1]  # M1 outcomes for ground prep
-                m1_e = states[:, 1, 1]  # M1 outcomes for excited prep
-                m2_g = states[:, 0, 2]  # M2 outcomes for ground prep
-                m2_e = states[:, 1, 2]  # M2 outcomes for excited prep
 
+            # Extract boolean measurement outcomes (legacy parity)
+            m0_g = states[:, 0, 0].astype(bool)
+            m0_e = states[:, 1, 0].astype(bool)
+            m1_g = states[:, 0, 1].astype(bool)
+            m1_e = states[:, 1, 1].astype(bool)
+            m2_g = states[:, 0, 2].astype(bool)
+            m2_e = states[:, 1, 2].astype(bool)
+
+            # Extract IQ data per measurement (legacy parity)
+            # QUA program saves I0/Q0/I1/Q1/I2/Q2 as (n_shots, 2_branches)
+            I0 = result.output.get("I0")
+            Q0 = result.output.get("Q0")
+            I1 = result.output.get("I1")
+            Q1 = result.output.get("Q1")
+            I2 = result.output.get("I2")
+            Q2 = result.output.get("Q2")
+
+            has_iq = all(x is not None for x in (I0, Q0, I1, Q1, I2, Q2))
+            if has_iq:
+                I0, Q0 = np.asarray(I0), np.asarray(Q0)
+                I1, Q1 = np.asarray(I1), np.asarray(Q1)
+                I2, Q2 = np.asarray(I2), np.asarray(Q2)
+
+                # Build complex IQ blobs per measurement per branch (legacy parity)
+                S0_g = I0[:, 0] + 1j * Q0[:, 0]
+                S0_e = I0[:, 1] + 1j * Q0[:, 1]
+                S1_g = I1[:, 0] + 1j * Q1[:, 0]
+                S1_e = I1[:, 1] + 1j * Q1[:, 1]
+                S2_g = I2[:, 0] + 1j * Q2[:, 0]
+                S2_e = I2[:, 1] + 1j * Q2[:, 1]
+
+                metrics["S0_g"] = S0_g
+                metrics["S0_e"] = S0_e
+                metrics["S1_g"] = S1_g
+                metrics["S1_e"] = S1_e
+                metrics["S2_g"] = S2_g
+                metrics["S2_e"] = S2_e
+
+            # Store boolean outcomes (legacy parity)
+            metrics["m0_g"] = m0_g
+            metrics["m0_e"] = m0_e
+            metrics["m1_g"] = m1_g
+            metrics["m1_e"] = m1_e
+            metrics["m2_g"] = m2_g
+            metrics["m2_e"] = m2_e
+
+            # Per-measurement outcome probabilities (legacy parity)
+            P0_g = float(1.0 - np.mean(m0_g))   # P(ground | ground prep, M0)
+            P0_e = float(np.mean(m0_e))           # P(excited | excited prep, M0)
+            P1_g = float(1.0 - np.mean(m1_g))   # P(ground | ground prep, M1)
+            P1_e = float(np.mean(m1_e))           # P(excited | excited prep, M1)
+            P2_g = float(1.0 - np.mean(m2_g))   # P(ground | ground prep, M2)
+            P2_e = float(np.mean(m2_e))           # P(excited | excited prep, M2)
+
+            butterfly_df = pd.DataFrame(
+                {
+                    "Ground (g)": [P0_g, P1_g, P2_g],
+                    "Excited (e)": [P0_e, P1_e, P2_e],
+                },
+                index=["m0", "m1", "m2"],
+            )
+            metrics["butterfly_df"] = butterfly_df
+
+            try:
                 bfly_out = butterfly_metrics(m1_g, m1_e, m2_g, m2_e)
                 metrics["F"] = float(bfly_out["F"])
                 metrics["Q"] = float(bfly_out["Q"])
@@ -1329,7 +1410,8 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         return analysis
 
     def plot(self, analysis: AnalysisResult, *, ax=None,
-             show_histogram: bool = False, **kwargs):
+             show_histogram: bool = False,
+             show_discriminator: bool = False, **kwargs):
         metrics = analysis.metrics
         if not any(k in metrics for k in ("F", "Q", "V")):
             return None
@@ -1411,6 +1493,36 @@ class ReadoutButterflyMeasurement(ExperimentBase):
 
         plt.tight_layout()
         plt.show()
+
+        # M0/M1/M2 two-state discriminator plots (legacy parity: show_analysis)
+        if show_discriminator:
+            S0_g = metrics.get("S0_g")
+            S0_e = metrics.get("S0_e")
+            S1_g = metrics.get("S1_g")
+            S1_e = metrics.get("S1_e")
+            S2_g = metrics.get("S2_g")
+            S2_e = metrics.get("S2_e")
+
+            if all(x is not None for x in (S0_g, S0_e, S1_g, S1_e, S2_g, S2_e)):
+                try:
+                    two_state_discriminator(
+                        S0_g.real, S0_g.imag, S0_e.real, S0_e.imag,
+                        b_plot=True, plots=("raw_blob", "hist"),
+                        fig_title="M0 analysis",
+                    )
+                    two_state_discriminator(
+                        S1_g.real, S1_g.imag, S1_e.real, S1_e.imag,
+                        b_plot=True, plots=("rot_blob", "hist", "info"),
+                        fig_title="M1 analysis",
+                    )
+                    two_state_discriminator(
+                        S2_g.real, S2_g.imag, S2_e.real, S2_e.imag,
+                        b_plot=True, plots=("rot_blob", "hist", "info"),
+                        fig_title="M2 analysis",
+                    )
+                except Exception as exc:
+                    _logger.warning("M0/M1/M2 discriminator plots skipped: %s", exc)
+
         return fig
 
 

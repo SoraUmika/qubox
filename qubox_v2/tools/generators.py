@@ -372,8 +372,8 @@ def ensure_displacement_ops(
     if alpha_list is None:
         if abs(b_alpha) == 0:
             raise ValueError("b_alpha must be nonzero for auto-scaling")
-        # Simple scaling: alpha_n proportional to sqrt(n+1)
-        alpha_list = [b_alpha * np.sqrt(n + 1) for n in n_list]
+        # Legacy parity: alpha_n proportional to sqrt(n + 0.5)
+        alpha_list = [b_alpha * np.sqrt(n + 0.5) for n in n_list]
 
     if len(alpha_list) != len(n_list):
         raise ValueError(

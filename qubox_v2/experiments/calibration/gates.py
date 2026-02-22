@@ -69,7 +69,7 @@ class AllXY(ExperimentBase):
         )
         result = self.run_program(
             prog, n_total=n_avg,
-            processors=[pp.proc_default],
+            processors=[pp.proc_default, pp.proc_attach("ops", ops)],
         )
         self.save_output(result.output, "allXY")
         return result
@@ -78,8 +78,9 @@ class AllXY(ExperimentBase):
         # Legacy parity: use Pe (state discrimination) instead of raw IQ magnitude.
         # The QUA program saves "Pe" via boolean_to_int().average(), giving
         # the excited-state probability directly.
-        Pe = result.output.extract("Pe", None)
+        Pe = result.output.get("Pe")
         if Pe is not None:
+            Pe = result.output._format(Pe)
             states = np.asarray(Pe, dtype=float)
         else:
             # Fallback to IQ magnitude if Pe not available
@@ -228,30 +229,31 @@ class DRAGCalibration(ExperimentBase):
         z_y90 = z_r90 * pi_rot
 
         # Register temporary volatile pulses
+        # Legacy parity: pass numpy arrays directly (not .tolist())
         _tmp_pulses = [
             PulseOp(
                 element=attr.qb_el, op="x180_tmp", pulse="x180_tmp_pulse",
                 type="control", length=rlen,
                 I_wf_name="gauss_r180_tmp_wf", Q_wf_name="drag_r180_tmp_wf",
-                I_wf=z_r180.real.tolist(), Q_wf=z_r180.imag.tolist(),
+                I_wf=z_r180.real, Q_wf=z_r180.imag,
             ),
             PulseOp(
                 element=attr.qb_el, op="y180_tmp", pulse="y180_tmp_pulse",
                 type="control", length=rlen,
                 I_wf_name="y180_tmp_I_wf", Q_wf_name="y180_tmp_Q_wf",
-                I_wf=z_y180.real.tolist(), Q_wf=z_y180.imag.tolist(),
+                I_wf=z_y180.real, Q_wf=z_y180.imag,
             ),
             PulseOp(
                 element=attr.qb_el, op="x90_tmp", pulse="x90_tmp_pulse",
                 type="control", length=rlen,
                 I_wf_name="gauss_r90_tmp_wf", Q_wf_name="drag_r90_tmp_wf",
-                I_wf=z_r90.real.tolist(), Q_wf=z_r90.imag.tolist(),
+                I_wf=z_r90.real, Q_wf=z_r90.imag,
             ),
             PulseOp(
                 element=attr.qb_el, op="y90_tmp", pulse="y90_tmp_pulse",
                 type="control", length=rlen,
                 I_wf_name="y90_tmp_I_wf", Q_wf_name="y90_tmp_Q_wf",
-                I_wf=z_y90.real.tolist(), Q_wf=z_y90.imag.tolist(),
+                I_wf=z_y90.real, Q_wf=z_y90.imag,
             ),
         ]
 
@@ -462,9 +464,13 @@ class QubitPulseTrain(ExperimentBase):
 
         # Legacy parity: prefer state discrimination (Pe) over raw I/Q
         # QUA program saves "state" (boolean_to_int averaged) for pulse train
-        Pe = result.output.extract("state", None)
+        Pe = result.output.get("state")
+        if Pe is not None:
+            Pe = result.output._format(Pe)
         if Pe is None:
-            Pe = result.output.extract("Pe", None)
+            Pe = result.output.get("Pe")
+            if Pe is not None:
+                Pe = result.output._format(Pe)
 
         S = result.output.extract("S")
         I_vals = np.real(S)
@@ -764,7 +770,8 @@ class RandomizedBenchmarking(ExperimentBase):
             Q_batch = np.imag(np.asarray(result.output.extract("S"), dtype=complex))
 
             # Legacy parity: also extract Pe (boolean_to_int averaged)
-            Pe_batch = result.output.extract("Pe", None)
+            Pe_raw = result.output.get("Pe")
+            Pe_batch = result.output._format(Pe_raw) if Pe_raw is not None else None
 
             m_idx = meta["m_idx"]
             start = meta["start"]
@@ -803,7 +810,8 @@ class RandomizedBenchmarking(ExperimentBase):
         m_list = result.output.extract("m_list")
 
         # Legacy parity: prefer Pe (state discrimination probability) over raw IQ
-        Pe = result.output.extract("Pe", None)
+        Pe_raw = result.output.get("Pe")
+        Pe = result.output._format(Pe_raw) if Pe_raw is not None else None
         if Pe is not None:
             survival = np.asarray(Pe, dtype=float)
             # Apply confusion-matrix correction if available
