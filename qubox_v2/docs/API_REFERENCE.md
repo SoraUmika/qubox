@@ -1,0 +1,1472 @@
+# qubox\_v2 — API Reference & Architecture Guide
+
+**Version**: 1.0.0  
+**Date**: 2026-02-22  
+**Status**: Governing Document
+
+---
+
+## Table of Contents
+
+1. [High-Level Architecture Overview](#1-high-level-architecture-overview)
+2. [End-to-End Workflow (Execution Lifecycle)](#2-end-to-end-workflow-execution-lifecycle)
+3. [Core Object Model](#3-core-object-model)
+4. [Calibration Architecture](#4-calibration-architecture)
+5. [Declarative Pulse System](#5-declarative-pulse-system)
+6. [Hardware Abstraction Layer](#6-hardware-abstraction-layer)
+7. [State & Persistence Model](#7-state--persistence-model)
+8. [Gate System](#8-gate-system)
+9. [Experiment Registry](#9-experiment-registry)
+10. [Comparison with Legacy](#10-comparison-with-legacy)
+
+---
+
+## 1. High-Level Architecture Overview
+
+### 1.1 What is qubox\_v2?
+
+`qubox_v2` is a modular experiment orchestration framework for circuit-QED
+systems built on Quantum Machines OPX+ hardware.  It replaces the legacy
+monolithic `qubox` package with a layered architecture that enforces:
+
+- **Declarative pulses** — persistent state stores *recipes*, never raw
+  waveform arrays.
+- **SessionState ownership** — an immutable snapshot of every configuration
+  file is computed at startup; any source-of-truth change produces a new
+  build hash.
+- **Calibration-DB persistence** — calibration parameters live in a typed,
+  versioned JSON store (`calibration.json`) governed by a state machine that
+  requires human approval before writes.
+- **No hidden experiment-side waveform mutation** — experiments consume
+  declared operations; they never generate or register waveforms implicitly.
+- **Notebook-first state-prep philosophy** — the Jupyter notebook is the
+  single authoritative site for pulse declaration, state preparation, and
+  calibration approval.
+
+### 1.2 Module-Level Architecture
+
+```
+SessionManager                        ← Layer 9 entry point
+    ├── ConfigEngine                  ← Layer 4: QM config compilation
+    │       └── HardwareConfig        ← Layer 1: hardware.json model
+    ├── HardwareController            ← Layer 1: OPX+/Octave live control
+    ├── ProgramRunner                 ← Layer 1: QUA program execution
+    ├── PulseOperationManager         ← Layer 3: dual-store pulse binding
+    │       └── PulseFactory          ← Layer 3: spec → waveform compiler
+    ├── PulseRegistry                 ← Layer 3: simplified registration API
+    ├── CalibrationStore              ← Layer 5: typed JSON persistence
+    ├── DeviceManager                 ← Layer 1: external instrument fleet
+    ├── ArtifactManager               ← Layer 7: build-hash artifact storage
+    ├── cQED_attributes               ← Physics parameters (frequencies, etc.)
+    └── QueueManager                  ← Layer 1: job queue
+```
+
+### 1.3 Layer Dependency Rule
+
+Layers may depend **only** on layers with lower numbers.  The notebook
+(Layer 9) may access any layer through `SessionManager`.
+
+```
+Layer 9  Notebook / User Interface
+Layer 8  Verification + Legacy Parity Harness
+Layer 7  Artifact Manager
+Layer 6  Experiment Definitions  (ExperimentBase subclasses)
+Layer 5  Calibration Management  (CalibrationStore, StateMachine, Patch)
+Layer 4  ConfigCompiler          (ConfigEngine)
+Layer 3  PulseFactory + Operation Binding  (POM, PulseFactory, PulseRegistry)
+Layer 2  Pulse Specification     (pulse_specs.json, spec_models)
+Layer 1  Hardware Abstraction    (hardware.json, HardwareController, ProgramRunner)
+```
+
+### 1.4 Ownership Table
+
+| Component | Owns | Must NOT Own |
+|-----------|------|--------------|
+| `SessionManager` | Infrastructure lifecycle, context wiring | Experiment logic, calibration decisions |
+| `ConfigEngine` | QM config dict assembly | Hardware connections, pulse sample data |
+| `HardwareController` | Live OPX+/Octave state (LO, gain, IF) | Calibration parameters, pulse definitions |
+| `ProgramRunner` | QUA program submission and result capture | Config building, analysis |
+| `PulseOperationManager` | Waveform/pulse/weight/op-mapping stores | Hardware state, calibration decisions |
+| `CalibrationStore` | `calibration.json` read/write | Pulse registration, hardware control |
+| `DeviceManager` | External instrument connections | QM elements, pulse definitions |
+| `ArtifactManager` | Build-hash-keyed generated artifacts | Source-of-truth files |
+| `ExperimentBase` | Experiment run/analyze/plot lifecycle | Session infrastructure, auto-calibration |
+
+---
+
+## 2. End-to-End Workflow (Execution Lifecycle)
+
+### Step 1 — Session Initialization
+
+```python
+session = SessionManager(experiment_path="seq_1_device/")
+session.open()
+```
+
+**What happens internally:**
+
+1. **Load `hardware.json`** → `ConfigEngine` parses into `HardwareConfig`
+   Pydantic model; validates schema version.
+2. **Load `calibration.json`** → `CalibrationStore` constructs typed
+   `CalibrationData` model (Pydantic v2, schema v3.0.0).
+3. **Load `pulse_specs.json`** → `PulseFactory` ingests declarative recipes.
+4. **Compile waveforms** → `PulseFactory.compile_all()` converts specs into
+   I/Q sample arrays; `PulseFactory.register_all(pom)` binds them to
+   elements.
+5. **Construct runtime element objects** → `ConfigEngine.build_qm_config()`
+   merges hardware + pulse overlay → QM config dict.
+6. **Bind declared pulses to elements** → `PulseOperationManager.burn_to_config()`
+   injects waveforms, pulses, weights, and element-op mappings.
+7. **Register default operations** → every element receives `const` and `zero`.
+8. **Open QM connection** → `HardwareController.open_qm(config_dict)`.
+9. **Compute `SessionState`** → immutable SHA-256 build hash over all
+   source-of-truth files.
+10. **Initialize devices** → `DeviceManager.instantiate_all()` connects
+    external instruments.
+
+> **Invariant**: `SessionManager.open()` must complete before any experiment
+> can run.
+
+### Step 2 — Notebook-Level Operation Declaration
+
+The user explicitly declares state-preparation pulses in notebook cells:
+
+```python
+from qubox_v2.tools.generators import register_rotations_from_ref_iq
+
+# Register derived rotation gates from a reference IQ pair
+register_rotations_from_ref_iq(
+    session.pulse_mgr,
+    ref_I=ref_I_wf,
+    ref_Q=ref_Q_wf,
+    element="qubit",
+    ops={"x180": (pi, 0), "x90": (pi/2, 0), "y90": (pi/2, pi/2)},
+)
+session.burn_pulses()
+```
+
+**Rules:**
+
+- Every operation the experiment will `play()` must be registered before
+  `run()`.
+- There is no hidden `ensure_displacement_ops()`.  Displacement operations
+  must be explicitly created.
+- `burn_pulses()` pushes the current POM state into the live QM config.
+
+### Step 3 — Experiment Construction
+
+```python
+from qubox_v2.experiments import PowerRabi
+
+rabi = PowerRabi(session)
+```
+
+**Rules:**
+
+- The experiment object stores a reference to the session context.
+- **No waveform auto-generation is permitted.** The constructor must not
+  create, register, or modify any pulse or waveform.
+- Experiments consume only operations that were previously declared in
+  Step 2 or during session initialization.
+
+### Step 4 — Program Build
+
+```python
+result = rabi.run(gains=np.linspace(0, 1.5, 100), n_avg=5000)
+```
+
+Internally, `run()`:
+
+1. Calls `set_standard_frequencies()` to align element IF/LO to calibrated
+   values.
+2. Builds a QUA program via `build_program()`.
+3. `PulseOperationManager` resolves `(element, op)` → pulse name → waveform
+   samples.
+4. Calibration parameters are injected where needed (e.g., readout threshold,
+   discrimination angle).
+
+### Step 5 — Execution
+
+```python
+# Already called inside run():
+# runner.run_program(qua_prog, n_total=n_avg)
+```
+
+- `ProgramRunner` submits the job to QM via `qm.execute()`.
+- Optional progress reporting via `tqdm` handle or custom callback.
+- SPA pump is managed via context manager (on before execute, off after).
+- Execution metadata (duration, job ID, mode) captured in `RunResult`.
+
+### Step 6 — Analysis Layer
+
+```python
+analysis = rabi.analyze(result, update_calibration=True)
+rabi.plot(analysis)
+```
+
+- `analyze()` processes raw data → fits → populates `AnalysisResult.metrics`.
+- `analyze()` is **idempotent** — calling it twice yields the same result.
+- `analyze()` **never** contacts hardware.
+- If `update_calibration=True`, uses `guarded_calibration_commit()`:
+  - Phase A: always saves an artifact (candidate).
+  - Phase B: applies update only if all validation gates pass.
+- The user inspects the plot and metrics.
+- Manual calibration approval: explicit `CalibrationPatch` → state machine →
+  `CalibrationStore.save()`.
+
+---
+
+## 3. Core Object Model
+
+### 3.1 `SessionManager`
+
+**Module**: `qubox_v2.experiments.session`  
+**Purpose**: Central service container; wires together all infrastructure.
+Replaces the legacy monolithic `cQED_Experiment`.
+
+```python
+class SessionManager:
+    def __init__(
+        self,
+        experiment_path: str | Path,
+        *,
+        qop_ip: str | None = None,
+        cluster_name: str | None = None,
+        load_devices: bool | list[str] = True,
+        oct_cal_path: str | Path | None = None,
+        auto_save_calibration: bool = False,
+        **kwargs: Any,
+    ) -> None
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `experiment_path` | `str \| Path` | Root directory for the experiment (contains `config/`) |
+| `qop_ip` | `str \| None` | OPX+ IP/hostname; resolved from `hardware.json` if `None` |
+| `cluster_name` | `str \| None` | QM cluster identifier |
+| `load_devices` | `bool \| list[str]` | Which external instruments to initialize on startup |
+| `oct_cal_path` | `str \| Path \| None` | Octave calibration DB path |
+| `auto_save_calibration` | `bool` | Auto-save calibration on every mutation (default `False`) |
+
+**Owned components** (set during `__init__` / `open()`):
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `config_engine` | `ConfigEngine` | QM config compilation |
+| `hardware` | `HardwareController` | Live OPX+/Octave control |
+| `runner` | `ProgramRunner` | QUA program execution |
+| `queue` | `QueueManager` | Job queue |
+| `pulse_mgr` | `PulseOperationManager` | Dual-store pulse management |
+| `pulses` | `PulseRegistry` | Simplified pulse registration API |
+| `calibration` | `CalibrationStore` | Typed calibration persistence |
+| `devices` | `DeviceManager` | External instrument fleet |
+| `attributes` | `cQED_attributes` | Physics parameters |
+
+**Public Methods:**
+
+| Method | Signature | Return | Side Effects |
+|--------|-----------|--------|--------------|
+| `open` | `() -> SessionManager` | `SessionManager` | Opens QM connection, inits elements, validates config, creates directories |
+| `close` | `() -> None` | `None` | Releases hardware/device connections, persists state |
+| `burn_pulses` | `(include_volatile: bool = True) -> None` | `None` | Pushes POM state into live QM config |
+| `save_attributes` | `() -> None` | `None` | Writes `cqed_params.json` |
+| `save_pulses` | `(path: str \| Path \| None = None) -> Path` | `Path` | Writes `pulses.json` |
+| `save_output` | `(output: Output \| dict, tag: str = "") -> Path` | `Path` | Writes `.npz` + `.meta.json` |
+| `save_runtime_settings` | `() -> Path` | `Path` | Writes `session_runtime.json` |
+| `get_runtime_setting` | `(key: str, default: Any = None) -> Any` | `Any` | Pure read |
+| `set_runtime_setting` | `(key: str, value: Any, *, persist: bool = True) -> None` | `None` | Writes JSON if `persist=True` |
+| `get_therm_clks` | `(channel: str, default: int \| None = None) -> int \| None` | `int \| None` | Pure read |
+| `get_displacement_reference` | `() -> dict[str, Any]` | `dict` | Pure read |
+| `validate_runtime_elements` | `(*, auto_map: bool = True, verbose: bool = True) -> dict[str, Any]` | `dict` | May auto-map missing elements |
+| `override_readout_operation` | `(*, element, operation, weights, drive_frequency, demod, threshold, weight_len, apply_to_attributes, persist_measure_config) -> dict[str, Any]` | `dict` | Modifies live readout op, optionally persists |
+
+**Context Manager:**
+
+```python
+with SessionManager("seq_1_device/") as session:
+    # session.open() called automatically
+    ...
+# session.close() called automatically
+```
+
+**Legacy aliases:** `hw` → `hardware`, `pulseOpMngr` → `pulse_mgr`,
+`quaProgMngr` → `hardware`, `device_manager` → `devices`.
+
+---
+
+### 3.2 `SessionState`
+
+**Module**: `qubox_v2.core.session_state`  
+**Purpose**: Frozen, hashable runtime snapshot for reproducibility tracking.
+
+```python
+@dataclass(frozen=True)
+class SessionState:
+    hardware: dict = field(default_factory=dict)
+    pulse_specs: dict = field(default_factory=dict)
+    calibration: dict = field(default_factory=dict)
+    cqed_params: dict = field(default_factory=dict)
+    schemas: tuple[SchemaInfo, ...] = ()
+    build_hash: str = ""
+    build_timestamp: str = ""
+    git_commit: str | None = None
+```
+
+| Class Method | Signature | Return | Side Effects |
+|--------------|-----------|--------|--------------|
+| `from_config_dir` | `(cls, config_dir: str \| Path) -> SessionState` | `SessionState` | Reads all config files; computes SHA-256 hash. Raises `FileNotFoundError` if required files missing. |
+
+| Instance Method | Signature | Return |
+|-----------------|-----------|--------|
+| `summary` | `() -> str` | Human-readable summary |
+| `to_dict` | `() -> dict[str, Any]` | JSON-serializable dict |
+
+**Invariant**: `build_hash` changes if and only if any source-of-truth file
+changes.
+
+---
+
+### 3.3 `CalibrationStore`
+
+**Module**: `qubox_v2.calibration.store`  
+**Purpose**: Typed, versioned calibration data store with JSON persistence,
+auto-save capability, and snapshot history.
+
+```python
+class CalibrationStore:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        auto_save: bool = False,
+    ) -> None
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | `str \| Path` | Path to `calibration.json` |
+| `auto_save` | `bool` | If `True`, every `set_*` call triggers atomic save |
+
+**Typed accessors** (get returns model or `None`; set merges or replaces):
+
+| Get Method | Set Method | Model Type |
+|------------|------------|------------|
+| `get_discrimination(element)` | `set_discrimination(element, params?, **kw)` | `DiscriminationParams` |
+| `get_readout_quality(element)` | `set_readout_quality(element, params?, **kw)` | `ReadoutQuality` |
+| `get_frequencies(element)` | `set_frequencies(element, freqs?, **kw)` | `ElementFrequencies` |
+| `get_coherence(element)` | `set_coherence(element, params?, **kw)` | `CoherenceParams` |
+| `get_pulse_calibration(name)` | `set_pulse_calibration(name, cal?, **kw)` | `PulseCalibration` |
+| `get_pulse_train_result(element)` | `set_pulse_train_result(element, result)` | `PulseTrainResult` |
+| `get_fock_sqr_calibrations(element)` | `set_fock_sqr_calibrations(element, cals)` | `list[FockSQRCalibration]` |
+| `get_multi_state_calibration(element)` | `set_multi_state_calibration(element, cal)` | `MultiStateCalibration` |
+
+**Fit history:**
+
+| Method | Signature | Return |
+|--------|-----------|--------|
+| `store_fit` | `(record: FitRecord) -> None` | `None` |
+| `get_latest_fit` | `(experiment: str) -> FitRecord \| None` | `FitRecord \| None` |
+| `get_fit_history` | `(experiment: str) -> list[FitRecord]` | `list[FitRecord]` |
+| `store_weight_snapshot` | `(element: str, weight_info: dict) -> None` | `None` |
+
+**Persistence:**
+
+| Method | Signature | Return | Side Effects |
+|--------|-----------|--------|--------------|
+| `save` | `() -> None` | `None` | Atomic write (temp file + `os.replace`) |
+| `snapshot` | `(tag: str = "") -> Path` | `Path` | Creates timestamped backup copy |
+| `reload` | `() -> None` | `None` | Discards in-memory state; re-reads disk |
+
+| Property | Return | Description |
+|----------|--------|-------------|
+| `data` | `CalibrationData` | Direct underlying Pydantic model |
+
+**Side effects**: All `set_*` methods call `_touch()`, which auto-saves if
+`auto_save=True`.
+
+---
+
+### 3.4 `PulseOperationManager`
+
+**Module**: `qubox_v2.pulses.manager`  
+**Purpose**: Full-featured pulse, waveform, integration weight, and
+element-op mapping management with a **dual-store** architecture
+(permanent + volatile).
+
+```python
+class PulseOperationManager:
+    def __init__(self, elements: list[str] | None = None) -> None
+```
+
+**Constants:**
+
+| Name | Value | Description |
+|------|-------|-------------|
+| `READOUT_PULSE_NAME` | `"readout_pulse"` | Reserved readout pulse name |
+| `MAX_AMPLITUDE` | `0.45` | Maximum analog amplitude |
+| `BASE_AMPLITUDE` | `0.24` | Default base amplitude |
+
+**Core pulse methods:**
+
+| Method | Signature | Return | Side Effects |
+|--------|-----------|--------|--------------|
+| `create_control_pulse` | `(element, op, *, length, pulse_name, I_wf_name, Q_wf_name, I_samples, Q_samples, digital_marker, persist, override) -> PulseOp` | `PulseOp` | Registers waveforms + pulse + op mapping |
+| `create_measurement_pulse` | `(element, op, *, length, pulse_name, ..., persist, override) -> PulseOp` | `PulseOp` | Registers measurement pulse with weight mapping |
+| `add_waveform` | `(name, kind, sample, *, persist=True) -> None` | `None` | Stores waveform samples |
+| `add_pulse` | `(name, op_type, length, I_wf_name, Q_wf_name, *, ...) -> None` | `None` | Stores pulse definition |
+| `add_operation` | `(op_id, pulse_name) -> None` | `None` | Maps op → pulse |
+| `register_pulse_op` | `(p: PulseOp, *, override, persist, warning_flag) -> None` | `None` | Full PulseOp registration |
+| `remove_pulse` | `(pulse_name, *, persist) -> None` | `None` | Removes pulse and mappings |
+| `modify_pulse` | `(pulse_name, *, new_length, ...) -> PulseOp` | `PulseOp` | Modifies existing pulse |
+| `modify_waveform` | `(name, new_samples, *, persist, allow_type_change) -> None` | `None` | Replaces waveform data |
+
+**Integration weight methods:**
+
+| Method | Signature | Return |
+|--------|-----------|--------|
+| `add_int_weight` | `(name, cos_w, sin_w, length, *, persist) -> None` | `None` |
+| `add_int_weight_segments` | `(name, cosine_segments, sine_segments, *, persist) -> None` | `None` |
+| `get_integration_weights` | `(name, *, include_volatile, strict) -> tuple` | `(cosine_segs, sine_segs)` |
+| `update_integration_weight` | `(name, *, cos_w, sin_w, length, ...) -> None` | `None` |
+| `modify_integration_weights` | `(pulse_name, new_mapping, ...) -> dict` | Updated mapping |
+
+**Query methods:**
+
+| Method | Signature | Return |
+|--------|-----------|--------|
+| `get_pulseOp_by_element_op` | `(element, op, *, include_volatile, strict) -> PulseOp \| None` | `PulseOp \| None` |
+| `get_pulse_waveforms` | `(pulse_name, *, include_volatile) -> tuple` | `(I_samples, Q_samples)` |
+| `get_pulse_definitions` | `() -> dict[str, dict]` | All high-level definitions |
+
+**Config integration:**
+
+| Method | Signature | Return | Side Effects |
+|--------|-----------|--------|--------------|
+| `burn_to_config` | `(cfg: dict, *, include_volatile) -> dict` | `dict` | Merges both stores into QM config |
+| `save_json` | `(path: str) -> None` | `None` | Persists permanent store to disk |
+| `from_json` | `(cls, path: str) -> PulseOperationManager` | `PulseOperationManager` | Classmethod; loads from JSON |
+| `clear_temporary` | `() -> None` | `None` | Clears volatile store |
+
+**Visualization:**
+
+| Method | Signature | Return |
+|--------|-----------|--------|
+| `display_op` | `(target, op, domain, ...) -> np.ndarray` | Waveform array (also plots) |
+| `display_pulse` | `(pulse, domain, ...) -> np.ndarray` | Waveform array |
+
+**Design**: Reserved readout pulse/waveform/weight names are protected from
+accidental creation or deletion.  The volatile store is for
+session-transient pulses that should not survive a `save_json()`.
+
+---
+
+### 3.5 `ProgramRunner`
+
+**Module**: `qubox_v2.hardware.program_runner`  
+**Purpose**: Execute and simulate QUA programs.  Thread-safe (`RLock`).
+
+```python
+class ProgramRunner:
+    def __init__(
+        self,
+        qmm: QuantumMachinesManager,
+        controller: HardwareController,
+        config_engine: ConfigEngine,
+    ) -> None
+```
+
+**Enums:**
+
+```python
+class ExecMode(str, Enum):
+    HARDWARE = "hardware"
+    SIMULATE = "simulate"
+```
+
+**Return type:**
+
+```python
+@dataclass
+class RunResult:
+    mode: ExecMode
+    output: Any
+    sim_samples: Any | None = None
+    metadata: dict | None = None
+```
+
+**Public methods:**
+
+| Method | Signature | Return | Side Effects |
+|--------|-----------|--------|--------------|
+| `run_program` | `(qua_prog, n_total, print_report, show_progress, processors, progress_handle, auto_job_halt, process_in_sim, *, use_queue, queue_to_start, queue_only, **kwargs) -> RunResult` | `RunResult` | Submits to QM; manages SPA pump; halts job in `finally` |
+| `simulate` | `(program, *, duration, plot, plot_params, controllers, t_begin, t_end, compiler_options) -> SimulatorSamples` | `SimulatorSamples` | Pure simulation, plots waveforms |
+| `set_exec_mode` | `(mode: ExecMode \| str) -> None` | `None` | Switches hardware/simulate mode |
+| `get_exec_mode` | `() -> ExecMode` | `ExecMode` | Pure read |
+| `halt_job` | `() -> None` | `None` | Halts currently running job |
+| `serialize_program` | `(qua_prog, path, filename, *, use_last_snapshot) -> str` | `str` | Writes QUA program to `.py` file |
+| `run_continuous_wave` | `(elements, el_freqs, pulses, gain) -> None` | `None` | CW output for debug |
+| `register_processor` | `(processor: Callable) -> None` | `None` | Adds post-processor |
+
+**Failure modes:**
+
+- `ConnectionError` if QM not reachable.
+- `JobError` if execution fails or times out.
+- `RuntimeError` if called before `SessionManager.open()`.
+
+---
+
+### 3.6 `ExperimentBase`
+
+**Module**: `qubox_v2.experiments.experiment_base`  
+**Purpose**: Abstract base class for all modular experiment types.  Provides
+unified context accessors working with both legacy `cQED_Experiment` and
+new `SessionManager`.
+
+```python
+class ExperimentBase:
+    def __init__(self, ctx: Any) -> None
+```
+
+**Properties:**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `str` | Class name |
+| `attr` | `cQED_attributes` | Physics parameters |
+| `pulse_mgr` | `PulseOperationManager` | Pulse manager |
+| `hw` | `HardwareController` | Hardware controller |
+| `device_manager` | `DeviceManager \| None` | Device manager |
+| `measure_macro` | `measureMacro` | Readout macro singleton |
+| `calibration_store` | `CalibrationStore \| None` | Calibration store |
+
+**Abstract methods** (must be overridden by subclasses):
+
+| Method | Signature | Return | Contract |
+|--------|-----------|--------|----------|
+| `build_program` | `(**params) -> Any` | QUA program | Build QUA program from parameters |
+| `run` | `(**params) -> RunResult` | `RunResult` | Execute experiment; no calibration writes |
+| `analyze` | `(result, *, update_calibration=False, **params) -> AnalysisResult` | `AnalysisResult` | Post-process; idempotent; no hardware ops |
+| `plot` | `(analysis, *, ax=None, **kwargs) -> Figure \| None` | `Figure \| None` | Visualization; create own figure if `ax=None` |
+
+**Concrete helper methods:**
+
+| Method | Signature | Return | Description |
+|--------|-----------|--------|-------------|
+| `set_standard_frequencies` | `(*, qb_fq: float \| None = None) -> None` | `None` | Set IFs to calibrated values |
+| `get_readout_lo` | `() -> float` | `float` | Readout LO frequency |
+| `get_qubit_lo` | `() -> float` | `float` | Qubit LO frequency |
+| `burn_pulses` | `(include_volatile: bool = True) -> None` | `None` | Push pulses to QM config |
+| `get_therm_clks` | `(channel, *, fallback) -> int \| None` | `int \| None` | Thermalization clocks |
+| `get_displacement_reference` | `() -> dict[str, Any]` | `dict` | Displacement reference params |
+| `run_program` | `(prog, *, n_total, processors, process_in_sim, **kw) -> RunResult` | `RunResult` | Delegates to ProgramRunner |
+| `save_output` | `(output, tag="") -> None` | `None` | Persist via session |
+| `guarded_calibration_commit` | `(*, analysis, run_result, calibration_tag, apply_update, require_fit, min_r2, required_metrics, extra_metadata) -> bool` | `bool` | Two-phase validated calibration persistence |
+
+**`guarded_calibration_commit` protocol:**
+
+- **Phase A** (always): save candidate artifact with metrics + metadata.
+- **Phase B** (conditional): apply update only if *all* validation gates
+  pass (`require_fit`, `min_r2`, `required_metrics` checks).
+- Returns `True` if update was applied.
+
+---
+
+### 3.7 `AnalysisResult`
+
+**Module**: `qubox_v2.experiments.result`  
+**Purpose**: Container for post-processed experiment results.
+
+```python
+@dataclass
+class AnalysisResult:
+    data: dict[str, Any]
+    fit: FitResult | None = None
+    fits: dict[str, FitResult] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
+    source: RunResult | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+```
+
+| Class Method | Signature | Return |
+|--------------|-----------|--------|
+| `from_run` | `(cls, run_result, *, fit, fits, metrics, metadata) -> AnalysisResult` | `AnalysisResult` |
+
+| Instance Method | Signature | Return |
+|-----------------|-----------|--------|
+| `get` | `(key, default=None) -> Any` | Value from `data` dict |
+| `__getitem__` | `(key) -> Any` | `data[key]` |
+| `__contains__` | `(key) -> bool` | `key in data` |
+
+**Companion type:**
+
+```python
+@dataclass
+class FitResult:
+    model_name: str
+    params: dict[str, float]
+    uncertainties: dict[str, float] = field(default_factory=dict)
+    r_squared: float | None = None
+    residuals: np.ndarray | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+```
+
+---
+
+### 3.8 `ArtifactManager`
+
+**Module**: `qubox_v2.core.artifact_manager`  
+**Purpose**: Build-hash-keyed artifact storage under
+`<experiment_path>/artifacts/<build_hash>/`.
+
+```python
+class ArtifactManager:
+    def __init__(
+        self,
+        experiment_path: str | Path,
+        build_hash: str,
+    ) -> None
+```
+
+| Method | Signature | Return | Description |
+|--------|-----------|--------|-------------|
+| `save_session_state` | `(state_dict: dict) -> Path` | `Path` | Save `SessionState` snapshot |
+| `save_generated_config` | `(config: dict) -> Path` | `Path` | Save compiled QM config |
+| `save_report` | `(name, content, *, ext=".md") -> Path` | `Path` | Save text report |
+| `save_artifact` | `(name, data: dict) -> Path` | `Path` | Save arbitrary JSON |
+| `list_artifacts` | `() -> list[Path]` | `list[Path]` | List all artifacts |
+
+| Function | Signature | Return | Description |
+|----------|-----------|--------|-------------|
+| `cleanup_artifacts` | `(experiment_path, *, keep_latest=10, current_hash=None) -> list[Path]` | `list[Path]` | Prune old build-hash dirs |
+
+---
+
+### 3.9 `DeviceManager`
+
+**Module**: `qubox_v2.devices.device_manager`  
+**Purpose**: Manage a fleet of external instruments declared in
+`devices.json`.  Thread-safe.
+
+```python
+class DeviceManager:
+    def __init__(self, config_path: str | Path) -> None
+```
+
+| Method | Signature | Return | Side Effects |
+|--------|-----------|--------|--------------|
+| `load` | `() -> None` | `None` | Reads specs from JSON |
+| `save` | `() -> None` | `None` | Writes specs to JSON |
+| `instantiate` | `(*names) -> None` | `None` | Connects specific devices |
+| `instantiate_all` | `() -> None` | `None` | Connects all declared devices |
+| `add_or_update` | `(name, **spec_fields) -> Any \| None` | instance | Add/update spec and connect |
+| `get` | `(name, connect=True) -> Any \| None` | instance | Get device instance |
+| `exists` | `(name: str) -> bool` | `bool` | Check spec existence |
+| `apply` | `(name, persist=True, **settings) -> None` | `None` | Apply settings to device |
+| `remove` | `(name, disconnect=True) -> None` | `None` | Remove device |
+| `reload` | `() -> None` | `None` | Reload from disk, reconnect changed |
+| `snapshot` | `() -> dict` | `dict` | Full fleet snapshot |
+| `ramp` | `(name, param, to, step, delay_s=0.1) -> None` | `None` | Gradually ramp parameter |
+
+**Device specification:**
+
+```python
+@dataclass
+class DeviceSpec:
+    name: str
+    driver: str          # "module:Class" format
+    backend: str = "qcodes"
+    connect: dict = field(default_factory=dict)
+    settings: dict = field(default_factory=dict)
+    enabled: bool = True
+```
+
+---
+
+## 4. Calibration Architecture
+
+### 4.1 Philosophy
+
+**Calibration parameters must NEVER auto-update.**  Every change follows:
+
+```
+Acquire  →  Analyze  →  Plot  →  User Confirm  →  Commit
+```
+
+### 4.2 Calibration State Machine
+
+**Module**: `qubox_v2.calibration.state_machine`
+
+```python
+class CalibrationState(str, Enum):
+    IDLE             = "idle"
+    CONFIGURED       = "configured"
+    ACQUIRING        = "acquiring"
+    ACQUIRED         = "acquired"
+    ANALYZING        = "analyzing"
+    ANALYZED         = "analyzed"
+    PLOTTED          = "plotted"
+    PENDING_APPROVAL = "pending_approval"
+    COMMITTING       = "committing"
+    COMMITTED        = "committed"
+    FAILED           = "failed"
+    ABORTED          = "aborted"
+    ROLLED_BACK      = "rolled_back"
+```
+
+**Transition rules:**
+
+- Only transitions listed in `ALLOWED_TRANSITIONS` are legal.
+- `FAILED` and `ABORTED` are reachable from any state.
+- `calibration.json` may only be written when state is `COMMITTING`.
+- Transition to `COMMITTING` requires passing through `PENDING_APPROVAL`.
+- No state may be skipped.
+- Every transition is logged with a timestamp.
+
+```python
+class CalibrationStateMachine:
+    def __init__(self, experiment: str) -> None
+
+    def transition(self, target: CalibrationState) -> None
+    def can_transition(self, target: CalibrationState) -> bool
+    def is_committable(self) -> bool
+    def abort(self, reason: str = "") -> None
+    def fail(self, error: str) -> None
+    def summary(self) -> dict[str, Any]
+```
+
+**Failure mode**: `CalibrationStateError` raised on illegal transition.
+
+### 4.3 CalibrationPatch
+
+**Module**: `qubox_v2.calibration.state_machine`  
+**Purpose**: Explicit diff object for calibration updates.
+
+```python
+@dataclass
+class CalibrationPatch:
+    experiment: str
+    timestamp: str                          # Auto ISO-8601
+    changes: list[PatchEntry] = field(...)
+    validation: PatchValidation = field(...)
+    metadata: dict[str, Any] = field(...)
+```
+
+```python
+@dataclass(frozen=True)
+class PatchEntry:
+    path: str       # Dotted key path, e.g. "readout.ge_angle"
+    old_value: Any
+    new_value: Any
+    dtype: str = ""
+```
+
+```python
+@dataclass(frozen=True)
+class PatchValidation:
+    passed: bool
+    checks: dict[str, bool] = field(default_factory=dict)
+    reasons: list[str] = field(default_factory=list)
+```
+
+| Method | Signature | Return |
+|--------|-----------|--------|
+| `add_change` | `(path, old_value, new_value, dtype="") -> None` | `None` |
+| `override_validation` | `(gate, reason, user="") -> None` | `None` |
+| `is_approved` | `() -> bool` | `bool` |
+| `summary` | `() -> str` | `str` |
+| `to_dict` | `() -> dict[str, Any]` | `dict` |
+
+### 4.4 Calibration Data Models
+
+**Module**: `qubox_v2.calibration.models`  
+All models are Pydantic v2 `BaseModel` subclasses.
+
+| Model | Purpose | Key Fields |
+|-------|---------|------------|
+| `DiscriminationParams` | Single-shot readout discrimination | `threshold`, `angle`, `mu_g`, `mu_e`, `sigma_g`, `sigma_e`, `fidelity?`, `confusion_matrix?` |
+| `ReadoutQuality` | Butterfly measurement metrics | `F?`, `Q?`, `V?`, `t01?`, `t10?`, `confusion_matrix?` |
+| `ElementFrequencies` | Calibrated frequencies (Hz) | `lo_freq`, `if_freq`, `qubit_freq?`, `anharmonicity?`, `fock_freqs?`, `chi?`, `kappa?`, `kerr?` |
+| `CoherenceParams` | Coherence times | `T1?`, `T2_ramsey?`, `T2_echo?` |
+| `PulseCalibration` | Calibrated pulse params | `pulse_name`, `element`, `amplitude?`, `length?`, `sigma?`, `drag_coeff?` |
+| `FitRecord` | Generic fit result | `experiment`, `model_name`, `params`, `uncertainties?`, `reduced_chi2?` |
+| `PulseTrainResult` | Pulse-train tomography | `amp_err`, `phase_err`, `delta`, `zeta` |
+| `FockSQRCalibration` | Per-Fock SQR gate | `fock_number`, `model_type`, `params`, `fidelity?` |
+| `MultiStateCalibration` | Multi-alpha affine calibration | `alpha_values`, `affine_matrix`, `offset_vector` |
+| `CalibrationData` | **Root container** (schema v3.0.0) | All of the above, plus `version`, `created`, `last_modified` |
+
+### 4.5 Calibration Flow Examples
+
+```
+PowerRabi.analyze(update_calibration=True)
+    → updates PulseCalibration("x180").amplitude   (g_pi)
+
+DRAGCalibration.analyze(update_calibration=True)
+    → updates PulseCalibration("x180").drag_coeff   (beta)
+
+ReadoutGEDiscrimination.analyze(update_calibration=True)
+    → updates DiscriminationParams.{threshold, angle, fidelity}
+    → optionally registers rotated integration weights in POM
+
+CalibrateReadoutFull.run(config=cfg)
+    → Step 1: ReadoutWeightsOptimization (optional)
+    → Step 2: ReadoutGEDiscrimination
+    → Step 3: ReadoutButterflyMeasurement
+    → returns combined result with all metrics
+```
+
+### 4.6 When `calibration.json` is Written
+
+1. **Only** during the `COMMITTING` state of `CalibrationStateMachine`.
+2. **Or** via `CalibrationStore.save()` / auto-save after `set_*()`.
+3. **Never** during `__init__()` or `analyze()` without validation gates.
+
+### 4.7 Validation Gates
+
+Standard gates: `min_r2`, `bounds_check`, `monotonic_check`,
+`relative_residual`, `stale_check`, `type_check`.
+
+Override path: `patch.override_validation(gate_name, reason, user)`.
+
+---
+
+## 5. Declarative Pulse System
+
+### 5.1 Design Principle
+
+> **Experiments never generate waveforms.  They consume declared
+> operations.**
+
+Persistent state stores *recipes* (`pulse_specs.json`), never raw waveform
+arrays.  Waveform arrays are compiled at runtime and exist only in memory.
+
+### 5.2 Pulse Definition vs Pulse Instance
+
+| Concept | Storage | Content | Lifetime |
+|---------|---------|---------|----------|
+| **Pulse spec** | `pulse_specs.json` | Shape name + parameters + constraints | Persistent across sessions |
+| **Pulse instance** | POM (permanent store) | Waveform samples + element-op binding | Session (written to `pulses.json` for compat) |
+| **Volatile pulse** | POM (volatile store) | Same as instance | Single session; cleared by `clear_temporary()` |
+
+### 5.3 `PulseFactory`
+
+**Module**: `qubox_v2.pulses.factory`  
+**Purpose**: Compiles declarative pulse specs into concrete I/Q waveform
+arrays.
+
+```python
+class PulseFactory:
+    def __init__(self, specs_data: dict[str, Any]) -> None
+```
+
+| Method | Signature | Return | Description |
+|--------|-----------|--------|-------------|
+| `spec_names` | `-> list[str]` (property) | `list[str]` | All spec names |
+| `compile_one` | `(spec_name: str) -> tuple[list[float], list[float], dict]` | `(I, Q, meta)` | Compile single spec |
+| `compile_all` | `() -> dict[str, tuple]` | `dict` | Compile all specs |
+| `register_all` | `(pom, *, persist=True, override=True) -> int` | `int` | Register compiled specs in POM |
+
+**Built-in shapes** (12):
+
+`constant`, `zero`, `drag_gaussian`, `drag_cosine`, `kaiser`, `slepian`,
+`flattop_gaussian`, `flattop_cosine`, `flattop_tanh`, `flattop_blackman`,
+`clear`, `arbitrary_blob`
+
+Plus the meta-shape `rotation_derived` which derives a pulse from an
+existing spec by applying `(theta, phi)` rotation.
+
+**Determinism guarantee**: identical specs → bit-identical waveforms.
+
+### 5.4 `PulseRegistry`
+
+**Module**: `qubox_v2.pulses.pulse_registry`  
+**Purpose**: Simplified pulse registration API wrapping the dual
+permanent/volatile `ResourceStore`.
+
+```python
+class PulseRegistry:
+    def __init__(
+        self,
+        elements: list[str] | None = None,
+        readout_length: int = 1000,
+    ) -> None
+```
+
+| Method | Signature | Return |
+|--------|-----------|--------|
+| `add_control_pulse` | `(element, op, *, I_wf, Q_wf=0.0, length, ...) -> str` | pulse name |
+| `add_measurement_pulse` | `(element, op, *, I_wf, Q_wf=0.0, length, ...) -> str` | pulse name |
+| `modify_pulse` | `(pulse_name, *, I_wf, Q_wf, length, ...) -> None` | `None` |
+| `remove_pulse` | `(pulse_name, *, persist) -> None` | `None` |
+| `get_pulse` | `(name) -> dict` | pulse dict |
+| `list_pulses` | `(*, element=None) -> list[str]` | names |
+| `get_element_ops` | `(element) -> dict[str, str]` | op → pulse mapping |
+| `burn_to_config` | `(cfg, *, include_volatile=True) -> dict` | merged config |
+
+### 5.5 Op Binding Rules
+
+- Every element must have at minimum: `const` and `zero`.
+- Qubit elements additionally require: `x180`, `x90`, `y180`, `y90`.
+- Operations are bound to pulses via
+  `PulseOperationManager.add_operation(op_id, pulse_name)`.
+- The same pulse can be bound to multiple ops (aliasing).
+- Reserved readout pulse/waveform/weight names are protected.
+
+### 5.6 Pulse Spec Schema (`pulse_specs.json`)
+
+```json
+{
+  "schema_version": 1,
+  "specs": {
+    "<name>": {
+      "shape": "drag_gaussian",
+      "element": "qubit",
+      "op": "x180",
+      "params": { "amplitude": 0.24, "length": 40, "sigma": 10, ... },
+      "constraints": { "max_amplitude": 0.45, "clip": true },
+      "metadata": { ... }
+    }
+  },
+  "integration_weights": { ... },
+  "element_operations": { ... }
+}
+```
+
+**Spec model types** (Pydantic v2):
+
+`PulseSpecEntry`, `PulseConstraints`, `ConstantParams`, `ZeroParams`,
+`DragGaussianParams`, `DragCosineParams`, `KaiserParams`, `SlepianParams`,
+`FlattopParams`, `CLEARParams`, `RotationDerivedParams`,
+`ArbitraryBlobParams`, `MeasurementMetadata`.
+
+**Compilation flow:**
+
+```
+pulse_specs.json
+    → PulseFactory.compile_all()
+        → resolve shape handler
+        → call waveform generator
+        → apply constraints (clip, normalize, pad)
+        → return (I_samples, Q_samples, metadata)
+    → PulseFactory.register_all(pom)
+        → POM.create_control_pulse() / create_measurement_pulse()
+```
+
+### 5.7 Invariants
+
+1. No waveform arrays may appear in `pulse_specs.json`.
+2. Every shape must map to a registered handler in `PulseFactory`.
+3. Every element referenced must exist in `hardware.json`.
+4. `rotation_derived` must reference an existing spec.
+5. All amplitudes ≤ `MAX_AMPLITUDE` (0.45).
+6. Integration weight segment lengths must be divisible by 4.
+
+---
+
+## 6. Hardware Abstraction Layer
+
+### 6.1 `ConfigEngine`
+
+**Module**: `qubox_v2.hardware.config_engine`  
+**Purpose**: Layered QM config compilation.
+
+```
+hardware_base → hardware_extras → pulse_overlay → element_ops → runtime_overrides
+```
+
+```python
+class ConfigEngine:
+    def __init__(
+        self,
+        hardware_path: str | Path | None = None,
+        *,
+        hardware_extras_keys: set[str] | None = None,
+        override_octave_json_mode: RFOutputMode | None = None,
+    ) -> None
+```
+
+| Method | Signature | Return | Description |
+|--------|-----------|--------|-------------|
+| `load_hardware` | `(path?) -> None` | `None` | Parse `hardware.json` |
+| `save_hardware` | `(path?) -> None` | `None` | Write `hardware.json` |
+| `build_qm_config` | `() -> dict` | `dict` | Compile full QM config |
+| `merge_pulses` | `(pom, *, include_volatile=True) -> None` | `None` | Overlay POM into config |
+| `patch_hardware` | `(patch_fn) -> None` | `None` | Apply hardware-level patch |
+| `patch_runtime` | `(overrides: dict) -> None` | `None` | Apply runtime overrides |
+| `clear_runtime_overrides` | `() -> None` | `None` | Reset runtime layer |
+
+### 6.2 `HardwareController`
+
+**Module**: `qubox_v2.hardware.controller`  
+**Purpose**: Owns the QM connection and provides live hardware control.
+
+```python
+class HardwareController:
+    def __init__(
+        self,
+        qmm: QuantumMachinesManager,
+        config_engine: ConfigEngine,
+        *,
+        default_output_mode: RFOutputMode | None = RFOutputMode.on,
+    ) -> None
+```
+
+| Method | Signature | Return | Description |
+|--------|-----------|--------|-------------|
+| `open_qm` | `(config_dict?, *, close_other_machines=True) -> None` | `None` | Open QM connection |
+| `close` | `() -> None` | `None` | Release QM connection |
+| `apply_changes` | `(*, save_hardware=False) -> None` | `None` | Apply frequency/gain/LO changes |
+| `set_device_manager` | `(dm) -> None` | `None` | Wire device manager |
+| `set_spa_pump` | `(spa_pump_sc) -> None` | `None` | Configure SPA pump |
+
+### 6.3 `HardwareConfig`
+
+**Module**: `qubox_v2.core.config`  
+**Purpose**: Complete typed representation of `hardware.json` (Pydantic v2).
+
+```python
+class HardwareConfig(BaseModel):
+    version: int = 1
+    controllers: Dict[str, ControllerConfig]
+    octaves: Dict[str, OctaveConfig]
+    elements: Dict[str, ElementConfig]
+    qubox_extras: Optional[QuboxExtras]     # alias: "__qubox"
+```
+
+| Method | Signature | Return |
+|--------|-----------|--------|
+| `from_json` | `(cls, path) -> HardwareConfig` | classmethod |
+| `from_dict` | `(cls, d) -> HardwareConfig` | classmethod |
+| `save_json` | `(path) -> None` | |
+| `to_qm_dict` | `() -> dict` | Strips `__qubox` for QM compatibility |
+
+**Sub-models:** `ControllerConfig`, `AnalogPort`, `OctaveRFOutput`,
+`OctaveRFInput`, `OctaveConfig`, `ElementConfig`, `ExternalLOEntry`,
+`OctaveLink`, `QuboxExtras`.
+
+### 6.4 Device Integration
+
+External instruments are managed by `DeviceManager` (§3.9).  Drivers use
+the `"module:Class"` format, supporting QCoDeS and InstrumentServer backends.
+
+### 6.5 Hardware vs Simulation
+
+| Capability | Hardware Required | Simulation Safe |
+|------------|:-----------------:|:---------------:|
+| QUA program execution | ✓ | ✓ (`ExecMode.SIMULATE`) |
+| Config compilation | — | ✓ |
+| Pulse waveform inspection | — | ✓ |
+| External device control | ✓ | — |
+| Spectrum analyzer calibration | ✓ | — |
+| Readout discrimination | ✓ | — |
+| Gate unitary computation | — | ✓ |
+| Waveform regression tests | — | ✓ |
+
+---
+
+## 7. State & Persistence Model
+
+### 7.1 What Lives Where
+
+| Data | Storage | Mutability |
+|------|---------|------------|
+| QM config dict | **Memory only** | Rebuilt every `burn_pulses()` / `build_qm_config()` |
+| Waveform sample arrays | **Memory only** | Compiled from specs; never persisted as source of truth |
+| `hardware.json` | **Disk** (source of truth) | Manual edits only |
+| `pulse_specs.json` | **Disk** (source of truth) | Written via `set_pulse_definition()` |
+| `calibration.json` | **Disk** (source of truth) | Only via `CalibrationStore` in `COMMITTING` state |
+| `cqed_params.json` | **Disk** (legacy compat) | Written by `save_attributes()`; read-only in v2 path |
+| `measureConfig.json` | **Disk** | Written by measureMacro lifecycle |
+| `devices.json` | **Disk** | Manual edits; written by `DeviceManager.save()` |
+| `pulses.json` | **Disk** (deprecated) | Transitional compatibility; will be removed |
+| `calibration_history.jsonl` | **Disk** | Append-only; never truncated |
+| Session artifacts | **Disk** (`artifacts/<build_hash>/`) | Immutable after creation |
+
+### 7.2 `calibration.json` Structure
+
+```json
+{
+  "version": "3.0.0",
+  "discrimination": {
+    "<element>": { "threshold": ..., "angle": ..., "mu_g": [...], ... }
+  },
+  "readout_quality": {
+    "<element>": { "F": ..., "Q": ..., "V": ..., ... }
+  },
+  "frequencies": {
+    "<element>": { "lo_freq": ..., "if_freq": ..., "qubit_freq": ..., ... }
+  },
+  "coherence": {
+    "<element>": { "T1": ..., "T2_ramsey": ..., ... }
+  },
+  "pulse_calibrations": {
+    "<name>": { "pulse_name": "x180", "element": "qubit", "amplitude": ..., ... }
+  },
+  "fit_history": [ ... ],
+  "pulse_train_results": { ... },
+  "fock_sqr_calibrations": { ... },
+  "multi_state_calibration": { ... },
+  "created": "...",
+  "last_modified": "..."
+}
+```
+
+### 7.3 Relationship Between Config Files
+
+```
+hardware.json          — Physical topology (controllers, octaves, elements)
+    ↓ read by ConfigEngine
+pulse_specs.json       — Declarative pulse recipes
+    ↓ compiled by PulseFactory
+calibration.json       — Calibrated parameters (thresholds, amplitudes, ...)
+    ↓ read by experiments + CalibrationStore
+cqed_params.json       — Legacy physics params (frequencies, anharmonicity)
+    ↓ read-only in v2
+```
+
+**Source-of-truth hierarchy** (higher overrides lower):
+
+1. `calibration.json`
+2. `cqed_params.json`
+3. `hardware.json`
+
+### 7.4 Schema Versioning
+
+**Module**: `qubox_v2.core.schemas`
+
+Every persisted JSON file must include a schema version.  The system refuses
+unsupported versions and never silently upgrades.
+
+| File | Version Field | Current Version |
+|------|---------------|-----------------|
+| `hardware.json` | `version` | 1 |
+| `pulse_specs.json` | `schema_version` | 1 |
+| `calibration.json` | `version` | `"3.0.0"` |
+| `measureConfig.json` | `_version` | 5 |
+| `devices.json` | `schema_version` | 1 |
+| `pulses.json` (deprecated) | `_schema_version` | 2 |
+
+**Migration machinery:**
+
+```python
+# Register a migration step
+register_migration("calibration", target_version=4, func=migrate_3_to_4)
+
+# Apply migration chain
+migrate(data, "calibration", from_version=3, to_version=4) -> dict
+
+# Validate any config file
+validate_schema(file_path, file_type) -> ValidationResult
+
+# Validate all config files in a directory
+validate_config_dir(config_dir) -> list[ValidationResult]
+```
+
+### 7.5 What Must Never Auto-Overwrite
+
+1. `calibration.json` — only written during `COMMITTING` state.
+2. `hardware.json` — manual edits only.
+3. `calibration_history.jsonl` — append-only, never truncated.
+
+---
+
+## 8. Gate System
+
+### 8.1 Architecture
+
+Gates have a clean separation between **pure mathematical models** and
+**hardware backends**.
+
+```
+Gate  ──┬── GateModel (ABC)     — pure unitary / superoperator math
+        └── GateHardware (ABC)  — QUA play / waveform build
+```
+
+Both sides have auto-registration via `__init_subclass__`:
+`_MODEL_REGISTRY` and `_HARDWARE_REGISTRY`.
+
+### 8.2 `GateModel` (ABC)
+
+**Module**: `qubox_v2.gates.model_base`
+
+| Abstract Method | Signature | Return |
+|-----------------|-----------|--------|
+| `key` | `() -> GateKey` | Immutable `(gate_type, target, param_hash)` |
+| `to_dict` | `() -> dict` | Serialization |
+| `from_dict` | `(cls, d) -> GateModel` | Deserialization |
+| `duration_s` | `(ctx: ModelContext) -> float` | Gate duration in seconds |
+| `unitary` | `(*, n_max, ctx) -> np.ndarray` | Ideal unitary matrix |
+
+| Concrete Method | Signature | Return |
+|-----------------|-----------|--------|
+| `kraus` | `(*, n_max, ctx, noise, noise_model) -> list[np.ndarray]` | Kraus operators (noisy) |
+| `superop` | `(*, n_max, ctx, noise, noise_model) -> np.ndarray` | Liouville superoperator |
+
+### 8.3 Concrete Gate Models
+
+| Class | Gate | Constructor Key Params |
+|-------|------|------------------------|
+| `DisplacementModel` | $\exp(\alpha a^\dagger - \alpha^* a)$ | `alpha: complex`, `target: str` |
+| `QubitRotationModel` | $R(\theta, \phi)$ | `theta: float`, `phi: float` |
+| `SNAPModel` | Selective Number-dependent Arbitrary Phase | `angles: np.ndarray` |
+| `SQRModel` | Selective Qubit Rotation | `thetas`, `phis`, `d_lambda`, `d_alpha`, `d_omega` |
+
+### 8.4 Contexts
+
+| Context | Purpose | Key Fields |
+|---------|---------|------------|
+| `ModelContext` | Physics parameters for ideal gate math | `dt_s`, `st_chi`, `st_kerr`, `qubit_dim`, `gate_durations_s` |
+| `NoiseConfig` | Noise parameters | `T1`, `T2`, `order` |
+| `HardwareContext` | QUA/hardware references (kept separate) | `mgr`, `attributes` |
+
+### 8.5 `GateSequence`
+
+```python
+@dataclass
+class GateSequence:
+    gates: list[GateModel]
+
+    def superop(self, *, n_max, ctx, noise, noise_model, cache) -> np.ndarray
+```
+
+Computes the composed super-operator for ordered gate sequences, with
+optional caching via `ModelCache`.
+
+---
+
+## 9. Experiment Registry
+
+### 9.1 Complete Experiment Listing
+
+All experiments inherit from `ExperimentBase` and implement the
+`run() → analyze() → plot()` contract.
+
+**Spectroscopy:**
+
+| Class | Purpose |
+|-------|---------|
+| `ResonatorSpectroscopy` | Resonator frequency scan |
+| `ResonatorPowerSpectroscopy` | Power-dependent resonator scan |
+| `ResonatorSpectroscopyX180` | Two-tone resonator spectroscopy |
+| `ReadoutTrace` | Raw readout trace acquisition |
+| `ReadoutFrequencyOptimization` | Optimize readout frequency for SNR |
+| `QubitSpectroscopy` | Qubit frequency scan |
+| `QubitSpectroscopyCoarse` | Coarse qubit frequency search |
+| `QubitSpectroscopyEF` | E-F transition spectroscopy |
+
+**Time Domain:**
+
+| Class | Purpose |
+|-------|---------|
+| `TemporalRabi` | Time Rabi oscillation |
+| `PowerRabi` | Power Rabi oscillation |
+| `SequentialQubitRotations` | Multi-pulse rotation sequences |
+| `T1Relaxation` | T1 energy relaxation measurement |
+| `T2Ramsey` | T2* Ramsey measurement |
+| `T2Echo` | T2 Hahn echo measurement |
+| `ResidualPhotonRamsey` | Thermal photon-induced dephasing |
+| `TimeRabiChevron` | 2-D time Rabi vs frequency |
+| `PowerRabiChevron` | 2-D power Rabi vs frequency |
+| `RamseyChevron` | 2-D Ramsey vs frequency |
+
+**Calibration:**
+
+| Class | Purpose |
+|-------|---------|
+| `IQBlob` | Simple g/e IQ blob acquisition |
+| `ReadoutGERawTrace` | Raw time-domain g/e traces |
+| `ReadoutGEIntegratedTrace` | Time-sliced integrated traces |
+| `ReadoutGEDiscrimination` | G/E state discrimination with rotated weights |
+| `ReadoutWeightsOptimization` | Optimize integration weights |
+| `ReadoutButterflyMeasurement` | Three-measurement butterfly (F, Q, QND) |
+| `CalibrateReadoutFull` | End-to-end readout pipeline (optional wopt → GE → butterfly) |
+| `ReadoutAmpLenOpt` | 2-D readout amplitude × length optimization |
+| `AllXY` | 21-gate-pair error benchmarking |
+| `DRAGCalibration` | DRAG coefficient optimization |
+| `QubitPulseTrain` | Pulse-train amplitude calibration |
+| `QubitPulseTrainLegacy` | Legacy pulse-train method |
+| `RandomizedBenchmarking` | Standard and interleaved RB |
+| `QubitResetBenchmark` | Reset fidelity benchmark |
+| `ActiveQubitResetBenchmark` | Active reset measurement |
+| `ReadoutLeakageBenchmarking` | Readout leakage to higher states |
+
+**Cavity:**
+
+| Class | Purpose |
+|-------|---------|
+| `StorageSpectroscopy` | Storage cavity frequency scan |
+| `StorageSpectroscopyCoarse` | Coarse storage cavity search |
+| `NumSplittingSpectroscopy` | Number-splitting spectroscopy |
+| `StorageRamsey` | Storage Ramsey measurement |
+| `StorageChiRamsey` | Chi-dependent Ramsey |
+| `StoragePhaseEvolution` | Phase evolution characterization |
+| `FockResolvedSpectroscopy` | Fock-number-resolved spectroscopy |
+| `FockResolvedT1` | Fock-resolved T1 |
+| `FockResolvedRamsey` | Fock-resolved Ramsey |
+| `FockResolvedPowerRabi` | Fock-resolved power Rabi |
+
+**Tomography:**
+
+| Class | Purpose |
+|-------|---------|
+| `QubitStateTomography` | Three-axis Bloch vector reconstruction |
+| `FockResolvedStateTomography` | Fock-resolved state tomography |
+| `StorageWignerTomography` | Wigner function reconstruction |
+| `SNAPOptimization` | SNAP gate angle optimization |
+
+**SPA:**
+
+| Class | Purpose |
+|-------|---------|
+| `SPAFluxOptimization` | SPA flux bias optimization |
+| `SPAFluxOptimization2` | SPA flux optimization variant |
+| `SPAPumpFrequencyOptimization` | SPA pump frequency optimization |
+
+### 9.2 Experiment Contract Summary
+
+Every experiment must satisfy:
+
+1. **`run()`**: Returns `RunResult`.  No calibration writes.  No hidden
+   pulse registration.  Must call `set_standard_frequencies()`.
+2. **`analyze()`**: Idempotent.  No hardware ops.  Populate
+   `AnalysisResult.{metrics, fit, metadata}`.
+3. **`plot()`**: Accept `AnalysisResult` + optional `ax`.  Create own
+   figure if `ax=None`.  Return `Figure`.
+
+### 9.3 `ReadoutConfig` (Full Pipeline Configuration)
+
+**Module**: `qubox_v2.experiments.calibration.readout_config`
+
+```python
+@dataclass
+class ReadoutConfig:
+    ro_op: str = "readout"
+    drive_frequency: float | None = None
+    ro_el: str = "readout_element"
+    r180: str = "x180"
+    skip_weights_optimization: bool = False
+    n_avg_weights: int = 200_000
+    persist_weights: bool = True
+    n_samples_disc: int = 50_000
+    burn_rot_weights: bool = True
+    blob_k_g: float = 2.0
+    blob_k_e: float | None = None
+    k: float | None = None
+    n_shots_butterfly: int = 50_000
+    M0_MAX_TRIALS: int = 16
+    max_iterations: int = 1
+    fidelity_tolerance: float = 0.01
+    adaptive_samples: bool = False
+    min_samples_disc: int = 10_000
+    gaussianity_warn_threshold: float = 2.0
+    cv_split_ratio: float = 0.2
+    display_analysis: bool = False
+    save: bool = True
+    # ... plus kwargs dicts for sub-experiments
+```
+
+---
+
+## 10. Comparison with Legacy
+
+### 10.1 What Changed
+
+| Aspect | Legacy (`qubox`) | Current (`qubox_v2`) |
+|--------|------------------|----------------------|
+| Entry point | `cQED_Experiment` monolith | `SessionManager` + modular experiments |
+| Pulse storage | Raw waveform arrays in `pulses.json` | Declarative specs in `pulse_specs.json` |
+| Calibration | Ad-hoc attribute writes | Typed `CalibrationStore` with state machine |
+| Experiment API | Varied, no contract | `ExperimentBase.run()/analyze()/plot()` |
+| Config building | Single-pass merge | Layered `ConfigEngine` with overlays |
+| State tracking | None | `SessionState` with build hash |
+| Artifact management | Scattered files | Build-hash-keyed `ArtifactManager` |
+| Schema versioning | None | Mandatory version field + migration chain |
+
+### 10.2 Why Hidden Waveform Mutation Was Removed
+
+In legacy `qubox`, some experiments internally called
+`ensure_displacement_ops()` or registered waveforms inside their
+constructors.  This made it impossible to:
+
+- Know which operations existed before running an experiment.
+- Reproduce results without re-running the exact same notebook sequence.
+- Validate that the QM config was self-consistent.
+
+In `qubox_v2`, all pulse/waveform registration happens explicitly in the
+notebook *before* the experiment is constructed.
+
+### 10.3 Why SessionState Exists
+
+`SessionState` captures a cryptographic hash of every source-of-truth file
+at session open.  This enables:
+
+- **Reproducibility**: same hash → same experiment conditions.
+- **Artifact tagging**: generated files are stored under the build hash.
+- **Drift detection**: if a file changes mid-session, the hash changes.
+
+### 10.4 Why Notebook-First Workflow is Required
+
+The notebook is the single authoritative site for:
+
+1. **Pulse declaration** — which operations exist.
+2. **State preparation** — which sequence prepares the target state.
+3. **Calibration approval** — the human decides whether to commit.
+
+This eliminates hidden side effects and ensures every experimental
+configuration is visible, auditable, and reproducible.
+
+---
+
+## Appendix A: Utility Functions
+
+### `qubox_v2.experiments.experiment_base`
+
+| Function | Signature | Return | Description |
+|----------|-----------|--------|-------------|
+| `create_if_frequencies` | `(el, start_fq, end_fq, df, lo_freq, base_if_freq) -> np.ndarray` | IF array | Compute IF sweep |
+| `create_clks_array` | `(t_begin, t_end, dt, time_per_clk=4) -> np.ndarray` | Clock array | Time → clock cycles |
+| `make_lo_segments` | `(rf_begin, rf_end) -> list[float]` | LO list | Multi-segment LO frequencies |
+| `if_freqs_for_segment` | `(LO, rf_end, df) -> np.ndarray` | IF array | Per-segment IF frequencies |
+| `merge_segment_outputs` | `(outputs, freqs) -> Output` | Merged output | Stitch multi-segment data |
+
+### `qubox_v2.pulses.waveforms`
+
+| Function | Signature | Return |
+|----------|-----------|--------|
+| `constant` | `(amplitude: float) -> float` | Constant value |
+| `square` | `(amplitude, length) -> list[float]` | Square waveform |
+| `gaussian` | `(amplitude, length, sigma) -> list[float]` | Gaussian waveform |
+| `drag_gaussian` | `(amplitude, length, sigma, alpha, anharmonicity, detuning=0.0) -> tuple[list, list]` | `(I, Q)` |
+
+### `qubox_v2.core.schemas`
+
+| Function | Signature | Return | Description |
+|----------|-----------|--------|-------------|
+| `validate_schema` | `(file_path, file_type, *, data=None) -> ValidationResult` | `ValidationResult` | Validate against schema |
+| `register_migration` | `(file_type, target_version, func) -> None` | `None` | Register migration step |
+| `migrate` | `(data, file_type, from_version, to_version) -> dict` | `dict` | Apply migration chain |
+| `migrate_file` | `(file_path, file_type, target_version, *, backup=True) -> Path` | `Path` | Migrate on disk |
+| `validate_config_dir` | `(config_dir) -> list[ValidationResult]` | `list` | Validate all config files |
+
+---
+
+## Appendix B: Known Inconsistencies
+
+*The following inconsistencies were identified between documentation and
+implementation at time of writing.  They are listed here for transparency.*
+
+1. **`blob_k_g` default**: `ReadoutConfig.blob_k_g` is `2.0`;
+   `CalibrateReadoutFull.run()` method signature has `blob_k_g: float = 3.0`.
+   The `ReadoutConfig` value takes precedence when using the config path.
+
+2. **`pulses.json` vs `pulse_specs.json`**: Both exist.  `pulses.json` is
+   the deprecated format (POM persistence); `pulse_specs.json` is the
+   declarative source of truth.  The transition is in progress.
+
+3. **`cqed_params.json`**: Unversioned legacy file.  Read-only in v2 but
+   still written by `save_attributes()` for backward compatibility.
+
+---
+
+*This document is auto-generated from source inspection and existing
+architecture documents.  Cross-reference with the governing documents in
+`qubox_v2/docs/` for policy-level requirements.*

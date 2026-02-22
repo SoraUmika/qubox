@@ -38,11 +38,12 @@ class AllXY(ExperimentBase):
         ("x90", "x90"), ("y90", "y90"),
     ]
 
-    # Expected Pe for each pair: 5 ground, 12 superposition, 4 excited
+    # Expected <Z> for each pair (legacy parity):
+    # 5 ground (+1), 12 superposition (0), 4 excited (-1)
     _ALLXY_IDEAL = np.array([
-        0, 0, 0, 0, 0,
-        0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
-        1, 1, 1, 1,
+        1, 1, 1, 1, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        -1, -1, -1, -1,
     ], dtype=float)
 
     def run(
@@ -75,33 +76,40 @@ class AllXY(ExperimentBase):
         return result
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
-        # Legacy parity: use Pe (state discrimination) instead of raw IQ magnitude.
-        # The QUA program saves "Pe" via boolean_to_int().average(), giving
-        # the excited-state probability directly.
+        # Legacy parity: interpret measured boolean stream as P_e and report
+        # corrected sigma_z = P_g - P_e (|g> -> +1, |e> -> -1).
         Pe = result.output.get("Pe")
+        used_confusion = False
         if Pe is not None:
             Pe = result.output._format(Pe)
-            states = np.asarray(Pe, dtype=float)
+            pe_states = np.asarray(Pe, dtype=float)
+
+            # Optional confusion-matrix correction (legacy parity).
+            confusion = kw.get("confusion", None)
+            if confusion is None:
+                from ...programs.macros.measure import measureMacro
+                confusion = measureMacro._ro_quality_params.get("confusion_matrix", None)
+
+            if confusion is not None:
+                states = pp.ro_state_correct_proc(
+                    {"Pe": pe_states},
+                    targets=[("Pe", "sz")],
+                    confusion=confusion,
+                    to_sigmaz=True,
+                ).get("sz", 1.0 - 2.0 * pe_states)
+                used_confusion = True
+            else:
+                # Still report sigma_z even if no correction artifacts are loaded.
+                states = 1.0 - 2.0 * pe_states
         else:
-            # Fallback to IQ magnitude if Pe not available
+            # Fallback if Pe stream is unavailable.
             S = result.output.extract("S")
             mag = np.abs(S)
             if mag.max() != mag.min():
-                states = (mag - mag.min()) / (mag.max() - mag.min())
+                pe_states = (mag - mag.min()) / (mag.max() - mag.min())
             else:
-                states = mag
-
-        # Optional confusion-matrix correction (legacy parity)
-        confusion = kw.get("confusion", None)
-        if confusion is None:
-            from ...programs.macros.measure import measureMacro
-            confusion = measureMacro._ro_quality_params.get("confusion_matrix", None)
-        if confusion is not None and Pe is not None:
-            states = pp.ro_state_correct_proc(
-                {"Pe": states},
-                targets=[("Pe", "Pe_corr")],
-                confusion=confusion,
-            ).get("Pe_corr", states)
+                pe_states = mag
+            states = 1.0 - 2.0 * np.asarray(pe_states, dtype=float)
 
         ideal = self._ALLXY_IDEAL
         if len(states) == len(ideal):
@@ -109,7 +117,13 @@ class AllXY(ExperimentBase):
         else:
             gate_error = float("nan")
 
-        metrics: dict[str, Any] = {"gate_error": gate_error, "states": states}
+        metrics: dict[str, Any] = {
+            "gate_error": gate_error,
+            "states": states,
+            "observable": "sigma_z",
+            "state_mapping": {"g": +1.0, "e": -1.0},
+            "used_confusion_correction": bool(used_confusion),
+        }
         return AnalysisResult.from_run(result, metrics=metrics)
 
     def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
@@ -141,8 +155,8 @@ class AllXY(ExperimentBase):
             title += f"  |  Gate Error = {analysis.metrics['gate_error']:.4f}"
         ax.set_title(title)
         ax.set_xlabel("Gate Pair Index")
-        ax.set_ylabel("$P_e$")
-        ax.set_ylim(-0.1, 1.1)
+        ax.set_ylabel(r"$\langle Z \rangle$")
+        ax.set_ylim(-1.1, 1.1)
         ax.legend()
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
@@ -340,8 +354,13 @@ class DRAGCalibration(ExperimentBase):
                 calibration_tag="drag_calibration_x180",
                 require_fit=False,
                 required_metrics={"optimal_alpha": (alpha_lo, alpha_hi)},
-                apply_update=lambda: self.calibration_store.set_pulse_calibration(
-                    name="x180", drag_coeff=metrics["optimal_alpha"],
+                apply_update=lambda: (
+                    self.calibration_store.set_pulse_calibration(
+                        name="ref_r180", drag_coeff=metrics["optimal_alpha"],
+                    ),
+                    self.calibration_store.set_pulse_calibration(
+                        name="x180", drag_coeff=metrics["optimal_alpha"],
+                    ),
                 ),
             )
 

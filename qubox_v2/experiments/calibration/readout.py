@@ -1445,6 +1445,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             "post_sel_policy": post_sel_policy,
             "post_sel_kwargs": dict(post_sel_kwargs),
             "measure_macro_sync": dict(sync_info),
+            "update_measure_macro": bool(update_measure_macro),
         }
 
         _logger.info("Butterfly measurement: n_samples=%d, policy=%r", n_samples, post_sel_policy)
@@ -1693,6 +1694,22 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                     t10=metrics.get("t10"),
                 ),
             )
+
+        if hasattr(self, "_run_params") and self._run_params.get("update_measure_macro", False):
+            try:
+                payload: dict[str, Any] = {}
+                for key in ("alpha", "beta", "F", "Q", "V", "t01", "t10"):
+                    if key in metrics:
+                        payload[key] = metrics[key]
+                if "confusion_matrix" in metrics:
+                    payload["confusion_matrix"] = metrics["confusion_matrix"]
+                if "transition_matrix" in metrics:
+                    payload["transition_matrix"] = metrics["transition_matrix"]
+                if payload:
+                    measureMacro._update_readout_quality(payload)
+                    _logger.info("measureMacro readout quality updated from butterfly analysis")
+            except Exception as exc:
+                _logger.warning("Failed to update measureMacro readout quality: %s", exc)
 
         # T1 decay correction (Section 6D)
         if self.calibration_store and "F" in metrics:
