@@ -175,19 +175,23 @@ class PowerRabi(ExperimentBase):
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
         gains = result.output.extract("gains")
         S = result.output.extract("S")
-        mag = np.abs(S)
+        # Legacy parity: fit on the real part of S (not magnitude).
+        # The legacy notebook fits S.real with both sinusoid_pe_model and
+        # power_rabi_model.  Using S.real preserves sign information and
+        # matches the legacy analysis output exactly.
+        ydata = np.real(S)
 
-        A_guess = float((mag.max() - mag.min()) / 2)
+        A_guess = float((ydata.max() - ydata.min()) / 2)
         # g_pi: gain at first minimum (positive side)
         pos_mask = gains > 0
         if np.any(pos_mask):
-            g_pi_guess = float(gains[pos_mask][np.argmin(mag[pos_mask])])
+            g_pi_guess = float(gains[pos_mask][np.argmin(ydata[pos_mask])])
         else:
-            g_pi_guess = float(gains[np.argmin(mag)])
-        offset_guess = float(mag.mean())
+            g_pi_guess = float(gains[np.argmin(ydata)])
+        offset_guess = float(ydata.mean())
         auto_p0 = [A_guess, g_pi_guess, offset_guess]
 
-        fit = fit_and_wrap(gains, mag, power_rabi_model,
+        fit = fit_and_wrap(gains, ydata, power_rabi_model,
                            p0 if p0 is not None else auto_p0,
                            model_name="power_rabi", **kw)
 
@@ -226,13 +230,14 @@ class PowerRabi(ExperimentBase):
         if gains is None or S is None:
             return None
 
-        mag = np.abs(S)
+        # Legacy parity: plot S.real (matching the analysis data convention)
+        ydata = np.real(S)
         if ax is None:
-            fig, ax = plt.subplots(figsize=(10, 5))
+            fig, ax = plt.subplots(figsize=(12, 5))
         else:
             fig = ax.figure
 
-        ax.scatter(gains, mag, s=5, label="Data")
+        ax.scatter(gains, ydata, s=5, label="Data")
         if analysis.fit and analysis.fit.params:
             p = analysis.fit.params
             x_fit = np.linspace(gains.min(), gains.max(), 500)
@@ -242,8 +247,8 @@ class PowerRabi(ExperimentBase):
             ax.axvline(p["g_pi"], color="green", ls="--", lw=1, alpha=0.7,
                        label=f"pi-pulse gain = {p['g_pi']:.4f}")
 
-        ax.set_xlabel("Gain")
-        ax.set_ylabel("Magnitude")
+        ax.set_xlabel("Qubit Amplitude")
+        ax.set_ylabel("Signal (a.u.)")
         ax.set_title("Power Rabi")
         ax.legend(
             bbox_to_anchor=(1.05, 1), loc='upper left',

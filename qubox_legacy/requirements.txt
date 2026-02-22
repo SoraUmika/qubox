@@ -1,0 +1,12 @@
+cma==4.0.0
+configuration==0.4.2
+grpclib==0.4.5
+matplotlib==3.10.3
+numpy==1.25.2
+PyYAML==6.0.2
+PyYAML==6.0.2
+qm==0.2
+qualang_tools==0.19.5
+scikit_optimize==0.10.2
+scipy==1.15.3
+tqdm==4.67.1

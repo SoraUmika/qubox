@@ -75,14 +75,32 @@ class AllXY(ExperimentBase):
         return result
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
-        S = result.output.extract("S")
-        mag = np.abs(S)
-
-        # Normalize to [0, 1] range
-        if mag.max() != mag.min():
-            states = (mag - mag.min()) / (mag.max() - mag.min())
+        # Legacy parity: use Pe (state discrimination) instead of raw IQ magnitude.
+        # The QUA program saves "Pe" via boolean_to_int().average(), giving
+        # the excited-state probability directly.
+        Pe = result.output.extract("Pe", None)
+        if Pe is not None:
+            states = np.asarray(Pe, dtype=float)
         else:
-            states = mag
+            # Fallback to IQ magnitude if Pe not available
+            S = result.output.extract("S")
+            mag = np.abs(S)
+            if mag.max() != mag.min():
+                states = (mag - mag.min()) / (mag.max() - mag.min())
+            else:
+                states = mag
+
+        # Optional confusion-matrix correction (legacy parity)
+        confusion = kw.get("confusion", None)
+        if confusion is None:
+            from ...programs.macros.measure import measureMacro
+            confusion = measureMacro._ro_quality_params.get("confusion_matrix", None)
+        if confusion is not None and Pe is not None:
+            states = pp.ro_state_correct_proc(
+                {"Pe": states},
+                targets=[("Pe", "Pe_corr")],
+                confusion=confusion,
+            ).get("Pe_corr", states)
 
         ideal = self._ALLXY_IDEAL
         if len(states) == len(ideal):
@@ -90,19 +108,20 @@ class AllXY(ExperimentBase):
         else:
             gate_error = float("nan")
 
-        metrics: dict[str, Any] = {"gate_error": gate_error}
+        metrics: dict[str, Any] = {"gate_error": gate_error, "states": states}
         return AnalysisResult.from_run(result, metrics=metrics)
 
     def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
-        S = analysis.data.get("S")
-        if S is None:
-            return None
-
-        mag = np.abs(S)
-        if mag.max() != mag.min():
-            states = (mag - mag.min()) / (mag.max() - mag.min())
-        else:
-            states = mag
+        states = analysis.metrics.get("states", None)
+        if states is None:
+            S = analysis.data.get("S")
+            if S is None:
+                return None
+            mag = np.abs(S)
+            if mag.max() != mag.min():
+                states = (mag - mag.min()) / (mag.max() - mag.min())
+            else:
+                states = mag
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(12, 5))
@@ -121,7 +140,7 @@ class AllXY(ExperimentBase):
             title += f"  |  Gate Error = {analysis.metrics['gate_error']:.4f}"
         ax.set_title(title)
         ax.set_xlabel("Gate Pair Index")
-        ax.set_ylabel("Normalized Population")
+        ax.set_ylabel("$P_e$")
         ax.set_ylim(-0.1, 1.1)
         ax.legend()
         ax.grid(True, alpha=0.3)
@@ -135,6 +154,16 @@ class DRAGCalibration(ExperimentBase):
 
     Sweeps the DRAG amplitude parameter to minimize leakage to
     higher transmon levels.
+
+    Legacy parity
+    -------------
+    The legacy workflow creates temporary DRAG waveforms with ``base_alpha``
+    baked into the Q channel, registers them as volatile pulses
+    (``x180_tmp``, etc.), and then sweeps ``amps`` as multipliers on the
+    DRAG amplitude via the QUA ``amp()`` matrix.  This class replicates
+    that behavior exactly so that the same ``amps`` sweep produces
+    identical QUA programs and the resulting ``optimal_alpha`` is in the
+    same units (``amps * base_alpha``).
     """
 
     def run(
@@ -142,18 +171,100 @@ class DRAGCalibration(ExperimentBase):
         amps: np.ndarray | list[float],
         n_avg: int = 1000,
         *,
+        base_alpha: float = 1.0,
         x180: str = "x180",
         x90: str = "x90",
         y180: str = "y180",
         y90: str = "y90",
     ) -> RunResult:
+        """Run the Yale DRAG calibration sweep.
+
+        Parameters
+        ----------
+        amps : array-like
+            Dimensionless alpha multipliers to sweep.
+        n_avg : int
+            Number of averaging iterations.
+        base_alpha : float
+            Base DRAG coefficient baked into the temporary waveforms.
+            The effective DRAG coefficient at each point is
+            ``base_alpha * amps[i]``.  Set to 1.0 (default) so that the
+            ``amps`` axis directly represents the DRAG coefficient.
+        x180, x90, y180, y90 : str
+            Fallback pulse operation names (used only when ``base_alpha``
+            is exactly 0, i.e. no temporary waveform generation).
+        """
+        from ...analysis.pulseOp import PulseOp
+        from ...tools.waveforms import drag_gaussian_pulse_waveforms
+
         attr = self.attr
         amps = np.asarray(amps, dtype=float)
 
         self.set_standard_frequencies()
 
+        # ----- Legacy parity: generate DRAG waveforms with base_alpha -----
+        # Retrieve pulse parameters from calibration store or attributes
+        cal = self.calibration_store
+        ref_cal = cal.get_pulse_calibration("ref_r180") if cal else None
+
+        rlen = int(ref_cal.length) if (ref_cal and ref_cal.length) else getattr(attr, "rlen", 16)
+        sigma = float(ref_cal.sigma) if (ref_cal and ref_cal.sigma) else rlen / 6.0
+        anh = float(getattr(attr, "anharmonicity", 0) or -200e6)
+
+        r180_amp = float(ref_cal.amplitude) if (ref_cal and ref_cal.amplitude) else getattr(attr, "r180_amp", 0.1)
+        r90_amp = 0.5 * r180_amp
+
+        # Build DRAG waveforms with base_alpha baked in
+        ga_r180, dr_r180 = drag_gaussian_pulse_waveforms(r180_amp, rlen, sigma, base_alpha, anh)
+        ga_r90, dr_r90 = drag_gaussian_pulse_waveforms(r90_amp, rlen, sigma, base_alpha, anh)
+
+        # Complex waveforms (I = gaussian, Q = derivative)
+        z_r180 = np.array(ga_r180) + 1j * np.array(dr_r180)
+        z_r90 = np.array(ga_r90) + 1j * np.array(dr_r90)
+
+        # Rotation by pi/2 to generate Y pulses from X pulses
+        pi_rot = np.exp(1j * np.pi / 2)
+        z_y180 = z_r180 * pi_rot
+        z_y90 = z_r90 * pi_rot
+
+        # Register temporary volatile pulses
+        _tmp_pulses = [
+            PulseOp(
+                element=attr.qb_el, op="x180_tmp", pulse="x180_tmp_pulse",
+                type="control", length=rlen,
+                I_wf_name="gauss_r180_tmp_wf", Q_wf_name="drag_r180_tmp_wf",
+                I_wf=z_r180.real.tolist(), Q_wf=z_r180.imag.tolist(),
+            ),
+            PulseOp(
+                element=attr.qb_el, op="y180_tmp", pulse="y180_tmp_pulse",
+                type="control", length=rlen,
+                I_wf_name="y180_tmp_I_wf", Q_wf_name="y180_tmp_Q_wf",
+                I_wf=z_y180.real.tolist(), Q_wf=z_y180.imag.tolist(),
+            ),
+            PulseOp(
+                element=attr.qb_el, op="x90_tmp", pulse="x90_tmp_pulse",
+                type="control", length=rlen,
+                I_wf_name="gauss_r90_tmp_wf", Q_wf_name="drag_r90_tmp_wf",
+                I_wf=z_r90.real.tolist(), Q_wf=z_r90.imag.tolist(),
+            ),
+            PulseOp(
+                element=attr.qb_el, op="y90_tmp", pulse="y90_tmp_pulse",
+                type="control", length=rlen,
+                I_wf_name="y90_tmp_I_wf", Q_wf_name="y90_tmp_Q_wf",
+                I_wf=z_y90.real.tolist(), Q_wf=z_y90.imag.tolist(),
+            ),
+        ]
+
+        pm = self.pulse_mgr
+        for p in _tmp_pulses:
+            pm.register_pulse_op(p, override=True, persist=False)
+
+        self.burn_pulses()
+
+        # Build QUA program using temporary ops
         prog = cQED_programs.drag_calibration_YALE(
-            attr.qb_el, amps, x180, x90, y180, y90,
+            attr.qb_el, amps,
+            "x180_tmp", "x90_tmp", "y180_tmp", "y90_tmp",
             attr.qb_therm_clks, n_avg,
         )
         result = self.run_program(
@@ -161,6 +272,8 @@ class DRAGCalibration(ExperimentBase):
             processors=[
                 pp.proc_default,
                 pp.proc_attach("amps", amps),
+                pp.proc_attach("base_alpha", float(base_alpha)),
+                pp.proc_attach("pulse_len", int(rlen)),
             ],
             targets=[("I1", "Q1"), ("I2", "Q2")],
         )
@@ -168,34 +281,41 @@ class DRAGCalibration(ExperimentBase):
         return result
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        from ...analysis.algorithms import find_roots
+
         amps = result.output.extract("amps")
+        base_alpha = result.output.get("base_alpha", 1.0)
+        if isinstance(base_alpha, np.ndarray):
+            base_alpha = float(base_alpha)
+
         S_1 = result.output.get("S_1")
         S_2 = result.output.get("S_2")
 
         # DRAG optimal alpha: difference of two sequences should cross zero
+        # Legacy parity: use S.real (not magnitude)
         I_diff = np.real(S_1) - np.real(S_2)
 
-        # Find zero-crossing in I difference
         metrics: dict[str, Any] = {}
-        sign_changes = np.where(np.diff(np.sign(I_diff)))[0]
-        if len(sign_changes) > 0:
-            idx = sign_changes[0]
-            # Linear interpolation for precise crossing
-            x0, x1 = float(amps[idx]), float(amps[idx + 1])
-            y0, y1 = float(I_diff[idx]), float(I_diff[idx + 1])
-            if y1 != y0:
-                optimal_alpha = x0 - y0 * (x1 - x0) / (y1 - y0)
-            else:
-                optimal_alpha = (x0 + x1) / 2
-            metrics["optimal_alpha"] = optimal_alpha
+
+        # Use find_roots for robust zero-crossing detection (legacy parity)
+        roots = find_roots(amps, I_diff)
+        if len(roots) > 0:
+            # Scale by base_alpha to get effective DRAG coefficient
+            possible_alpha_candidates = np.array(roots) * base_alpha
+            metrics["optimal_alpha"] = float(possible_alpha_candidates[0])
+            metrics["alpha_candidates"] = possible_alpha_candidates.tolist()
         else:
-            metrics["optimal_alpha"] = float(amps[np.argmin(np.abs(I_diff))])
+            # Fallback: pick amplitude with smallest |I_diff|
+            metrics["optimal_alpha"] = float(amps[np.argmin(np.abs(I_diff))]) * base_alpha
+            metrics["alpha_candidates"] = []
+
+        metrics["base_alpha"] = base_alpha
 
         analysis = AnalysisResult.from_run(result, metrics=metrics)
 
         if update_calibration and self.calibration_store:
-            alpha_lo = float(np.min(amps)) if len(amps) else None
-            alpha_hi = float(np.max(amps)) if len(amps) else None
+            alpha_lo = float(np.min(amps) * base_alpha) if len(amps) else None
+            alpha_hi = float(np.max(amps) * base_alpha) if len(amps) else None
             self.guarded_calibration_commit(
                 analysis=analysis,
                 run_result=result,
@@ -216,26 +336,45 @@ class DRAGCalibration(ExperimentBase):
         if amps is None or S_1 is None or S_2 is None:
             return None
 
+        base_alpha = analysis.metrics.get("base_alpha", 1.0)
         I_diff = np.real(S_1) - np.real(S_2)
+
         if ax is None:
-            fig, ax = plt.subplots(figsize=(10, 5))
+            fig, ax = plt.subplots(figsize=(10, 6))
         else:
             fig = ax.figure
 
-        ax.scatter(amps, np.real(S_1), s=5, c="blue", alpha=0.5, label="Seq 1 (I)")
-        ax.scatter(amps, np.real(S_2), s=5, c="red", alpha=0.5, label="Seq 2 (I)")
-        ax.plot(amps, I_diff, "k-", lw=1.5, label="Difference")
-        ax.axhline(0, color="gray", ls="-", lw=0.5, alpha=0.5)
+        # Legacy parity: line plots with markers (not scatter)
+        ax.plot(amps, np.real(S_1), 'o-', linewidth=2, markersize=4,
+                label=r'$X_{180} - Y_{90}$ sequence')
+        ax.plot(amps, np.real(S_2), 's-', linewidth=2, markersize=4,
+                label=r'$Y_{180} - X_{90}$ sequence')
+        ax.axhline(y=0, color='gray', linestyle='--', linewidth=1, alpha=0.5,
+                    label=r'$\langle\sigma_z\rangle = 0$')
+
+        ax.set_xlabel(r"DRAG amplitude scaling factor ($\alpha$)", fontsize=12)
+        ax.set_ylabel(r"$\langle\sigma_z\rangle$", fontsize=12)
+        ax.set_title(
+            f"DRAG Calibration (Yale Method) - base $\\alpha$ = {base_alpha}",
+            fontsize=14, fontweight='bold',
+        )
+
+        # Mark crossing points (legacy parity)
+        alpha_candidates = analysis.metrics.get("alpha_candidates", [])
+        if alpha_candidates:
+            for root_alpha in alpha_candidates:
+                # Convert back to amps-axis units for the vertical line
+                root_amp = root_alpha / base_alpha if base_alpha != 0 else root_alpha
+                ax.axvline(x=root_amp, color='red', linestyle=':', linewidth=1.5, alpha=0.7)
 
         if "optimal_alpha" in analysis.metrics:
-            ax.axvline(analysis.metrics["optimal_alpha"], color="r", ls="--", lw=1.5,
-                       label=f"Optimal alpha = {analysis.metrics['optimal_alpha']:.4f}")
+            opt = analysis.metrics["optimal_alpha"]
+            opt_amp = opt / base_alpha if base_alpha != 0 else opt
+            ax.axvline(opt_amp, color="r", ls="--", lw=1.5,
+                       label=f"Optimal $\\alpha$ = {opt:.4f}")
 
-        ax.set_xlabel("DRAG Amplitude")
-        ax.set_ylabel("I (a.u.)")
-        ax.set_title("DRAG Calibration")
-        ax.legend()
         ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=11)
         plt.tight_layout()
         plt.show()
         return fig
@@ -320,17 +459,40 @@ class QubitPulseTrain(ExperimentBase):
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
         N_values = result.output.extract("N_values")
+
+        # Legacy parity: prefer state discrimination (Pe) over raw I/Q
+        # QUA program saves "state" (boolean_to_int averaged) for pulse train
+        Pe = result.output.extract("state", None)
+        if Pe is None:
+            Pe = result.output.extract("Pe", None)
+
         S = result.output.extract("S")
         I_vals = np.real(S)
         Q_vals = np.imag(S)
 
-        # Compute amplitude error from deviation of I/Q vs N
+        # Optional confusion-matrix correction
+        if Pe is not None:
+            Pe = np.asarray(Pe, dtype=float)
+            confusion = kw.get("confusion", None)
+            if confusion is None:
+                from ...programs.macros.measure import measureMacro
+                confusion = measureMacro._ro_quality_params.get("confusion_matrix", None)
+            if confusion is not None:
+                corrected = pp.ro_state_correct_proc(
+                    {"Pe": Pe},
+                    targets=[("Pe", "Pe_corr")],
+                    confusion=confusion,
+                )
+                Pe = corrected.get("Pe_corr", Pe)
+
+        # Compute amplitude error from deviation vs N
         metrics: dict[str, Any] = {}
         if len(I_vals) > 1:
-            # Ideal: I should be constant for perfect pi-pulses
             metrics["I_std"] = float(np.std(I_vals))
             metrics["Q_std"] = float(np.std(Q_vals))
             metrics["amp_err"] = float(np.std(np.abs(S)))
+        if Pe is not None:
+            metrics["Pe"] = Pe
 
         return AnalysisResult.from_run(result, metrics=metrics)
 
@@ -587,8 +749,9 @@ class RandomizedBenchmarking(ExperimentBase):
                 programs.append(prog)
                 queued_meta.append(dict(m_idx=int(m_idx), start=int(start), end=int(end)))
 
-        # Run all batched programs
+        # Run all batched programs — collect both I/Q and Pe (state discrimination)
         runres_template = None
+        Pe_mat = np.full((n_m, num_sequence), np.nan, dtype=float)
         for meta, prog in zip(queued_meta, programs):
             result = self.run_program(
                 prog, n_total=n_avg,
@@ -600,24 +763,35 @@ class RandomizedBenchmarking(ExperimentBase):
             I_batch = np.real(np.asarray(result.output.extract("S"), dtype=complex))
             Q_batch = np.imag(np.asarray(result.output.extract("S"), dtype=complex))
 
+            # Legacy parity: also extract Pe (boolean_to_int averaged)
+            Pe_batch = result.output.extract("Pe", None)
+
             m_idx = meta["m_idx"]
             start = meta["start"]
             end = meta["end"]
 
             I_mat[m_idx, start:end] = I_batch
             Q_mat[m_idx, start:end] = Q_batch
+            if Pe_batch is not None:
+                Pe_mat[m_idx, start:end] = np.asarray(Pe_batch, dtype=float)
 
         # Average over sequences for each depth
         I_avg = np.nanmean(I_mat, axis=1)
         Q_avg = np.nanmean(Q_mat, axis=1)
         S_avg = I_avg + 1j * Q_avg
+        Pe_avg = np.nanmean(Pe_mat, axis=1) if not np.all(np.isnan(Pe_mat)) else None
 
-        output = Output({
+        output_dict = {
             "S": S_avg,
             "m_list": np.asarray(m_list_int),
             "I_matrix": I_mat,
             "Q_matrix": Q_mat,
-        })
+        }
+        if Pe_avg is not None:
+            output_dict["Pe"] = Pe_avg
+            output_dict["Pe_matrix"] = Pe_mat
+
+        output = Output(output_dict)
         self.save_output(output, "randomizedBenchmarking")
 
         if runres_template is not None:
@@ -627,8 +801,27 @@ class RandomizedBenchmarking(ExperimentBase):
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
         m_list = result.output.extract("m_list")
-        S = result.output.extract("S")
-        survival = np.real(S)
+
+        # Legacy parity: prefer Pe (state discrimination probability) over raw IQ
+        Pe = result.output.extract("Pe", None)
+        if Pe is not None:
+            survival = np.asarray(Pe, dtype=float)
+            # Apply confusion-matrix correction if available
+            confusion = kw.pop("confusion", None)
+            if confusion is None:
+                from ...programs.macros.measure import measureMacro
+                confusion = measureMacro._ro_quality_params.get("confusion_matrix", None)
+            if confusion is not None:
+                corrected = pp.ro_state_correct_proc(
+                    {"Pe": survival},
+                    targets=[("Pe", "Pe_corr")],
+                    confusion=confusion,
+                )
+                survival = corrected.get("Pe_corr", survival)
+        else:
+            # Fallback: use real part of S
+            S = result.output.extract("S")
+            survival = np.real(S)
 
         # Initial guesses for rb_survival_model(m, p, A, B)
         p_guess = 0.99
@@ -652,11 +845,18 @@ class RandomizedBenchmarking(ExperimentBase):
 
     def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
         m_list = analysis.data.get("m_list")
-        S = analysis.data.get("S")
-        if m_list is None or S is None:
+        if m_list is None:
             return None
 
-        survival = np.real(S)
+        # Prefer Pe data; fall back to np.real(S)
+        Pe = analysis.data.get("Pe")
+        if Pe is not None:
+            survival = np.asarray(Pe, dtype=float)
+        else:
+            S = analysis.data.get("S")
+            if S is None:
+                return None
+            survival = np.real(S)
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 5))
         else:
