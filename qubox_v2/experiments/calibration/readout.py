@@ -7,6 +7,7 @@ from typing import Any, Mapping, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
+from qm.qua import dual_demod
 
 from ..experiment_base import ExperimentBase
 from ..result import AnalysisResult, FitResult
@@ -194,6 +195,7 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
     ) -> RunResult:
         attr = self.attr
         self.hw.set_element_fq(attr.ro_el, drive_frequency)
+        self.measure_macro.set_drive_frequency(drive_frequency)
         self.set_standard_frequencies()
         ro_therm_clks = self.get_therm_clks("ro", fallback=0) or 0
 
@@ -345,10 +347,28 @@ class ReadoutGEDiscrimination(ExperimentBase):
         attr = self.attr
         readout_element = ro_element or attr.ro_el
 
-        k_g = float(kwargs.pop("k_g", 2.0))
-        k_e = float(kwargs.pop("k_e", k_g))
+        legacy_update_measure = kwargs.pop("update_measureMacro", None)
+        if legacy_update_measure is not None:
+            update_measure_macro = bool(legacy_update_measure)
+
+        legacy_k = kwargs.pop("k", None)
+        legacy_k_g = kwargs.pop("k_g", None)
+        legacy_k_e = kwargs.pop("k_e", None)
+
+        if legacy_k_g is not None and blob_k_g == 2.0:
+            blob_k_g = float(legacy_k_g)
+        elif legacy_k is not None and blob_k_g == 2.0:
+            blob_k_g = float(legacy_k)
+
         if blob_k_e is None:
-            blob_k_e = blob_k_g
+            if legacy_k_e is not None:
+                blob_k_e = float(legacy_k_e)
+            elif legacy_k_g is not None:
+                blob_k_e = float(legacy_k_g)
+            elif legacy_k is not None:
+                blob_k_e = float(legacy_k)
+            else:
+                blob_k_e = blob_k_g
 
         # Resolve pulse and integration weight mapping
         pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(readout_element, measure_op, strict=False)
@@ -373,13 +393,24 @@ class ReadoutGEDiscrimination(ExperimentBase):
         base_m_sin_name = weight_mapping[m_sin_key]
 
         # Ensure measure macro uses the resolved readout element/op mapping for this run.
-        measureMacro.set_pulse_op(
-            pulse_info,
-            active_op=measure_op,
-            weights=[[cos_key, sin_key], [m_sin_key, cos_key]],
-            weight_len=pulse_info.length,
-        )
-        measureMacro.set_drive_frequency(drive_frequency)
+        # Keep both references in sync because notebook reloads can leave
+        # `readout.py` and `cQED_programs.py` holding different measureMacro objects.
+        macro_refs = [measureMacro]
+        prog_measure_macro = getattr(cQED_programs, "measureMacro", None)
+        if prog_measure_macro is not None and all(prog_measure_macro is not ref for ref in macro_refs):
+            macro_refs.append(prog_measure_macro)
+
+        for macro in macro_refs:
+            # Force canonical dual-demod path for IQ blob acquisition.
+            # This clears any stale sliced/per-output demodulator settings.
+            macro.set_demodulator(dual_demod.full)
+            macro.set_pulse_op(
+                pulse_info,
+                active_op=measure_op,
+                weights=[[cos_key, sin_key], [m_sin_key, cos_key]],
+                weight_len=pulse_info.length,
+            )
+            macro.set_drive_frequency(drive_frequency)
 
         # Store params so analyze() can build rotated weights
         self._run_params = {
@@ -1095,6 +1126,7 @@ class ReadoutWeightsOptimization(ExperimentBase):
     ) -> RunResult:
         attr = self.attr
         self.hw.set_element_fq(attr.ro_el, drive_frequency)
+        self.measure_macro.set_drive_frequency(drive_frequency)
         self.set_standard_frequencies()
 
         # Store run params for analyze()
@@ -1345,6 +1377,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         self,
         prep_policy: str | None = None,
         prep_kwargs: dict | None = None,
+        k: float | None = None,
         r180: str = "x180",
         update_measure_macro: bool = False,
         show_analysis: bool = False,
@@ -1356,6 +1389,26 @@ class ReadoutButterflyMeasurement(ExperimentBase):
     ) -> RunResult:
         attr = self.attr
         self.set_standard_frequencies()
+
+        sync_info: dict[str, Any] = {
+            "requested": bool(update_measure_macro),
+            "applied": False,
+            "reason": "not_requested",
+        }
+        if update_measure_macro:
+            sync_info = self._sync_measure_macro_from_current_mapping(prefer_rotated=True)
+            if sync_info.get("applied"):
+                _logger.info(
+                    "Butterfly measureMacro sync applied: element=%s op=%s weights=%s",
+                    sync_info.get("element"),
+                    sync_info.get("operation"),
+                    sync_info.get("weights"),
+                )
+            else:
+                _logger.warning(
+                    "Butterfly measureMacro sync not applied: %s",
+                    sync_info.get("reason", "unknown"),
+                )
 
         # Resolve post-selection config
         if use_stored_config and prep_policy is None:
@@ -1370,7 +1423,29 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             post_sel_policy = prep_policy or "NONE"
             post_sel_kwargs = dict(prep_kwargs or {})
 
+        if k is not None:
+            k_val = float(k)
+            policy_norm = str(post_sel_policy).upper()
+            if policy_norm == "ZSCORE":
+                post_sel_kwargs.setdefault("k", k_val)
+            elif policy_norm == "BLOBS":
+                if (
+                    "rg2" not in post_sel_kwargs
+                    and "re2" not in post_sel_kwargs
+                    and "sigma_g" in post_sel_kwargs
+                    and "sigma_e" in post_sel_kwargs
+                ):
+                    sigma_g = float(post_sel_kwargs["sigma_g"])
+                    sigma_e = float(post_sel_kwargs["sigma_e"])
+                    post_sel_kwargs["rg2"] = float((k_val * sigma_g) ** 2)
+                    post_sel_kwargs["re2"] = float((k_val * sigma_e) ** 2)
+
         self._show_analysis = show_analysis
+        self._run_params = {
+            "post_sel_policy": post_sel_policy,
+            "post_sel_kwargs": dict(post_sel_kwargs),
+            "measure_macro_sync": dict(sync_info),
+        }
 
         _logger.info("Butterfly measurement: n_samples=%d, policy=%r", n_samples, post_sel_policy)
 
@@ -1388,6 +1463,82 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         )
         self.save_output(result.output, "butterflyMeasurement")
         return result
+
+    @staticmethod
+    def _pick_weight_triplet(weight_mapping: dict[str, str], op_prefix: str) -> tuple[str, str, str] | None:
+        def _name(prefix: str, suffix: str) -> str:
+            return suffix if not prefix else f"{prefix}{suffix}"
+
+        candidates = [
+            (_name(op_prefix, "rot_cos"), _name(op_prefix, "rot_sin"), _name(op_prefix, "rot_m_sin")),
+            ("rot_cos", "rot_sin", "rot_m_sin"),
+            (_name(op_prefix, "cos"), _name(op_prefix, "sin"), _name(op_prefix, "minus_sin")),
+            ("cos", "sin", "minus_sin"),
+        ]
+        for triplet in candidates:
+            if all(k in weight_mapping for k in triplet):
+                return triplet
+        return None
+
+    def _sync_measure_macro_from_current_mapping(self, *, prefer_rotated: bool = True) -> dict[str, Any]:
+        _ = prefer_rotated  # kept for API clarity
+        try:
+            element = measureMacro.active_element()
+        except Exception:
+            element = self.attr.ro_el
+
+        try:
+            operation = measureMacro.active_op()
+        except Exception:
+            operation = "readout"
+
+        pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
+        if pulse_info is None:
+            return {
+                "requested": True,
+                "applied": False,
+                "reason": f"No pulse mapping for element={element!r}, op={operation!r}",
+                "element": element,
+                "operation": operation,
+            }
+
+        weight_mapping = pulse_info.int_weights_mapping or {}
+        if not isinstance(weight_mapping, dict):
+            weight_mapping = {}
+
+        is_readout = (pulse_info.op == "readout")
+        op_prefix = "" if is_readout else f"{pulse_info.op}_"
+        triplet = self._pick_weight_triplet(weight_mapping, op_prefix)
+        if triplet is None:
+            return {
+                "requested": True,
+                "applied": False,
+                "reason": f"No compatible weight labels found. Available: {sorted(weight_mapping.keys())}",
+                "element": element,
+                "operation": operation,
+            }
+
+        cos_key, sin_key, m_sin_key = triplet
+        measureMacro.set_pulse_op(
+            pulse_info,
+            active_op=operation,
+            weights=[[cos_key, sin_key], [m_sin_key, cos_key]],
+            weight_len=pulse_info.length,
+        )
+
+        drive_frequency = measureMacro.get_drive_frequency()
+        if drive_frequency is not None:
+            measureMacro.set_drive_frequency(drive_frequency)
+
+        return {
+            "requested": True,
+            "applied": True,
+            "reason": "ok",
+            "element": element,
+            "operation": operation,
+            "pulse": pulse_info.pulse,
+            "weights": [cos_key, sin_key, m_sin_key],
+        }
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
         import pandas as pd
@@ -1699,16 +1850,31 @@ class CalibrateReadoutFull(ExperimentBase):
         persist_weights: bool = True,
         save: bool = True,
         skip_weights_optimization: bool = False,
-        blob_k_g: float = 3.0,
+        blob_k_g: float = 2.0,
         blob_k_e: float | None = None,
+        k: float | None = None,
+        M0_MAX_TRIALS: int = 16,
         burn_rot_weights: bool = True,
         wopt_kwargs: dict | None = None,
         ge_kwargs: dict | None = None,
         bfly_kwargs: dict | None = None,
     ) -> dict:
+        k_value = float(k) if k is not None else None
+        effective_blob_k_g = blob_k_g
+        effective_blob_k_e = blob_k_e
+        if k_value is not None and blob_k_g == 2.0:
+            effective_blob_k_g = k_value
+        if effective_blob_k_e is None and k_value is not None:
+            effective_blob_k_e = k_value
+
         # Build effective config: ReadoutConfig takes precedence if supplied
         if config is not None:
             cfg = config
+            cfg_k = float(cfg.k) if getattr(cfg, "k", None) is not None else None
+            if cfg_k is not None and cfg.blob_k_g == 2.0:
+                cfg.blob_k_g = cfg_k
+            if cfg.blob_k_e is None and cfg_k is not None:
+                cfg.blob_k_e = cfg_k
         else:
             cfg = ReadoutConfig(
                 ro_op=ro_op or "readout",
@@ -1720,9 +1886,11 @@ class CalibrateReadoutFull(ExperimentBase):
                 persist_weights=persist_weights,
                 n_samples_disc=n_samples_disc,
                 burn_rot_weights=burn_rot_weights,
-                blob_k_g=blob_k_g,
-                blob_k_e=blob_k_e,
+                blob_k_g=effective_blob_k_g,
+                blob_k_e=effective_blob_k_e,
+                k=k_value,
                 n_shots_butterfly=n_shots_butterfly,
+                M0_MAX_TRIALS=M0_MAX_TRIALS,
                 display_analysis=display_analysis,
                 save=save,
                 wopt_kwargs=dict(wopt_kwargs or {}),
@@ -1754,26 +1922,43 @@ class CalibrateReadoutFull(ExperimentBase):
             _logger.info("Step 1: Weight optimization")
             wopt = ReadoutWeightsOptimization(self._ctx)
             wopt_kw = dict(cfg.wopt_kwargs)
+            wopt_set_measure_macro = bool(wopt_kw.pop("set_measure_macro", False))
             wopt_result = wopt.run(
                 eff_ro_op, eff_drive_freq,
                 cfg.cos_weight_key, cfg.sin_weight_key, cfg.m_sin_weight_key,
                 r180=cfg.r180, n_avg=cfg.n_avg_weights,
                 persist=cfg.persist_weights,
-                set_measure_macro=True,
+                set_measure_macro=wopt_set_measure_macro,
                 revert_on_no_improvement=cfg.revert_on_no_improvement,
                 **wopt_kw,
             )
             results["weights_optimization"] = wopt_result
 
             # Analyze to register optimized weights and extract opt_*_key (legacy parity)
-            wopt_analysis = wopt.analyze(wopt_result)
-            opt_cos_key = wopt_analysis.metrics.get("opt_cos_key", opt_cos_key)
-            opt_sin_key = wopt_analysis.metrics.get("opt_sin_key", opt_sin_key)
-            opt_m_sin_key = wopt_analysis.metrics.get("opt_m_sin_key", opt_m_sin_key)
+            wopt.analyze(wopt_result)
 
         # Steps 2+3: Iterative discrimination + butterfly (Section 3)
         ge_kw = dict(cfg.ge_kwargs)
         bfly_kw = dict(cfg.bfly_kwargs)
+
+        if "update_measureMacro" in ge_kw and "update_measure_macro" not in ge_kw:
+            ge_kw["update_measure_macro"] = ge_kw.pop("update_measureMacro")
+
+        ge_update_measure_macro = bool(ge_kw.pop("update_measure_macro", True))
+        ge_persist = bool(ge_kw.pop("persist", True))
+        ge_n_samples_override = ge_kw.pop("n_samples", None)
+
+        if "update_measureMacro" in bfly_kw and "update_measure_macro" not in bfly_kw:
+            bfly_kw["update_measure_macro"] = bfly_kw.pop("update_measureMacro")
+
+        bfly_update_measure_macro = bool(bfly_kw.pop("update_measure_macro", True))
+        bfly_n_samples_override = bfly_kw.pop("n_samples", None)
+        bfly_max_trials_override = bfly_kw.pop("M0_MAX_TRIALS", cfg.M0_MAX_TRIALS)
+
+        pipeline_k = float(cfg.k) if getattr(cfg, "k", None) is not None else None
+        if pipeline_k is not None:
+            ge_kw.setdefault("k", pipeline_k)
+            bfly_kw.setdefault("k", pipeline_k)
         prev_fidelity = None
         iteration_results: list[dict] = []
 
@@ -1796,16 +1981,18 @@ class CalibrateReadoutFull(ExperimentBase):
                         n_disc, uncertainty,
                     )
 
+            ge_n_samples = int(ge_n_samples_override) if ge_n_samples_override is not None else int(n_disc)
+
             # Step 2: G/E discrimination
-            _logger.info("Step 2: GE discrimination (n_samples=%d)", n_disc)
+            _logger.info("Step 2: GE discrimination (n_samples=%d)", ge_n_samples)
             ge_disc = ReadoutGEDiscrimination(self._ctx)
             ge_result = ge_disc.run(
                 eff_ro_op, eff_drive_freq,
                 r180=cfg.r180,
-                n_samples=n_disc,
+                n_samples=ge_n_samples,
                 base_weight_keys=(opt_cos_key, opt_sin_key, opt_m_sin_key),
-                update_measure_macro=True,
-                persist=True,
+                update_measure_macro=ge_update_measure_macro,
+                persist=ge_persist,
                 burn_rot_weights=cfg.burn_rot_weights,
                 blob_k_g=cfg.blob_k_g,
                 blob_k_e=cfg.blob_k_e,
@@ -1817,12 +2004,21 @@ class CalibrateReadoutFull(ExperimentBase):
             current_fidelity = ge_analysis.metrics.get("fidelity", 0.0)
 
             # Step 3: Butterfly measurement
-            _logger.info("Step 3: Butterfly measurement (n_shots=%d)", cfg.n_shots_butterfly)
+            bfly_n_samples = (
+                int(bfly_n_samples_override)
+                if bfly_n_samples_override is not None
+                else int(cfg.n_shots_butterfly)
+            )
+            bfly_max_trials = int(bfly_max_trials_override)
+
+            _logger.info("Step 3: Butterfly measurement (n_shots=%d)", bfly_n_samples)
             bfly = ReadoutButterflyMeasurement(self._ctx)
             bfly_show = bfly_kw.pop("show_analysis", cfg.display_analysis)
             bfly_result = bfly.run(
                 r180=cfg.r180,
-                n_samples=cfg.n_shots_butterfly,
+                update_measure_macro=bfly_update_measure_macro,
+                n_samples=bfly_n_samples,
+                M0_MAX_TRIALS=bfly_max_trials,
                 show_analysis=bfly_show,
                 **bfly_kw,
             )
@@ -1835,7 +2031,7 @@ class CalibrateReadoutFull(ExperimentBase):
                 "ge_result": ge_result,
                 "bfly_result": bfly_result,
                 "fidelity": current_fidelity,
-                "n_disc": n_disc,
+                "n_disc": ge_n_samples,
             })
 
             # Check convergence (Section 3A)
@@ -1874,6 +2070,14 @@ class CalibrateReadoutFull(ExperimentBase):
             ge_analysis = ge_disc.analyze(result["ge_discrimination"],
                                           update_calibration=update_calibration, **kw)
             for k, v in ge_analysis.metrics.items():
+                if k == "fidelity":
+                    try:
+                        v = float(v)
+                    except (TypeError, ValueError):
+                        pass
+                    else:
+                        if np.isfinite(v) and v > 1.0:
+                            v /= 100.0
                 metrics[f"ge_{k}"] = v
 
         # Analyze butterfly stage
@@ -1908,7 +2112,11 @@ class CalibrateReadoutFull(ExperimentBase):
 
         # Print GE discrimination summary
         if "ge_fidelity" in metrics:
-            print(f"GE Discrimination fidelity: {metrics['ge_fidelity']:.2f}%")
+            ge_fid = metrics["ge_fidelity"]
+            if isinstance(ge_fid, (int, float, np.floating)) and ge_fid <= 1.0:
+                print(f"GE Discrimination fidelity: {ge_fid:.2%}")
+            else:
+                print(f"GE Discrimination fidelity: {ge_fid:.2f}%")
         if "ge_angle" in metrics:
             print(f"GE Discrimination angle: {metrics['ge_angle']:.4f} rad")
         if "ge_threshold" in metrics:

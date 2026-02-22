@@ -319,7 +319,17 @@ class measureMacro:
             cls._post_select_config = None
             return
         if not isinstance(cfg, PostSelectionConfig):
-            raise TypeError(f"set_post_select_config: expected PostSelectionConfig or None, got {type(cfg)}")
+            if isinstance(cfg, dict):
+                cfg = PostSelectionConfig.from_dict(cfg)
+            elif hasattr(cfg, "to_dict") and callable(getattr(cfg, "to_dict")):
+                cfg = PostSelectionConfig.from_dict(cfg.to_dict())
+            else:
+                raise TypeError(
+                    f"set_post_select_config: expected PostSelectionConfig-compatible object or None, got {type(cfg)}"
+                )
+            if cfg is None:
+                cls._post_select_config = None
+                return
         cls._post_select_config = cfg.copy() if copy else cfg
 
     @classmethod

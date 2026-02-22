@@ -201,6 +201,22 @@ class DRAGCalibration(ExperimentBase):
         attr = self.attr
         amps = np.asarray(amps, dtype=float)
 
+        if amps.ndim != 1 or amps.size == 0:
+            raise ValueError("`amps` must be a non-empty 1D array-like.")
+        if not np.all(np.isfinite(amps)):
+            raise ValueError("`amps` must contain only finite numeric values.")
+
+        # OPX amplitude matrix coefficients must satisfy |a| < 2.
+        # Using |a| == 2 triggers runtime overflow errors on hardware.
+        over_limit = np.abs(amps) >= 2.0
+        if np.any(over_limit):
+            max_abs = float(np.max(np.abs(amps)))
+            raise ValueError(
+                "DRAG sweep values in `amps` exceed OPX limits for amp-matrix scaling "
+                f"(|a| must be < 2, got max |a|={max_abs:.6g}). "
+                "Use a narrower range (legacy notebook uses -0.5 to 0.5)."
+            )
+
         self.set_standard_frequencies()
 
         # ----- Legacy parity: generate DRAG waveforms with base_alpha -----

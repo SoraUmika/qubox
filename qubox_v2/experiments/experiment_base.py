@@ -225,7 +225,10 @@ class ExperimentBase:
     def set_standard_frequencies(self, *, qb_fq: float | None = None) -> None:
         """Set readout and qubit element frequencies to calibrated values."""
         mm = self.measure_macro
-        self.hw.set_element_fq(self.attr.ro_el, mm._drive_frequency)
+        ro_fq = getattr(mm, "_drive_frequency", None)
+        if not isinstance(ro_fq, (int, float, np.floating)) or not np.isfinite(ro_fq):
+            ro_fq = self.attr.ro_fq
+        self.hw.set_element_fq(self.attr.ro_el, float(ro_fq))
         self.hw.set_element_fq(self.attr.qb_el, qb_fq or self.attr.qb_fq)
 
     def get_readout_lo(self) -> float:

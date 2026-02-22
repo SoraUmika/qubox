@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Literal, Tuple, Union, Optional
+from collections.abc import Mapping
 import numpy as np
 
 TargetState = Literal["g", "e"]
@@ -120,8 +121,29 @@ class PostSelectionConfig:
         if blob_k_e is None:
             blob_k_e = blob_k_g
 
-        rot_mu_g, rot_mu_e, threshold = output.extract("rot_mu_g", "rot_mu_e", "threshold")
-        sigma_g, sigma_e = output.extract("sigma_g", "sigma_e")
+        def _extract_values(src, *keys):
+            if hasattr(src, "extract") and callable(getattr(src, "extract")):
+                vals = src.extract(*keys)
+                if len(keys) == 1:
+                    return (vals,)
+                return tuple(vals)
+
+            if isinstance(src, Mapping):
+                missing = [k for k in keys if k not in src]
+                if missing:
+                    raise KeyError(
+                        f"Missing discrimination keys: {missing}. "
+                        f"Available keys: {sorted(src.keys())}"
+                    )
+                return tuple(src[k] for k in keys)
+
+            raise TypeError(
+                "from_discrimination_results expected an object with extract(*keys) "
+                f"or a mapping, got {type(src)}"
+            )
+
+        rot_mu_g, rot_mu_e, threshold = _extract_values(output, "rot_mu_g", "rot_mu_e", "threshold")
+        sigma_g, sigma_e = _extract_values(output, "sigma_g", "sigma_e")
 
         sigma_g = float(sigma_g)
         sigma_e = float(sigma_e)

@@ -42,8 +42,15 @@ class ReadoutConfig:
         If *True*, burn rotated weights after discrimination fitting.
     blob_k_g, blob_k_e : float | None
         Blob filtering thresholds for ground / excited states.
+    k : float | None
+        Legacy convenience alias for symmetric blob thresholding. When set,
+        callers may use a single ``k`` value instead of separate
+        ``blob_k_g``/``blob_k_e``.
     n_shots_butterfly : int
         Number of shots for the butterfly measurement.
+    M0_MAX_TRIALS : int
+        Maximum retries for post-selection preparation in butterfly
+        measurement (legacy-compatible control).
     max_iterations : int
         Maximum discrimination+butterfly iterations (convergence loop).
         Default ``1`` preserves current single-pass behaviour.
@@ -86,11 +93,13 @@ class ReadoutConfig:
     # Discrimination
     n_samples_disc: int = 250_000
     burn_rot_weights: bool = True
-    blob_k_g: float = 3.0
+    blob_k_g: float = 2.0
     blob_k_e: float | None = None
+    k: float | None = None
 
     # Butterfly
     n_shots_butterfly: int = 50_000
+    M0_MAX_TRIALS: int = 16
 
     # Iteration (Section 3)
     max_iterations: int = 1
