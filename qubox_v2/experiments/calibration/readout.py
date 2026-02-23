@@ -1243,6 +1243,12 @@ class ReadoutWeightsOptimization(ExperimentBase):
         metrics["ge_diff"] = ge_diff
         metrics["ge_diff_norm"] = ge_diff_norm
 
+        # Ensure traces are available to plot() via metadata
+        # (analysis.data may not contain them if Output.__iter__ skips non-standard keys)
+        metadata["g_trace"] = g_trace
+        metadata["e_trace"] = e_trace
+        metadata["time_list"] = result.output.get("time_list")
+
         # Build segmented weights
         Re = ge_diff_norm.real
         Im = ge_diff_norm.imag
@@ -1403,6 +1409,15 @@ class ReadoutWeightsOptimization(ExperimentBase):
         g_trace = analysis.data.get("g_trace")
         e_trace = analysis.data.get("e_trace")
         time_list = analysis.data.get("time_list")
+
+        # Fall back to metadata if traces are not in data
+        if g_trace is None and analysis.metadata:
+            g_trace = analysis.metadata.get("g_trace")
+        if e_trace is None and analysis.metadata:
+            e_trace = analysis.metadata.get("e_trace")
+        if time_list is None and analysis.metadata:
+            time_list = analysis.metadata.get("time_list")
+
         ge_diff_norm = analysis.metrics.get("ge_diff_norm")
         ge_diff = analysis.metrics.get("ge_diff")
 

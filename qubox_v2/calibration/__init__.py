@@ -49,6 +49,14 @@ from .patch_rules import (
     WeightRegistrationRule,
     default_patch_rules,
 )
+from .pulse_train_tomo import (
+    run_pulse_train_tomography,
+    fit_pulse_train_model,
+    fit_params_to_qubitrotation_knobs,
+    pretty_knob_report,
+    default_r0_dict,
+    plot_meas_vs_fit,
+)
 
 __all__ = [
     # Store
@@ -95,4 +103,11 @@ __all__ = [
     "DiscriminationRule",
     "ReadoutQualityRule",
     "default_patch_rules",
+    # Pulse-train tomography
+    "run_pulse_train_tomography",
+    "fit_pulse_train_model",
+    "fit_params_to_qubitrotation_knobs",
+    "pretty_knob_report",
+    "default_r0_dict",
+    "plot_meas_vs_fit",
 ]

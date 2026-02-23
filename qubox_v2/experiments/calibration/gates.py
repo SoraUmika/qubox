@@ -14,6 +14,13 @@ from ...analysis.cQED_models import rb_survival_model
 from ...analysis.algorithms import random_sequences
 from ...hardware.program_runner import RunResult
 from ...programs import cQED_programs
+from ...calibration.pulse_train_tomo import (
+    run_pulse_train_tomography,
+    fit_pulse_train_model,
+    fit_params_to_qubitrotation_knobs,
+    default_r0_dict,
+    plot_meas_vs_fit,
+)
 
 
 class AllXY(ExperimentBase):
@@ -444,160 +451,6 @@ class DRAGCalibration(ExperimentBase):
         return fig
 
 
-class QubitPulseTrainLegacy(ExperimentBase):
-    """Legacy pulse train amplitude calibration.
-
-    Applies N repeated rotation pulses after a reference pulse and checks
-    amplitude independence of the measured signal.
-    """
-
-    def run(
-        self,
-        N_values: list[int] | np.ndarray,
-        rotation_pulse: str = "x180",
-        n_avg: int = 1000,
-        reference_pulse: str = "x90",
-    ) -> RunResult:
-        attr = self.attr
-        self.set_standard_frequencies()
-
-        # Look up pulse durations (in clock cycles) from pulse manager
-        ref_info = self.pulse_mgr.get_pulseOp_by_element_op(attr.qb_el, reference_pulse)
-        rot_info = self.pulse_mgr.get_pulseOp_by_element_op(attr.qb_el, rotation_pulse)
-        if ref_info is None:
-            raise ValueError(f"No PulseOp found for '{reference_pulse}' on '{attr.qb_el}'")
-        if rot_info is None:
-            raise ValueError(f"No PulseOp found for '{rotation_pulse}' on '{attr.qb_el}'")
-
-        reference_clks = int(ref_info.length) // 4
-        rotation_clks = int(rot_info.length) // 4
-
-        prog = cQED_programs.qubit_pulse_train_legacy(
-            attr.qb_el, reference_pulse, rotation_pulse,
-            reference_clks, rotation_clks,
-            N_values, attr.qb_therm_clks, n_avg,
-        )
-        result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
-                pp.proc_default,
-                pp.proc_attach("N_values", np.asarray(N_values)),
-            ],
-        )
-        self.save_output(result.output, "qubitPulseTrainLegacy")
-        return result
-
-
-class QubitPulseTrain(ExperimentBase):
-    """Improved pulse train amplitude calibration.
-
-    Optionally includes zero-amplitude reference measurements
-    for background subtraction.
-    """
-
-    def run(
-        self,
-        N_values: list[int] | np.ndarray,
-        reference_pulse: str = "x90",
-        rotation_pulse: str = "x180",
-        run_reference: bool = False,
-        n_avg: int = 1000,
-    ) -> RunResult:
-        attr = self.attr
-        self.set_standard_frequencies()
-
-        prog = cQED_programs.qubit_pulse_train(
-            attr.qb_el, reference_pulse, rotation_pulse,
-            N_values, attr.qb_therm_clks, n_avg,
-            run_reference,
-        )
-        result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
-                pp.proc_default,
-                pp.proc_attach("N_values", np.asarray(N_values)),
-            ],
-        )
-        self.save_output(result.output, "qubitPulseTrain")
-        return result
-
-    def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
-        N_values = result.output.extract("N_values")
-
-        # Legacy parity: prefer state discrimination (Pe) over raw I/Q
-        # QUA program saves "state" (boolean_to_int averaged) for pulse train
-        Pe = result.output.get("state")
-        if Pe is not None:
-            Pe = result.output._format(Pe)
-        if Pe is None:
-            Pe = result.output.get("Pe")
-            if Pe is not None:
-                Pe = result.output._format(Pe)
-
-        S = result.output.extract("S")
-        I_vals = np.real(S)
-        Q_vals = np.imag(S)
-
-        # Optional confusion-matrix correction
-        if Pe is not None:
-            Pe = np.asarray(Pe, dtype=float)
-            confusion = kw.get("confusion", None)
-            if confusion is None:
-                confusion = self.get_confusion_matrix()
-            if confusion is not None:
-                corrected = pp.ro_state_correct_proc(
-                    {"Pe": Pe},
-                    targets=[("Pe", "Pe_corr")],
-                    confusion=confusion,
-                )
-                Pe = corrected.get("Pe_corr", Pe)
-
-        # Compute amplitude error from deviation vs N
-        metrics: dict[str, Any] = {}
-        if len(I_vals) > 1:
-            metrics["I_std"] = float(np.std(I_vals))
-            metrics["Q_std"] = float(np.std(Q_vals))
-            metrics["amp_err"] = float(np.std(np.abs(S)))
-        if Pe is not None:
-            metrics["Pe"] = Pe
-
-        return AnalysisResult.from_run(result, metrics=metrics)
-
-    def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
-        N_values = analysis.data.get("N_values")
-        S = analysis.data.get("S")
-        if N_values is None or S is None:
-            return None
-
-        if ax is None:
-            fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-        else:
-            fig = ax.figure
-            axes = [ax, ax.twinx()]
-
-        axes[0].scatter(N_values, np.real(S), s=5, c="blue", label="I")
-        axes[0].scatter(N_values, np.imag(S), s=5, c="red", label="Q")
-        axes[0].set_xlabel("N (pulse repetitions)")
-        axes[0].set_ylabel("I / Q (a.u.)")
-        axes[0].set_title("Pulse Train: I/Q vs N")
-        axes[0].legend()
-        axes[0].grid(True, alpha=0.3)
-
-        axes[1].scatter(N_values, np.abs(S), s=5, c="green", label="|S|")
-        axes[1].set_xlabel("N (pulse repetitions)")
-        axes[1].set_ylabel("Magnitude")
-        title = "Pulse Train: Magnitude vs N"
-        if "amp_err" in analysis.metrics:
-            title += f"  |  amp_err = {analysis.metrics['amp_err']:.4f}"
-        axes[1].set_title(title)
-        axes[1].legend()
-        axes[1].grid(True, alpha=0.3)
-
-        plt.tight_layout()
-        plt.show()
-        return fig
-
-
 class RandomizedBenchmarking(ExperimentBase):
     """Standard and interleaved randomized benchmarking.
 
@@ -952,3 +805,206 @@ class RandomizedBenchmarking(ExperimentBase):
         plt.tight_layout()
         plt.show()
         return fig
+
+
+class PulseTrainCalibration(ExperimentBase):
+    """Pulse-train tomography for arbitrary rotation calibration.
+
+    Runs full 3-axis qubit state tomography at each N value with multiple
+    initial state preparations. Fits the Bloch-vector evolution using
+    DE+LS global optimisation to extract amplitude error, phase error,
+    detuning, and per-step Z rotation (zeta). Converts fit parameters
+    to QubitRotation knob corrections (d_lambda, d_alpha, d_omega).
+
+    Protocol
+    --------
+    For each N in N_values, for each prep in prep_defs:
+        ``prep_fn()`` -> ``align()`` -> ``arb_rot.play() x N`` -> ``align()`` -> tomo(sx,sy,sz)
+
+    The ``run()`` method wraps ``run_pulse_train_tomography()`` and stores
+    the Bloch-vector data in a RunResult.  The ``analyze()`` method wraps
+    ``fit_pulse_train_model()`` and ``fit_params_to_qubitrotation_knobs()``.
+    """
+
+    def run(
+        self,
+        arb_rot,
+        prep_defs: dict,
+        N_values,
+        n_avg: int = 20000,
+        *,
+        verbose: bool = True,
+        sanity_check: bool = True,
+        theta: float = np.pi,
+        phi: float = 0.0,
+    ) -> RunResult:
+        """Run the pulse-train tomography sweep.
+
+        Parameters
+        ----------
+        arb_rot
+            QubitRotation gate under test (must have ``.play()`` method).
+        prep_defs : dict
+            Map label -> QUA callable (or None for ground state).
+            Standard: ``{"g": None, "e": prep_e, "+x": prep_px, ...}``
+        N_values : array-like of int
+            Number of rotation-pulse repetitions to sweep.
+        n_avg : int
+            Averaging iterations.
+        verbose, sanity_check : bool
+            Passed to ``run_pulse_train_tomography``.
+        theta, phi : float
+            Nominal rotation angle and phase (stored as metadata).
+        """
+        from ...analysis.output import Output
+        from ...hardware.program_runner import RunResult as RR, ExecMode
+
+        meas, prep_check = run_pulse_train_tomography(
+            experiment=self._ctx,
+            arb_rot=arb_rot,
+            prep_defs=prep_defs,
+            N_values=N_values,
+            n_avg=n_avg,
+            verbose=verbose,
+            sanity_check=sanity_check,
+        )
+
+        N_arr = np.asarray(N_values, int)
+        output_dict = {
+            "N_values": N_arr,
+            "theta": float(theta),
+            "phi": float(phi),
+            "n_avg": int(n_avg),
+            "prep_keys": list(meas.keys()),
+        }
+        for key, arr in meas.items():
+            output_dict[f"meas_{key}"] = np.asarray(arr, float)
+        if prep_check is not None:
+            for key, arr in prep_check.items():
+                output_dict[f"prep_check_{key}"] = np.asarray(arr, float)
+
+        output = Output(output_dict)
+        self.save_output(output, "pulseTrainCalibration")
+        return RR(mode=ExecMode.HARDWARE, output=output, sim_samples=None)
+
+    @staticmethod
+    def _reconstruct_meas(result) -> dict:
+        """Reconstruct meas dict from RunResult output."""
+        keys = result.output.get("prep_keys", [])
+        if isinstance(keys, np.ndarray):
+            keys = keys.tolist()
+        return {
+            key: np.asarray(result.output.get(f"meas_{key}"), float)
+            for key in keys
+        }
+
+    def analyze(
+        self,
+        result: RunResult,
+        *,
+        update_calibration: bool = False,
+        fit_zeta: bool = True,
+        bounds: dict | None = None,
+        multi_seed: bool = True,
+        seeds=None,
+        seed_select: str = "ls",
+        residual_mode: str = "dir",
+        fit_relax: bool = False,
+        t_step: float | None = None,
+        verbose: bool = True,
+        dt_s: float | None = None,
+        n_samp: int | None = None,
+        d_omega_sign: float = 1.0,
+        **kw,
+    ) -> AnalysisResult:
+        """Analyse pulse-train tomography data.
+
+        Runs DE+LS global fit, optionally converts to QubitRotation knobs.
+
+        Parameters
+        ----------
+        fit_zeta : bool
+            Fit per-step Z rotation parameter.
+        bounds : dict or None
+            Parameter bounds for DE optimiser.
+        multi_seed, seeds, seed_select : multi-seed controls.
+        residual_mode : str
+            ``"dir"`` (normalised), ``"raw"``, or ``"both"``.
+        dt_s, n_samp : float, int
+            Pulse duration info for knob conversion.  Both required
+            to compute ``d_lambda``, ``d_alpha``, ``d_omega``.
+        d_omega_sign : float
+            Sign convention for detuning -> d_omega conversion.
+        """
+        N_values = np.asarray(result.output.extract("N_values"), int)
+        theta = float(result.output.get("theta", np.pi))
+        phi = float(result.output.get("phi", 0.0))
+        meas = self._reconstruct_meas(result)
+
+        p_hat, de, ls, pred_fit, fit_meta = fit_pulse_train_model(
+            meas=meas, N_values=N_values, theta=theta, phi=phi,
+            r0_dict=default_r0_dict(),
+            fit_zeta=fit_zeta,
+            bounds=bounds,
+            multi_seed=multi_seed, seeds=seeds, seed_select=seed_select,
+            residual_mode=residual_mode,
+            fit_relax=fit_relax, t_step=t_step,
+            verbose=verbose,
+            **kw,
+        )
+
+        metrics: dict[str, Any] = {
+            "amp_err": p_hat["amp_err"],
+            "phase_err": p_hat["phase_err"],
+            "delta": p_hat["delta"],
+            "zeta": p_hat.get("zeta", 0.0),
+            "de_sse": float(de.fun),
+            "ls_cost": float(ls.cost),
+            "ls_success": bool(ls.success),
+        }
+
+        if dt_s is not None and n_samp is not None:
+            knobs = fit_params_to_qubitrotation_knobs(
+                amp_err_hat=p_hat["amp_err"],
+                phase_err_hat=p_hat["phase_err"],
+                delta_hat=p_hat["delta"],
+                dt_s=dt_s, n_samp=n_samp,
+                d_omega_sign=d_omega_sign,
+            )
+            metrics.update(knobs)
+
+        metadata: dict[str, Any] = {
+            "calibration_kind": "pulse_train",
+            "fit_meta": fit_meta,
+        }
+
+        for key, arr in pred_fit.items():
+            result.output[f"pred_fit_{key}"] = np.asarray(arr, float)
+
+        fit = FitResult(
+            model_name="pulse_train_tomo",
+            params=dict(p_hat),
+        )
+        return AnalysisResult.from_run(result, fit=fit, metrics=metrics, metadata=metadata)
+
+    def plot(self, analysis: AnalysisResult, *, residual_mode: str = "both", **kwargs):
+        """Plot measured Bloch vectors vs fit, per-prep panels."""
+        N_values = np.asarray(analysis.data.get("N_values"), int)
+        theta = float(analysis.data.get("theta", np.pi))
+        phi = float(analysis.data.get("phi", 0.0))
+        keys = analysis.data.get("prep_keys", [])
+        if isinstance(keys, np.ndarray):
+            keys = keys.tolist()
+
+        meas = {k: np.asarray(analysis.data.get(f"meas_{k}"), float) for k in keys}
+        pred_fit = {k: np.asarray(analysis.data.get(f"pred_fit_{k}"), float) for k in keys}
+        p_hat = analysis.fit.params if analysis.fit else {}
+        fit_meta = (analysis.metadata or {}).get("fit_meta", {})
+
+        plot_meas_vs_fit(
+            meas=meas, pred_fit=pred_fit,
+            N_values=N_values, theta=theta, phi=phi,
+            p_hat=p_hat, fit_meta=fit_meta,
+            residual_mode=residual_mode,
+        )
+

@@ -55,7 +55,13 @@ class T1Relaxation(ExperimentBase):
         p0_time_unit = str(kw.pop("p0_time_unit", "us")).lower()
 
         A_guess = float(ydata[0] - ydata[-1])
-        T1_guess = float(delays[-1]) / 3
+        # Robust T1 guess: find where signal crosses halfway between first and last value
+        midpoint = (ydata[0] + ydata[-1]) / 2.0
+        half_idx = int(np.argmin(np.abs(ydata - midpoint)))
+        if half_idx > 0 and half_idx < len(delays) - 1:
+            T1_guess = float(delays[half_idx]) / np.log(2)
+        else:
+            T1_guess = float(delays[-1]) / 3
         offset_guess = float(ydata[-1])
         auto_p0 = [A_guess, T1_guess, offset_guess]
 
@@ -73,7 +79,7 @@ class T1Relaxation(ExperimentBase):
                            p0_fit,
                            model_name="T1_relaxation", **kw)
 
-        metrics: dict[str, Any] = {}
+        metrics: dict[str, Any] = {"T1_guess_ns": T1_guess, "fit_converged": bool(fit.params)}
         if fit.params:
             metrics["T1"] = fit.params["T1"]
             metrics["T1_us"] = fit.params["T1"] / 1e3

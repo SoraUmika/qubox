@@ -1,9 +1,13 @@
 # qubox\_v2 — API Reference & Architecture Guide
 
-**Version**: 1.4.0
-**Date**: 2026-02-22
+**Version**: 1.5.0
+**Date**: 2026-02-23
 **Status**: Governing Document
 **Changelog**:
+- v1.5.0 — Added section 23: Writing Custom Experiments.  Added usage examples
+  throughout sections 2-9 and 13 (drawn from `post_cavity_experiment_context.ipynb`).
+  Expanded sections 8 (Gate System) and Appendix A with gate-legacy API.
+  Added Appendix C: Quick-Reference Cheat Sheet.
 - v1.4.0 — Implemented macro refactor (Phases 1-3). Sections 13, 14, 15,
   20-22 updated to reflect: (a) cQED\_programs split into 8 builder
   sub-modules under `programs/builders/`, (b) new orchestrator patch ops
@@ -46,6 +50,13 @@
 20. [Macro System Architecture](#20-macro-system-architecture)
 21. [Experiment ↔ Macro Interaction Rules](#21-experiment--macro-interaction-rules)
 22. [Macro State Ownership & Persistence Boundaries](#22-macro-state-ownership--persistence-boundaries)
+23. [Writing Custom Experiments](#23-writing-custom-experiments)
+
+**Appendices:**
+
+- [Appendix A: Utility Functions](#appendix-a-utility-functions)
+- [Appendix B: Known Inconsistencies](#appendix-b-known-inconsistencies)
+- [Appendix C: Quick-Reference Cheat Sheet](#appendix-c-quick-reference-cheat-sheet)
 
 ---
 
@@ -126,9 +137,49 @@ Layer 1  Hardware Abstraction    (hardware.json, HardwareController, ProgramRunn
 
 ### Step 1 — Session Initialization
 
+**Legacy mode** (flat directory):
+
 ```python
 session = SessionManager(experiment_path="seq_1_device/")
 session.open()
+```
+
+**Context mode** (device + cooldown scoping):
+
+```python
+from qubox_v2.devices import DeviceRegistry
+from qubox_v2.experiments.session import SessionManager
+
+REGISTRY_BASE = Path("E:/qubox")
+registry = DeviceRegistry(REGISTRY_BASE)
+
+# One-time: create device and cooldown
+registry.create_device(
+    "post_cavity_sample_A",
+    description="Transmon qubit A — 3D cavity sample",
+    config_source=Path("E:/qubox/seq_1_device/config"),
+    sample_info={"chip": "Q1-2025A", "fridge": "BlueFors-LD400"},
+)
+registry.create_cooldown(
+    "post_cavity_sample_A", "cd_2025_02_22",
+    seed_from=Path("E:/qubox/seq_1_device/config"),
+)
+
+# Open session
+session = SessionManager(
+    device_id="post_cavity_sample_A",
+    cooldown_id="cd_2025_02_22",
+    registry_base=REGISTRY_BASE,
+    qop_ip="10.157.36.68",
+    cluster_name="Cluster_2",
+    auto_save_calibration=True,
+)
+session.open()
+
+# Inspect context
+ctx = session.context
+print(f"Device: {ctx.device_id}, Cooldown: {ctx.cooldown_id}")
+print(f"Wiring Rev: {ctx.wiring_rev}, Config Hash: {ctx.config_hash}")
 ```
 
 **What happens internally:**
@@ -173,6 +224,50 @@ register_rotations_from_ref_iq(
 session.burn_pulses()
 ```
 
+**Example — register selective and displacement pulses for cavity experiments:**
+
+```python
+from qubox_v2.tools.waveforms import kaiser_pulse_waveforms
+from qubox_v2.tools.generators import register_rotations_from_ref_iq, ensure_displacement_ops
+
+# Selective pi pulse (Kaiser-windowed, spectrally narrow)
+sel_I, sel_Q = kaiser_pulse_waveforms(
+    amplitude=0.0013, length=1000, beta=7.967,
+    detuning=0.0, subtracted=True, alpha=0.0,
+    anharmonicity=-200e6,
+)
+sel_ops = register_rotations_from_ref_iq(
+    session.pulse_mgr,
+    ref_I=sel_I, ref_Q=sel_Q,
+    element=attr.qb_el,
+    prefix="sel_",
+    rotations="all",            # x180, y180, x90, xn90, y90, yn90
+    override=True, persist=False,
+)
+
+# Constant displacement pulse on storage cavity
+session.pulse_mgr.create_control_pulse(
+    element=attr.st_el,
+    op="const_alpha",
+    length=48,
+    I_samples=[0.01958] * 48,
+    Q_samples=[0.0] * 48,
+    override=True, persist=False,
+)
+
+# Fock-resolved displacement pulses (disp_n0, disp_n1, ...)
+created = ensure_displacement_ops(
+    session.pulse_mgr,
+    element=attr.st_el,
+    n_max=3,
+    coherent_amp=0.01958,
+    coherent_len=48,
+    b_alpha=1.0,
+)
+
+session.burn_pulses()  # Push all new operations to the live QM config
+```
+
 **Rules:**
 
 - Every operation the experiment will `play()` must be registered before
@@ -197,10 +292,10 @@ rabi = PowerRabi(session)
 - Experiments consume only operations that were previously declared in
   Step 2 or during session initialization.
 
-### Step 4 — Program Build
+### Step 4 — Program Build & Execution
 
 ```python
-result = rabi.run(gains=np.linspace(0, 1.5, 100), n_avg=5000)
+result = rabi.run(max_gain=1.2, dg=0.04, op="ref_r180", n_avg=5000)
 ```
 
 Internally, `run()`:
@@ -213,7 +308,61 @@ Internally, `run()`:
 4. Calibration parameters are injected where needed (e.g., readout threshold,
    discrimination angle).
 
-### Step 5 — Execution
+**More experiment `run()` examples:**
+
+```python
+from qualang_tools.units import unit
+u = unit()
+
+# Resonator spectroscopy
+spec = ResonatorSpectroscopy(session)
+result = spec.run(
+    readout_op="readout",
+    rf_begin=8560 * u.MHz,
+    rf_end=8640 * u.MHz,
+    df=200 * u.kHz,
+    n_avg=10000,
+)
+
+# T1 relaxation
+t1 = T1Relaxation(session)
+result = t1.run(delay_end=50 * u.us, dt=500, n_avg=2000)
+
+# T2 Ramsey with detuning
+t2r = T2Ramsey(session)
+result = t2r.run(
+    qb_detune=int(0.2e6),
+    delay_end=40 * u.us,
+    dt=100,
+    n_avg=4000,
+    qb_detune_MHz=0.2,
+)
+
+# IQ blob acquisition
+iq = IQBlob(session)
+result = iq.run("x180", n_runs=5000)
+
+# Randomized benchmarking
+rb = RandomizedBenchmarking(session)
+result = rb.run(
+    m_list=[1, 5, 10, 20, 50, 100, 200],
+    num_sequence=20,
+    n_avg=1000,
+)
+
+# Storage spectroscopy (requires const_alpha pulse registered)
+st_spec = StorageSpectroscopy(session)
+result = st_spec.run(
+    disp="const_alpha",
+    rf_begin=5200 * u.MHz,
+    rf_end=5280 * u.MHz,
+    df=200 * u.kHz,
+    storage_therm_time=500,
+    n_avg=50,
+)
+```
+
+### Step 5 — Execution Details
 
 ```python
 # Already called inside run():
@@ -225,11 +374,12 @@ Internally, `run()`:
 - SPA pump is managed via context manager (on before execute, off after).
 - Execution metadata (duration, job ID, mode) captured in `RunResult`.
 
-### Step 6 — Analysis Layer
+### Step 6 — Analysis & Calibration
 
 ```python
-analysis = rabi.analyze(result, update_calibration=True)
+analysis = rabi.analyze(result, update_calibration=True, p0=[0.0001, 1, 0])
 rabi.plot(analysis)
+print(f"g_pi = {analysis.metrics['g_pi']:.6f}")
 ```
 
 - `analyze()` processes raw data → fits → populates `AnalysisResult.metrics`.
@@ -241,6 +391,72 @@ rabi.plot(analysis)
 - The user inspects the plot and metrics.
 - Manual calibration approval: explicit `CalibrationPatch` → state machine →
   `CalibrationStore.save()`.
+
+**More analysis examples:**
+
+```python
+# T1 with custom initial guess and unit conversion
+analysis = t1.analyze(
+    result,
+    update_calibration=True,
+    p0=[0, 10, 0],
+    p0_time_unit="us",
+    derive_qb_therm_clks=True,
+    clock_period_ns=4.0,
+)
+print(f"T1 = {analysis.metrics['T1_us']:.2f} us")
+
+# T2 Ramsey with frequency correction
+analysis = t2r.analyze(
+    result,
+    update_calibration=True,
+    p0=[0, 20, 1.0, 0.2, 0.0, 0],
+    p0_time_unit="us",
+    p0_freq_unit="MHz",
+    apply_frequency_correction=True,
+    freq_correction_sign=-1.0,
+)
+print(f"T2* = {analysis.metrics['T2_star_us']:.2f} us")
+
+# Resonator spectroscopy with fit
+analysis = spec.analyze(result, update_calibration=True)
+spec.plot(analysis)
+print(f"f0 = {analysis.metrics['f0_MHz']:.4f} MHz")
+print(f"kappa = {analysis.metrics['kappa'] / 1e3:.1f} kHz")
+
+# RB analysis
+analysis = rb.analyze(result, p0=[0.99, 0.5, 0.5])
+rb.plot(analysis)
+print(f"Avg gate fidelity = {analysis.metrics['avg_gate_fidelity']}")
+```
+
+### Step 7 — Orchestrator-Driven Calibration Lifecycle
+
+For production calibration workflows, use the `CalibrationOrchestrator` to
+manage the full artifact → patch → commit lifecycle with dry-run preview:
+
+```python
+from qubox_v2.calibration import CalibrationOrchestrator
+
+orch = CalibrationOrchestrator(session)
+
+# Full cycle: run → analyze → build patch → preview → (optional apply)
+rabi_cycle = orch.run_analysis_patch_cycle(
+    rabi,
+    run_kwargs={"max_gain": 1.2, "dg": 0.04, "op": "ref_r180", "n_avg": 5000},
+    analyze_kwargs={"update_calibration": True, "p0": [0.0001, 1, 0]},
+    apply=False,              # dry-run: don't commit yet
+    persist_artifact=True,    # save raw data
+)
+
+# Inspect the patch before committing
+print(f"g_pi = {rabi_cycle['calibration_result'].params['g_pi']:.6f}")
+for item in rabi_cycle["dry_run"]["preview"]:
+    print(f"  {item}")
+
+# Commit only after review
+orch.apply_patch(rabi_cycle["patch"], dry_run=False)
+```
 
 ---
 
@@ -824,22 +1040,122 @@ All models are Pydantic v2 `BaseModel` subclasses.
 
 ### 4.5 Calibration Flow Examples
 
+**Direct `run → analyze` pattern (simple experiments):**
+
+```python
+# Power Rabi → stores g_pi amplitude
+rabi = PowerRabi(session)
+result = rabi.run(max_gain=1.2, dg=0.04, op="ref_r180", n_avg=5000)
+analysis = rabi.analyze(result, update_calibration=True, p0=[0.0001, 1, 0])
+rabi.plot(analysis)
+# → updates PulseCalibration("ref_r180").amplitude
+
+# DRAG → stores optimal alpha
+drag = DRAGCalibration(session)
+result = drag.run(amps=np.linspace(-0.5, 0.5, 20), n_avg=5000, base_alpha=1.0)
+analysis = drag.analyze(result, update_calibration=True, propagate_drag_to_primitives=True)
+drag.plot(analysis)
+# → updates PulseCalibration("ref_r180").drag_coeff + all primitive pulses
+
+# GE Discrimination → stores threshold, angle, fidelity, rotated weights
+ge = ReadoutGEDiscrimination(session)
+result = ge.run("readout", attr.ro_fq, r180="x180", n_samples=50000,
+                update_measure_macro=True, apply_rotated_weights=True, persist=True)
+analysis = ge.analyze(result, update_calibration=True)
+ge.plot(analysis, show_rotated=True)
+# → updates DiscriminationParams.{threshold, angle, fidelity}
 ```
-PowerRabi.analyze(update_calibration=True)
-    → updates PulseCalibration("x180").amplitude   (g_pi)
 
-DRAGCalibration.analyze(update_calibration=True)
-    → updates PulseCalibration("x180").drag_coeff   (beta)
+**Orchestrator pattern (production calibration with dry-run preview):**
 
-ReadoutGEDiscrimination.analyze(update_calibration=True)
-    → updates DiscriminationParams.{threshold, angle, fidelity}
-    → optionally registers rotated integration weights in POM
+```python
+orch = CalibrationOrchestrator(session)
 
-CalibrateReadoutFull.run(config=cfg)
-    → Step 1: ReadoutWeightsOptimization (optional)
-    → Step 2: ReadoutGEDiscrimination
-    → Step 3: ReadoutButterflyMeasurement
-    → returns combined result with all metrics
+# T1 with full lifecycle
+t1_cycle = orch.run_analysis_patch_cycle(
+    T1Relaxation(session),
+    run_kwargs={"delay_end": 50 * u.us, "dt": 500, "n_avg": 2000},
+    analyze_kwargs={
+        "update_calibration": True,
+        "p0": [0, 10, 0],
+        "p0_time_unit": "us",
+        "derive_qb_therm_clks": True,
+    },
+    apply=False, persist_artifact=True,
+)
+print(f"T1 = {t1_cycle['calibration_result'].params['T1_us']:.2f} us")
+
+# Preview patch before committing
+for item in t1_cycle["dry_run"]["preview"]:
+    print(f"  {item}")
+
+# Commit after review
+# orch.apply_patch(t1_cycle["patch"], dry_run=False)
+```
+
+**State machine pattern (manual calibration lifecycle):**
+
+```python
+from qubox_v2.calibration.state_machine import (
+    CalibrationStateMachine, CalibrationState,
+    CalibrationPatch, PatchValidation,
+)
+
+sm = CalibrationStateMachine(experiment="drag_calibration")
+sm.transition(CalibrationState.CONFIGURED)
+sm.transition(CalibrationState.ACQUIRING)
+sm.transition(CalibrationState.ACQUIRED)
+sm.transition(CalibrationState.ANALYZING)
+
+# Build patch from analysis results
+patch = CalibrationPatch(experiment="drag_calibration")
+patch.add_change(
+    path="pulse_calibrations.ref_r180.drag_coeff",
+    old_value=0.0,
+    new_value=float(optimal_alpha),
+)
+patch.validation = PatchValidation(
+    passed=True,
+    checks={"alpha_finite": True, "alpha_bounds": abs(optimal_alpha) < 5.0},
+)
+sm.patch = patch
+
+sm.transition(CalibrationState.ANALYZED)
+sm.transition(CalibrationState.PENDING_APPROVAL)
+
+# Review and commit
+print(patch.summary())
+if patch.is_approved():
+    sm.transition(CalibrationState.COMMITTING)
+    sm.transition(CalibrationState.COMMITTED)
+```
+
+**Full readout calibration pipeline:**
+
+```python
+from qubox_v2.experiments.calibration.readout import CalibrateReadoutFull, ReadoutConfig
+
+readoutConfig = ReadoutConfig(
+    measure_op="readout",
+    drive_frequency=attr.ro_fq,
+    ro_el=attr.ro_el,
+    r180="x180",
+    n_avg_weights=200_000,
+    n_samples=50_000,
+    n_shots_butterfly=50_000,
+    skip_weights_optimization=False,
+    persist_weights=True,
+    rotation_method="optimal",
+    threshold_extraction="legacy_discriminator",
+)
+
+cal = CalibrationReadoutFull(session)
+result = cal.run(readoutConfig=readoutConfig)
+analysis = cal.analyze(result, update_calibration=True)
+
+print(f"GE fidelity = {analysis.metrics['ge_fidelity']:.4f}")
+print(f"F = {analysis.metrics['bfly_F']:.4f}")
+print(f"Q = {analysis.metrics['bfly_Q']:.4f}")
 ```
 
 ### 4.6 When `calibration.json` is Written
@@ -1259,6 +1575,88 @@ class GateSequence:
 Computes the composed super-operator for ordered gate sequences, with
 optional caching via `ModelCache`.
 
+### 8.6 Legacy Gate Classes (`gates_legacy`)
+
+**Module**: `qubox_v2.experiments.gates_legacy`
+
+The legacy gate classes provide concrete QUA-emitting gates for use in
+notebook-driven experiments.  Each gate supports serialization, simulation
+(via `ideal_unitary()`), and QUA code emission (via `play()`).
+
+| Class | Gate | Constructor Key Params |
+|-------|------|------------------------|
+| `QubitRotation` | $R(\theta, \phi)$ | `theta`, `phi`, `d_lambda`, `d_alpha`, `d_omega`, `ref_r180_pulse` |
+| `Displacement` | $D(\alpha)$ | `alpha: complex`, `target` |
+| `SQR` | Selective Qubit Rotation | `thetas`, `phis`, per-Fock angles + optional error knobs |
+| `SNAP` | Selective Number-dependent Arbitrary Phase | `angles`, optional unselective correction |
+| `Idle` | Free evolution (wait gate) | `wait_time: int` |
+| `Measure` | Readout via measureMacro | `axis: str` |
+| `GateArray` | Composite multi-target gate | `gates: list[Gate]` |
+
+**Usage example — pulse-train tomography with QubitRotation:**
+
+```python
+from qubox_v2.experiments.gates_legacy import QubitRotation
+from qubox_v2.experiments import PulseTrainCalibration
+
+# Create a gate under test
+arb_rot = QubitRotation(
+    theta=np.pi,
+    phi=0.0,
+    ref_r180_pulse="ref_r180_pulse",
+    build=True,
+)
+session.burn_pulses()
+
+# Define state preparations using QUA primitives
+from qm.qua import play, align
+
+def prep_e():  play("x180", attr.qb_el)
+def prep_px(): play("y90",  attr.qb_el)
+def prep_mx(): play("yn90", attr.qb_el)
+
+prep_defs = {
+    "g": None, "e": prep_e,
+    "+x": prep_px, "-x": prep_mx,
+}
+
+# Run pulse-train calibration
+pt = PulseTrainCalibration(session)
+result = pt.run(
+    arb_rot=arb_rot, prep_defs=prep_defs,
+    N_values=np.arange(0, 80, 8),
+    n_avg=20000, theta=np.pi, phi=0.0,
+)
+
+# Extract rotation error knobs
+_Iw, _Qw, waveform_len, marker = arb_rot.waveforms()
+analysis = pt.analyze(
+    result, fit_zeta=True, multi_seed=True,
+    dt_s=1e-9, n_samp=int(waveform_len),
+)
+pt.plot(analysis, residual_mode="both")
+print(f"amp_err   = {analysis.metrics['amp_err']:+.4%}")
+print(f"phase_err = {analysis.metrics['phase_err']:+.6f} rad")
+print(f"d_lambda  = {analysis.metrics.get('d_lambda', 'N/A')}")
+```
+
+**Usage example — save/load gate sequences:**
+
+```python
+from qubox_v2.experiments.gates_legacy import (
+    QubitRotation, Displacement, SNAP, save_gates, load_gates,
+)
+
+gates = [
+    Displacement(alpha=1.0+0.5j, target="storage"),
+    SNAP(angles=[0.0, np.pi, 0.0], target="qubit"),
+    Displacement(alpha=-1.0-0.5j, target="storage"),
+]
+
+save_gates("my_gates.json", gates)
+loaded = load_gates("my_gates.json", mgr=session.pulse_mgr, build=True)
+```
+
 ---
 
 ## 9. Experiment Registry
@@ -1310,8 +1708,6 @@ All experiments inherit from `ExperimentBase` and implement the
 | `ReadoutAmpLenOpt` | 2-D readout amplitude × length optimization |
 | `AllXY` | 21-gate-pair error benchmarking |
 | `DRAGCalibration` | DRAG coefficient optimization |
-| `QubitPulseTrain` | Pulse-train amplitude calibration |
-| `QubitPulseTrainLegacy` | Legacy pulse-train method |
 | `RandomizedBenchmarking` | Standard and interleaved RB |
 | `QubitResetBenchmark` | Reset fidelity benchmark |
 | `ActiveQubitResetBenchmark` | Active reset measurement |
@@ -1360,7 +1756,178 @@ Every experiment must satisfy:
 3. **`plot()`**: Accept `AnalysisResult` + optional `ax`.  Create own
    figure if `ax=None`.  Return `Figure`.
 
-### 9.3 `ReadoutConfig` (Full Pipeline Configuration)
+### 9.3 Usage Examples by Category
+
+**Spectroscopy:**
+
+```python
+# Resonator spectroscopy with orchestrator
+spec = ResonatorSpectroscopy(session)
+cycle = orch.run_analysis_patch_cycle(
+    spec,
+    run_kwargs={
+        "readout_op": "readout",
+        "rf_begin": 8560 * u.MHz, "rf_end": 8640 * u.MHz,
+        "df": 200 * u.kHz, "n_avg": 10000,
+    },
+    analyze_kwargs={"update_calibration": True},
+    apply=False, persist_artifact=True,
+)
+
+# Resonator with X180 (dispersive shift measurement)
+spec_x180 = ResonatorSpectroscopyX180(session)
+result = spec_x180.run(
+    rf_begin=8560 * u.MHz, rf_end=8640 * u.MHz,
+    df=200 * u.kHz, n_avg=10000,
+)
+analysis = spec_x180.analyze(result, update_calibration=True)
+print(f"chi = {analysis.metrics['chi'] / 1e3:.1f} kHz")
+
+# Qubit spectroscopy
+qb_spec = QubitSpectroscopy(session)
+result = qb_spec.run(
+    pulse="saturation",
+    rf_begin=6130 * u.MHz, rf_end=6170 * u.MHz,
+    df=500 * u.kHz, qb_gain=1.0, qb_len=1000, n_avg=1000,
+)
+analysis = qb_spec.analyze(result, update_calibration=True)
+print(f"f_qubit = {analysis.metrics['f0_MHz']:.4f} MHz")
+
+# Readout trace (raw ADC)
+trace = ReadoutTrace(session)
+result = trace.run(attr.ro_fq, n_avg=10000)
+analysis = trace.analyze(result)
+trace.plot(analysis)
+```
+
+**Time domain:**
+
+```python
+# Power Rabi
+rabi = PowerRabi(session)
+result = rabi.run(max_gain=1.2, dg=0.04, op="ref_r180", n_avg=5000)
+analysis = rabi.analyze(result, update_calibration=True, p0=[0.0001, 1, 0])
+print(f"g_pi = {analysis.metrics['g_pi']:.6f}")
+
+# Temporal Rabi
+trabi = TemporalRabi(session)
+result = trabi.run(
+    pulse="const_x180",
+    pulse_len_begin=16, pulse_len_end=500, dt=4, n_avg=5000,
+)
+analysis = trabi.analyze(result)
+print(f"f_Rabi = {analysis.metrics['f_Rabi']} Hz")
+
+# T1
+t1 = T1Relaxation(session)
+result = t1.run(delay_end=50 * u.us, dt=500, n_avg=2000)
+analysis = t1.analyze(result, update_calibration=True,
+                      p0=[0, 10, 0], p0_time_unit="us")
+print(f"T1 = {analysis.metrics['T1_us']:.2f} us")
+
+# T2 Echo
+t2e = T2Echo(session)
+result = t2e.run(delay_end=40 * u.us, dt=100, n_avg=4000)
+analysis = t2e.analyze(result, update_calibration=True,
+                       p0=[-1, 40, 1.0, 0], p0_time_unit="us")
+print(f"T2_echo = {analysis.metrics['T2_echo_us']:.2f} us")
+```
+
+**Calibration:**
+
+```python
+# AllXY gate error diagnostic
+allxy = AllXY(session)
+result = allxy.run(n_avg=5000)
+analysis = allxy.analyze(result)
+allxy.plot(analysis)
+print(f"Gate error = {analysis.metrics['gate_error']:.4f}")
+
+# DRAG calibration
+drag = DRAGCalibration(session)
+result = drag.run(amps=np.linspace(-0.5, 0.5, 20), n_avg=5000, base_alpha=1.0)
+analysis = drag.analyze(result, update_calibration=True,
+                        propagate_drag_to_primitives=True)
+print(f"Optimal alpha = {analysis.metrics['optimal_alpha']}")
+
+# Randomized benchmarking
+rb = RandomizedBenchmarking(session)
+result = rb.run(m_list=[1, 5, 10, 20, 50, 100, 200], num_sequence=20, n_avg=1000)
+analysis = rb.analyze(result, p0=[0.99, 0.5, 0.5])
+print(f"Error per gate = {analysis.metrics['error_per_gate']}")
+```
+
+**Cavity / Fock:**
+
+```python
+# Storage spectroscopy
+st = StorageSpectroscopy(session)
+result = st.run(
+    disp="const_alpha",
+    rf_begin=5200 * u.MHz, rf_end=5280 * u.MHz,
+    df=200 * u.kHz, storage_therm_time=500, n_avg=50,
+)
+analysis = st.analyze(result, update_calibration=True)
+print(f"f_storage = {analysis.metrics['f_storage'] / 1e6:.4f} MHz")
+
+# Chi Ramsey
+chi = StorageChiRamsey(session)
+result = chi.run(
+    fock_fq=attr.qb_fq,
+    delay_ticks=np.arange(4, 2000, 10),
+    disp_pulse="const_alpha",
+    x90_pulse="x90", n_avg=20,
+)
+analysis = chi.analyze(result, update_calibration=True,
+                       p0=[0.5, 0.5, 35000, 0.1, 0.0028, 400])
+print(f"chi = {analysis.metrics['chi'] / 1e3:.1f} kHz")
+
+# Fock-resolved T1
+fock_t1 = FockResolvedT1(session)
+fock_fqs = attr.get_fock_frequencies(2)
+result = fock_t1.run(
+    fock_fqs=fock_fqs,
+    fock_disps=["disp_n0", "disp_n1"],
+    delay_end=40000, dt=200, n_avg=20,
+)
+analysis = fock_t1.analyze(result)
+for key, val in analysis.metrics.items():
+    if key.startswith("T1_fock_"):
+        print(f"{key} = {val / 1e3:.2f} us")
+```
+
+**Tomography:**
+
+```python
+from qm.qua import play
+
+# Qubit state tomography with custom state prep
+def prep_x_plus():
+    play("x90", attr.qb_el)
+
+tomo = QubitStateTomography(session)
+result = tomo.run(state_prep=prep_x_plus, n_avg=10000)
+analysis = tomo.analyze(result)
+tomo.plot(analysis)
+print(f"Bloch vector: ({analysis.metrics['sx']:.3f}, "
+      f"{analysis.metrics['sy']:.3f}, {analysis.metrics['sz']:.3f})")
+print(f"Purity = {analysis.metrics['purity']:.3f}")
+```
+
+**SPA:**
+
+```python
+spa_flux = SPAFluxOptimization(session)
+result = spa_flux.run(
+    dc_list=np.linspace(-0.5, 0.5, 51),
+    sample_fqs=np.linspace(8.5e9, 8.7e9, 21),
+    n_avg=1000,
+)
+analysis = spa_flux.analyze(result)
+print(f"Best DC = {analysis.metrics['best_dc']:.4f} V")
+```
+
+### 9.4 `ReadoutConfig` (Full Pipeline Configuration)
 
 **Module**: `qubox_v2.experiments.calibration.readout_config`
 
@@ -1524,6 +2091,69 @@ The constructor performs the following in order:
 
 Each step is wrapped in try/except to ensure teardown completes even if
 individual saves fail.
+
+### 11.4 Session Setup Utilities
+
+**Preflight validation, session state, and config snapshots:**
+
+```python
+from qubox_v2.core.session_state import SessionState
+from qubox_v2.core.artifact_manager import ArtifactManager
+from qubox_v2.core.preflight import preflight_check
+from qubox_v2.core.artifacts import save_config_snapshot
+from qubox_v2.core.schemas import validate_config_dir
+
+# Session state (frozen config hash for reproducibility)
+config_dir = Path(session.experiment_path) / "config"
+ss = SessionState.from_config_dir(
+    config_dir,
+    device_config_dir=device_config_dir,
+    device_id="post_cavity_sample_A",
+    cooldown_id="cd_2025_02_22",
+    wiring_rev=ctx.wiring_rev,
+)
+print(ss.summary())
+print(f"Build hash: {ss.build_hash}")
+
+# Artifact manager (build-hash-keyed storage)
+am = ArtifactManager(session.experiment_path, ss.build_hash)
+am.save_session_state(ss.to_dict())
+
+# Preflight validation
+report = preflight_check(session)
+if report["all_ok"]:
+    print("All preflight checks PASSED.")
+else:
+    for err in report["errors"]:
+        print(f"  ERROR: {err}")
+
+# Config snapshot (frozen copy for future reference)
+snapshot_path = save_config_snapshot(session, tag="session_open")
+
+# Schema validation
+results = validate_config_dir(config_dir)
+for r in results:
+    status = "PASS" if r.valid else "FAIL"
+    print(f"  {status} v={r.version}")
+```
+
+**Runtime readout override:**
+
+```python
+# Override readout operation at runtime (e.g., switch demod strategy)
+override_info = session.override_readout_operation(
+    element=attr.ro_el,
+    operation="readout",
+    weights=None,                     # use current weights
+    demod="dual_demod.full",
+    threshold=None,                   # use calibrated threshold
+    weight_len=None,
+    apply_to_attributes=True,
+    persist_measure_config=True,
+    drive_frequency=attr.ro_fq,
+)
+print(f"Readout override: {override_info['element']} / {override_info['operation']}")
+```
 
 ---
 
@@ -2301,7 +2931,7 @@ The original file is retained as a backward-compatible re-export shim.
 | `builders/spectroscopy.py` | 6 | `readout_trace`, `resonator_spectroscopy`, `resonator_power_spectroscopy`, `qubit_spectroscopy`, `qubit_spectroscopy_ef`, `resonator_spectroscopy_x180` |
 | `builders/time_domain.py` | 10 | `temporal_rabi`, `power_rabi`, `time_rabi_chevron`, `power_rabi_chevron`, `ramsey_chevron`, `T1_relaxation`, `T2_ramsey`, `T2_echo`, `ac_stark_shift`, `residual_photon_ramsey` |
 | `builders/readout.py` | 8 | `iq_blobs`, `readout_ge_raw_trace`, `readout_ge_integrated_trace`, `readout_core_efficiency_calibration`, `readout_butterfly_measurement`, `readout_leakage_benchmarking`, `qubit_reset_benchmark`, `active_qubit_reset_benchmark` |
-| `builders/calibration.py` | 7 | `sequential_qb_rotations`, `all_xy`, `randomized_benchmarking`, `qubit_pulse_train_legacy`, `qubit_pulse_train`, `drag_calibration_YALE`, `drag_calibration_GOOGLE` |
+| `builders/calibration.py` | 5 | `sequential_qb_rotations`, `all_xy`, `randomized_benchmarking`, `drag_calibration_YALE`, `drag_calibration_GOOGLE` |
 | `builders/cavity.py` | 11 | `storage_spectroscopy`, `num_splitting_spectroscopy`, `sel_r180_calibration0`, `fock_resolved_spectroscopy`, `fock_resolved_T1_relaxation`, `fock_resolved_power_rabi`, `fock_resolved_qb_ramsey`, `storage_wigner_tomography`, `phase_evolution_prog`, `storage_chi_ramsey`, `storage_ramsey` |
 | `builders/tomography.py` | 2 | `qubit_state_tomography`, `fock_resolved_state_tomography` |
 | `builders/utility.py` | 2 | `continuous_wave`, `SPA_flux_optimization` |
@@ -2469,6 +3099,756 @@ The following audit documents provide detailed analysis of the macro system:
 
 ---
 
+## 23. Writing Custom Experiments
+
+This section is a guide for users who want to write their own experiment
+classes beyond the built-in experiments provided by the API.
+
+### 23.1 Architecture Overview
+
+Every experiment in `qubox_v2` inherits from `ExperimentBase` and follows
+a four-method contract:
+
+```
+build_program(**params)  →  QUA program
+run(**params)            →  RunResult
+analyze(result, ...)     →  AnalysisResult
+plot(analysis, ...)      →  Figure
+```
+
+The experiment class is a **thin wrapper** around:
+
+1. A **QUA program builder** — generates the quantum program to execute.
+2. A **post-processor** — extracts and fits the returned data.
+3. A **plotter** — visualizes results.
+
+The `ExperimentBase` base class provides infrastructure accessors
+(`self.attr`, `self.pulse_mgr`, `self.hw`, `self.measure_macro`,
+`self.calibration_store`) so that custom experiments have direct access
+to the session without needing to reimplement session wiring.
+
+### 23.2 Minimal Custom Experiment (Step-by-Step)
+
+Below is a complete example of a custom experiment that performs a Ramsey
+experiment with a parametric detuning sweep.  This demonstrates the full
+lifecycle from class definition through execution and analysis.
+
+**Step 1 — Define the class:**
+
+```python
+from __future__ import annotations
+from typing import Any
+import numpy as np
+from qm.qua import *
+
+from qubox_v2.experiments.experiment_base import ExperimentBase, create_clks_array
+from qubox_v2.experiments.result import AnalysisResult, FitResult
+from qubox_v2.hardware.program_runner import RunResult
+from qubox_v2.analysis import post_process as pp
+
+
+class CustomDetuningRamsey(ExperimentBase):
+    """Ramsey experiment with a parametric detuning sweep.
+
+    Measures T2* and detuning-dependent dephasing by varying the qubit
+    detuning across a range while performing a Ramsey sequence at a
+    fixed free-evolution time.
+    """
+
+    def build_program(
+        self,
+        *,
+        x90_op: str = "x90",
+        detune_list: np.ndarray,
+        wait_clks: int = 100,
+        n_avg: int = 1000,
+    ) -> Any:
+        """Build the QUA program.
+
+        Parameters
+        ----------
+        x90_op : str
+            Name of the pi/2 pulse operation (must already be registered).
+        detune_list : np.ndarray
+            Array of IF detunings in Hz.
+        wait_clks : int
+            Free-evolution time in clock cycles (4 ns each).
+        n_avg : int
+            Number of averages per detuning point.
+        """
+        ro_el = self.attr.ro_el
+        qb_el = self.attr.qb_el
+        mm = self.measure_macro
+
+        with program() as prog:
+            n = declare(int)
+            detune = declare(int)
+            I = declare(fixed)
+            Q = declare(fixed)
+            state = declare(bool)
+            I_stream = declare_stream()
+            Q_stream = declare_stream()
+            state_stream = declare_stream()
+
+            with for_(n, 0, n < n_avg, n + 1):
+                with for_each_(detune, detune_list.astype(int).tolist()):
+                    # Set detuning
+                    update_frequency(qb_el, detune)
+
+                    # Ramsey sequence: X90 — wait — X90
+                    play(x90_op, qb_el)
+                    wait(wait_clks, qb_el)
+                    play(x90_op, qb_el)
+
+                    # Align and measure
+                    align(qb_el, ro_el)
+                    mm.measure(I=I, Q=Q, state=state)
+
+                    save(I, I_stream)
+                    save(Q, Q_stream)
+                    save(state, state_stream)
+
+            with stream_processing():
+                I_stream.buffer(len(detune_list)).average().save("I")
+                Q_stream.buffer(len(detune_list)).average().save("Q")
+                state_stream.boolean_to_int().buffer(
+                    len(detune_list)
+                ).average().save("state")
+
+        return prog
+
+    def run(
+        self,
+        *,
+        x90_op: str = "x90",
+        detune_list: np.ndarray,
+        wait_clks: int = 100,
+        n_avg: int = 1000,
+    ) -> RunResult:
+        """Build and execute the detuning Ramsey program.
+
+        Returns
+        -------
+        RunResult
+            Raw data with keys 'I', 'Q', 'state'.
+        """
+        self.set_standard_frequencies()
+        self.burn_pulses()
+
+        prog = self.build_program(
+            x90_op=x90_op,
+            detune_list=detune_list,
+            wait_clks=wait_clks,
+            n_avg=n_avg,
+        )
+
+        result = self.run_program(prog, n_total=n_avg)
+        # Stash sweep params for analyze()
+        result.metadata["detune_list"] = detune_list
+        result.metadata["wait_clks"] = wait_clks
+        return result
+
+    def analyze(
+        self,
+        result: RunResult,
+        *,
+        update_calibration: bool = False,
+        **kw,
+    ) -> AnalysisResult:
+        """Analyze the detuning Ramsey data.
+
+        Extracts the detuning-dependent Ramsey fringe and optionally fits
+        to a sinusoidal decay.
+
+        Returns
+        -------
+        AnalysisResult
+            Contains 'detune_list', 'state', 'I', 'Q' in data,
+            and 'visibility' in metrics.
+        """
+        detune_list = result.metadata["detune_list"]
+        state = np.array(result.output["state"])
+        I_data = np.array(result.output["I"])
+        Q_data = np.array(result.output["Q"])
+
+        # Compute visibility
+        visibility = float(np.max(state) - np.min(state))
+
+        # Optional: fit a Lorentzian to the fringe envelope
+        fit = None
+        try:
+            from scipy.optimize import curve_fit
+
+            def lorentzian(x, a, x0, gamma, offset):
+                return a / (1 + ((x - x0) / gamma) ** 2) + offset
+
+            p0 = [visibility, np.mean(detune_list), 1e6, 0.5]
+            popt, pcov = curve_fit(lorentzian, detune_list, state, p0=p0)
+            perr = np.sqrt(np.diag(pcov))
+            fit = FitResult(
+                model_name="lorentzian",
+                params=dict(zip(["a", "x0", "gamma", "offset"], popt)),
+                uncertainties=dict(zip(["a", "x0", "gamma", "offset"], perr)),
+            )
+        except Exception:
+            pass
+
+        return AnalysisResult(
+            data={
+                "detune_list": detune_list,
+                "state": state,
+                "I": I_data,
+                "Q": Q_data,
+            },
+            fit=fit,
+            metrics={"visibility": visibility},
+            source=result,
+        )
+
+    def plot(self, analysis: AnalysisResult, *, ax=None, **kw):
+        """Plot the detuning Ramsey fringe."""
+        import matplotlib.pyplot as plt
+
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = ax.figure
+
+        detune = analysis.data["detune_list"]
+        state = analysis.data["state"]
+        ax.plot(detune / 1e6, state, "o-", label="Data")
+
+        if analysis.fit is not None:
+            x_fit = np.linspace(detune.min(), detune.max(), 500)
+
+            def lorentzian(x, a, x0, gamma, offset):
+                return a / (1 + ((x - x0) / gamma) ** 2) + offset
+
+            p = analysis.fit.params
+            y_fit = lorentzian(
+                x_fit, p["a"], p["x0"], p["gamma"], p["offset"]
+            )
+            ax.plot(x_fit / 1e6, y_fit, "-r", label="Fit")
+
+        ax.set_xlabel("Detuning (MHz)")
+        ax.set_ylabel("P(e)")
+        ax.set_title(f"Detuning Ramsey — visibility={analysis.metrics['visibility']:.3f}")
+        ax.legend()
+        return fig
+```
+
+**Step 2 — Use it in a notebook:**
+
+```python
+# Prerequisites: session is open, x90 pulse is registered
+ramsey = CustomDetuningRamsey(session)
+
+result = ramsey.run(
+    x90_op="x90",
+    detune_list=np.linspace(-5e6, 5e6, 101),
+    wait_clks=250,    # 1 us free evolution
+    n_avg=2000,
+)
+
+analysis = ramsey.analyze(result)
+ramsey.plot(analysis)
+print(f"Visibility = {analysis.metrics['visibility']:.3f}")
+```
+
+### 23.3 Contract Rules Your Experiment Must Follow
+
+1. **Constructor (`__init__`)**: Must accept `ctx` (the session) and call
+   `super().__init__(ctx)`.  Must **not** register or modify any pulses.
+
+2. **`run()`**:
+   - Must call `self.set_standard_frequencies()` before building the program.
+   - Must call `self.burn_pulses()` if any new ops were registered in the
+     notebook before this experiment.
+   - Must return `RunResult` from `self.run_program(...)`.
+   - Must **not** write calibration values or contact external instruments
+     beyond what the hardware runner does.
+   - Stash sweep metadata in `result.metadata` for `analyze()` to use.
+
+3. **`analyze()`**:
+   - Must be **idempotent** — same input → same output.
+   - Must **not** contact hardware.
+   - Must return `AnalysisResult` with at minimum `data` and `metrics`.
+   - If `update_calibration=True`, use `self.guarded_calibration_commit()`
+     for safe two-phase persistence.
+
+4. **`plot()`**:
+   - Must accept `AnalysisResult` and an optional `ax` kwarg.
+   - Must create a figure if `ax=None`.
+   - Must return `Figure`.
+
+5. **Naming**: By convention, use `self.name` (auto-derived from the class
+   name) for logging and artifact tagging.
+
+### 23.4 Using `measureMacro` in Custom Programs
+
+The `measureMacro` singleton emits the QUA `measure` + `assign` block.
+All custom experiments should use it instead of raw QUA `measure()`:
+
+```python
+from qubox_v2.programs.macros.measure import measureMacro
+
+mm = self.measure_macro  # Shortcut property from ExperimentBase
+
+# Inside a QUA program block:
+with program() as prog:
+    I = declare(fixed)
+    Q = declare(fixed)
+    state = declare(bool)
+
+    # Standard state-discriminated readout
+    mm.measure(I=I, Q=Q, state=state)
+
+    # Advanced: measure with specific targets
+    mm.measure(
+        I=I, Q=Q, state=state,
+        targets=["resonator"],
+        with_state=True,
+    )
+```
+
+**Why use `measureMacro`?**  It automatically:
+- Selects the correct readout element, operation, and weights.
+- Applies the calibrated discrimination threshold and rotation angle.
+- Handles demodulation strategy (sliced, full, accumulated).
+- Manages the `wait_for_trigger` / active reset flow if configured.
+
+### 23.5 Accessing Calibrated Parameters
+
+Custom experiments often need calibrated values for sweep ranges, initial
+guesses, or reference amplitudes:
+
+```python
+class MyExperiment(ExperimentBase):
+    def run(self, **kw):
+        # Readout parameters
+        ro_el = self.attr.ro_el        # resonator element name
+        ro_fq = self.attr.ro_fq        # calibrated resonator frequency
+        ro_lo = self.get_readout_lo()   # LO frequency
+
+        # Qubit parameters
+        qb_el = self.attr.qb_el        # qubit element name
+        qb_fq = self.attr.qb_fq        # calibrated qubit frequency
+        qb_lo = self.get_qubit_lo()     # LO frequency
+
+        # Thermalization clocks
+        qb_therm = self.get_therm_clks("qubit", fallback=2500)
+        ro_therm = self.get_therm_clks("readout", fallback=500)
+
+        # Storage / cavity parameters (if applicable)
+        st_el = self.attr.st_el        # storage element name
+        st_fq = self.attr.st_fq        # storage frequency
+
+        # Pulse calibrations from CalibrationStore
+        cal = self.calibration_store
+        if cal is not None:
+            pi_amp = cal.get_pulse("ref_r180")
+            if pi_amp:
+                print(f"Pi amplitude = {pi_amp.amplitude}")
+
+        # Confusion matrix for readout correction
+        cm = self.get_confusion_matrix()
+        if cm is not None:
+            # Apply readout correction to measured populations
+            corrected = np.linalg.solve(cm, raw_populations)
+```
+
+### 23.6 Writing a Custom Program Builder (Advanced)
+
+For complex or reusable QUA programs, extract the program-generation logic
+into a standalone builder function under `qubox_v2/programs/builders/`:
+
+```python
+# qubox_v2/programs/builders/my_custom.py
+from qm.qua import *
+from ..macros.measure import measureMacro
+
+def custom_echo_train(
+    qb_el: str,
+    x180_op: str,
+    x90_op: str,
+    n_echoes: int,
+    delay_clks_list: list[int],
+    n_avg: int,
+):
+    """Build a Hahn-echo train with variable delay.
+
+    Parameters
+    ----------
+    qb_el : str
+        Qubit element name.
+    x180_op, x90_op : str
+        Registered operation names for pi and pi/2 pulses.
+    n_echoes : int
+        Number of echo refocusing pulses.
+    delay_clks_list : list[int]
+        Interpulse delay values (in clock cycles).
+    n_avg : int
+        Averaging count.
+
+    Returns
+    -------
+    program
+        The compiled QUA program.
+    """
+    mm = measureMacro
+
+    with program() as prog:
+        n = declare(int)
+        delay = declare(int)
+        echo_idx = declare(int)
+        I = declare(fixed)
+        Q = declare(fixed)
+        state = declare(bool)
+        I_st = declare_stream()
+        Q_st = declare_stream()
+        state_st = declare_stream()
+
+        with for_(n, 0, n < n_avg, n + 1):
+            with for_each_(delay, delay_clks_list):
+                # X90
+                play(x90_op, qb_el)
+
+                # Echo train: (wait — X180) x n_echoes
+                with for_(echo_idx, 0, echo_idx < n_echoes, echo_idx + 1):
+                    wait(delay, qb_el)
+                    play(x180_op, qb_el)
+
+                # Final wait
+                wait(delay, qb_el)
+
+                # X90 (closing)
+                play(x90_op, qb_el)
+
+                # Measure
+                align(qb_el, mm.active_element())
+                mm.measure(I=I, Q=Q, state=state)
+                save(I, I_st)
+                save(Q, Q_st)
+                save(state, state_st)
+
+        with stream_processing():
+            I_st.buffer(len(delay_clks_list)).average().save("I")
+            Q_st.buffer(len(delay_clks_list)).average().save("Q")
+            state_st.boolean_to_int().buffer(
+                len(delay_clks_list)
+            ).average().save("state")
+
+    return prog
+```
+
+Then in your experiment class:
+
+```python
+from qubox_v2.programs.builders.my_custom import custom_echo_train
+
+class EchoTrainExperiment(ExperimentBase):
+
+    def build_program(self, *, n_echoes=1, delay_clks_list, n_avg=1000, **kw):
+        return custom_echo_train(
+            qb_el=self.attr.qb_el,
+            x180_op="x180",
+            x90_op="x90",
+            n_echoes=n_echoes,
+            delay_clks_list=delay_clks_list,
+            n_avg=n_avg,
+        )
+
+    def run(self, *, n_echoes=1, delay_end=40000, dt=200, n_avg=1000, **kw):
+        self.set_standard_frequencies()
+        self.burn_pulses()
+        clks = create_clks_array(0, delay_end, dt).tolist()
+        prog = self.build_program(
+            n_echoes=n_echoes, delay_clks_list=clks, n_avg=n_avg,
+        )
+        result = self.run_program(prog, n_total=n_avg)
+        result.metadata["delay_clks"] = clks
+        result.metadata["n_echoes"] = n_echoes
+        return result
+
+    def analyze(self, result, *, update_calibration=False, **kw):
+        clks = result.metadata["delay_clks"]
+        state = np.array(result.output["state"])
+        times_us = np.array(clks) * 4e-3  # clks → us
+
+        from scipy.optimize import curve_fit
+        def decay(t, A, T, C):
+            return A * np.exp(-t / T) + C
+
+        popt, pcov = curve_fit(decay, times_us, state,
+                               p0=[1.0, 20.0, 0.5])
+        fit = FitResult(
+            model_name="exp_decay",
+            params=dict(zip(["A", "T2_echo_us", "C"], popt)),
+            uncertainties=dict(zip(
+                ["A", "T2_echo_us", "C"], np.sqrt(np.diag(pcov))
+            )),
+        )
+        return AnalysisResult(
+            data={"times_us": times_us, "state": state},
+            fit=fit,
+            metrics={"T2_echo_us": popt[1]},
+            source=result,
+        )
+```
+
+### 23.7 Calibration Commit from Custom Experiments
+
+If your experiment produces a calibrated value (e.g., a corrected
+frequency, g_pi amplitude, T2), use the two-phase commit:
+
+```python
+def analyze(self, result, *, update_calibration=False, **kw):
+    # ... compute analysis ...
+
+    if update_calibration:
+        def apply_update():
+            cal = self.calibration_store
+            if cal is not None:
+                # Write to the typed CalibrationStore
+                cal.update_coherence(CoherenceParams(
+                    T2_echo=analysis.metrics["T2_echo_us"] * 1e-6,
+                ))
+                cal.save()
+
+        self.guarded_calibration_commit(
+            analysis=analysis,
+            run_result=result,
+            calibration_tag="T2_echo_custom",
+            apply_update=apply_update,
+            require_fit=True,
+            min_r2=0.8,
+            required_metrics={
+                "T2_echo_us": (0.1, 500.0),   # sanity bounds
+            },
+        )
+
+    return analysis
+```
+
+The `guarded_calibration_commit()` method:
+- **Phase A** (always): Saves a timestamped artifact under
+  `artifacts/calibration_runs/`.
+- **Phase B** (conditional): Calls `apply_update()` only if all validation
+  gates pass (fit exists, R² meets threshold, metrics within bounds).
+
+### 23.8 Using Gate Objects in Custom Experiments
+
+For cavity QED or multi-qubit experiments, use the gate classes from
+`gates_legacy` to compose complex pulse sequences:
+
+```python
+from qubox_v2.experiments.gates_legacy import (
+    QubitRotation, Displacement, SNAP, Idle, Measure, GateArray,
+)
+
+class SNAPEchoExperiment(ExperimentBase):
+    """Apply a SNAP gate sandwiched between displacements with echo."""
+
+    def run(self, *, alpha=1.0, snap_angles=None, wait_ns=1000, n_avg=1000):
+        self.set_standard_frequencies()
+
+        if snap_angles is None:
+            snap_angles = [0.0, np.pi, 0.0]
+
+        # Build gate sequence
+        D_plus  = Displacement(alpha=complex(alpha), target=self.attr.st_el, build=True)
+        snap    = SNAP(angles=snap_angles, target=self.attr.qb_el, build=True)
+        D_minus = Displacement(alpha=-complex(alpha), target=self.attr.st_el, build=True)
+        idle    = Idle(wait_time=wait_ns // 4)
+        meas    = Measure(axis="z")
+
+        self.burn_pulses()
+
+        # Build QUA program using gate.play()
+        with program() as prog:
+            n = declare(int)
+            I = declare(fixed)
+            Q = declare(fixed)
+            state = declare(bool)
+            I_st = declare_stream()
+            state_st = declare_stream()
+
+            with for_(n, 0, n < n_avg, n + 1):
+                D_plus.play()
+                snap.play()
+                D_minus.play()
+                idle.play()
+                align()
+                self.measure_macro.measure(I=I, Q=Q, state=state)
+                save(state, state_st)
+                save(I, I_st)
+
+            with stream_processing():
+                state_st.boolean_to_int().average().save("state")
+                I_st.average().save("I")
+
+        result = self.run_program(prog, n_total=n_avg)
+        result.metadata["alpha"] = alpha
+        result.metadata["snap_angles"] = snap_angles
+        return result
+```
+
+### 23.9 Complete Notebook Workflow Example
+
+This puts all the pieces together — from session setup through custom
+experiment execution — in a single notebook flow:
+
+```python
+# ── Cell 1: Imports ──
+from pathlib import Path
+import numpy as np
+from qualang_tools.units import unit
+from qubox_v2.devices import DeviceRegistry
+from qubox_v2.experiments.session import SessionManager
+from qubox_v2.experiments import *
+from qubox_v2.tools.generators import register_rotations_from_ref_iq
+from qubox_v2.tools.waveforms import drag_gaussian_pulse_waveforms
+u = unit()
+
+# ── Cell 2: Session Setup ──
+registry = DeviceRegistry(Path("E:/qubox"))
+session = SessionManager(
+    device_id="my_device",
+    cooldown_id="cd_001",
+    registry_base=Path("E:/qubox"),
+    qop_ip="10.157.36.68",
+    cluster_name="Cluster_2",
+)
+session.open()
+attr = session.attributes
+
+# ── Cell 3: Register Pulses ──
+ref_I, ref_Q = drag_gaussian_pulse_waveforms(
+    amplitude=attr.r180_amp,
+    length=attr.r180_len,
+    sigma=attr.r180_len / 5,
+    alpha=attr.drag_coeff,
+    anharmonicity=attr.anharmonicity,
+)
+register_rotations_from_ref_iq(
+    session.pulse_mgr,
+    ref_I=ref_I, ref_Q=ref_Q,
+    element=attr.qb_el,
+    rotations="all",
+)
+session.burn_pulses()
+
+# ── Cell 4: Built-in Experiment ──
+rabi = PowerRabi(session)
+rabi_result = rabi.run(max_gain=1.2, dg=0.04, op="ref_r180", n_avg=5000)
+rabi_analysis = rabi.analyze(rabi_result, update_calibration=True, p0=[0.0001, 1, 0])
+rabi.plot(rabi_analysis)
+print(f"g_pi = {rabi_analysis.metrics['g_pi']:.6f}")
+
+# ── Cell 5: Custom Experiment ──
+class MyRamseyDetuning(ExperimentBase):
+    def build_program(self, *, freqs, wait_clks, n_avg):
+        qb_el, ro_el = self.attr.qb_el, self.attr.ro_el
+        mm = self.measure_macro
+        with program() as prog:
+            n = declare(int)
+            f = declare(int)
+            I, Q, state = declare(fixed), declare(fixed), declare(bool)
+            I_st, state_st = declare_stream(), declare_stream()
+            with for_(n, 0, n < n_avg, n + 1):
+                with for_each_(f, freqs.astype(int).tolist()):
+                    update_frequency(qb_el, f)
+                    play("x90", qb_el)
+                    wait(wait_clks, qb_el)
+                    play("x90", qb_el)
+                    align(qb_el, ro_el)
+                    mm.measure(I=I, Q=Q, state=state)
+                    save(I, I_st); save(state, state_st)
+            with stream_processing():
+                I_st.buffer(len(freqs)).average().save("I")
+                state_st.boolean_to_int().buffer(len(freqs)).average().save("state")
+        return prog
+
+    def run(self, *, freqs, wait_clks=250, n_avg=2000):
+        self.set_standard_frequencies()
+        prog = self.build_program(freqs=freqs, wait_clks=wait_clks, n_avg=n_avg)
+        result = self.run_program(prog, n_total=n_avg)
+        result.metadata["freqs"] = freqs
+        return result
+
+    def analyze(self, result, **kw):
+        freqs = result.metadata["freqs"]
+        state = np.array(result.output["state"])
+        return AnalysisResult(
+            data={"freqs": freqs, "state": state},
+            metrics={"visibility": float(np.ptp(state))},
+            source=result,
+        )
+
+    def plot(self, analysis, *, ax=None, **kw):
+        import matplotlib.pyplot as plt
+        fig, ax = (ax.figure, ax) if ax else plt.subplots()
+        ax.plot(analysis.data["freqs"] / 1e6, analysis.data["state"], "o-")
+        ax.set(xlabel="Detuning (MHz)", ylabel="P(e)",
+               title=f"Vis={analysis.metrics['visibility']:.3f}")
+        return fig
+
+ramsey = MyRamseyDetuning(session)
+result = ramsey.run(freqs=np.linspace(-5e6, 5e6, 81), wait_clks=250, n_avg=2000)
+analysis = ramsey.analyze(result)
+ramsey.plot(analysis)
+
+# ── Cell 6: Cleanup ──
+session.close()
+```
+
+### 23.10 Tips and Best Practices
+
+1. **Keep programs small.**  A QUA program should do one thing.  If your
+   experiment needs multiple scans, run multiple programs sequentially.
+
+2. **Use `create_clks_array()` and `create_if_frequencies()`** from
+   `experiment_base` for proper grid snapping and IF boundary validation.
+
+3. **Stash metadata in `result.metadata`** — sweep arrays, parameter
+   choices, etc., so that `analyze()` can reconstruct context.
+
+4. **Use `FitResult`** for structured fit storage — model name, parameter
+   dictionary, uncertainties, and R² all feed into `guarded_calibration_commit()`
+   validation gates.
+
+5. **Never call `qm.execute()` directly.**  Always use
+   `self.run_program(prog, n_total=...)` which handles SPA pump management,
+   progress reporting, and metadata capture.
+
+6. **Prefer `measureMacro.measure()`** over raw QUA `measure()`.  The macro
+   handles element selection, demodulation weights, threshold rotation, and
+   state discrimination in one call.
+
+7. **Test with simulation first.**  Pass `process_in_sim=True` to
+   `run_program()` to execute the program in the QM simulator without
+   hardware:
+
+   ```python
+   result = self.run_program(prog, n_total=100, process_in_sim=True)
+   ```
+
+8. **Save artifacts** for traceability:
+
+   ```python
+   self.save_output(result.output, tag="my_experiment_v1")
+   ```
+
+9. **For multi-element alignment**, always call `align()` between
+   operations on different elements.  QM executes element programs
+   independently and `align()` is the synchronization barrier.
+
+10. **Register pulses in the notebook, not in the experiment.**
+    The experiment class should be pure logic; waveform creation belongs
+    in the notebook cells before the experiment is constructed.
+
+---
+
 ## Appendix A: Utility Functions
 
 ### `qubox_v2.experiments.experiment_base`
@@ -2489,6 +3869,47 @@ The following audit documents provide detailed analysis of the macro system:
 | `square` | `(amplitude, length) -> list[float]` | Square waveform |
 | `gaussian` | `(amplitude, length, sigma) -> list[float]` | Gaussian waveform |
 | `drag_gaussian` | `(amplitude, length, sigma, alpha, anharmonicity, detuning=0.0) -> tuple[list, list]` | `(I, Q)` |
+
+### `qubox_v2.tools.waveforms`
+
+| Function | Signature | Return | Description |
+|----------|-----------|--------|-------------|
+| `drag_gaussian_pulse_waveforms` | `(amplitude, length, sigma, alpha, anharmonicity, detuning=0.0, subtracted=True) -> (I, Q)` | `tuple[list, list]` | Gaussian DRAG waveform with Chen-style correction |
+| `kaiser_pulse_waveforms` | `(amplitude, length, beta, detuning=0.0, subtracted=True, alpha=0.0, anharmonicity=0.0) -> (I, Q)` | `tuple[list, list]` | Spectrally selective Kaiser window pulse |
+| `slepian_pulse_waveforms` | `(amplitude, length, NW, ...) -> (I, Q)` | `tuple[list, list]` | DPSS/Slepian window pulse |
+| `drag_cosine_pulse_waveforms` | `(amplitude, length, alpha, anharmonicity, ...) -> (I, Q)` | `tuple[list, list]` | Cosine-enveloped DRAG |
+| `CLEAR_waveform` | `(t_duration, t_kick, A_steady, ...) -> np.ndarray` | `np.ndarray` | 2-kick CLEAR measurement envelope |
+| `build_CLEAR_waveform_from_physics` | `(t_duration, t_kick, A_steady, kappa_rad_s, chi_rad_s, dt_s=1e-9) -> np.ndarray` | `np.ndarray` | Physics-parameterized CLEAR waveform |
+| `gaussian_amp_for_same_rotation` | `(ref_amp, ref_dur, target_dur, n_sigma=4.0) -> float` | `float` | Scale amplitude for different duration |
+
+### `qubox_v2.tools.generators`
+
+| Function | Signature | Return | Description |
+|----------|-----------|--------|-------------|
+| `register_qubit_rotation` | `(pom, *, name, axis, rlen, amp, waveform_type="drag", ...) -> None` | `None` | Register one rotation pulse |
+| `register_rotations_from_ref_iq` | `(pom, ref_I, ref_Q, *, element, prefix, rotations, ...) -> dict` | `dict[str, (I, Q)]` | Create full rotation set from reference IQ |
+| `ensure_displacement_ops` | `(pom, *, element, n_max, coherent_amp, ...) -> dict` | `dict[str, (I, Q)]` | Generate Fock-resolved displacement pulses |
+| `validate_displacement_ops` | `(pom, element, disp_names) -> list[str]` | missing names | Check required displacement ops exist |
+
+### `qubox_v2.experiments.result`
+
+| Class | Description |
+|-------|-------------|
+| `FitResult` | Dataclass: `model_name`, `params`, `uncertainties`, `r_squared`, `residuals`, `metadata` |
+| `AnalysisResult` | Dataclass: `data`, `fit`, `fits`, `metrics`, `source`, `metadata` |
+
+### `qubox_v2.core.errors`
+
+| Exception | Base | When |
+|-----------|------|------|
+| `QuboxError` | `RuntimeError` | Base for all qubox errors |
+| `ConfigError` | `QuboxError` | Invalid or missing configuration |
+| `ConnectionError` | `QuboxError` | OPX+ / Octave / instrument communication failure |
+| `JobError` | `QuboxError` | QUA job submission, execution, or fetch failure |
+| `DeviceError` | `QuboxError` | External-device driver error |
+| `PulseError` | `QuboxError` | Invalid pulse definition |
+| `CalibrationError` | `QuboxError` | Octave or element calibration failure |
+| `ContextMismatchError` | `ConfigError` | Device/cooldown/wiring context mismatch |
 
 ### `qubox_v2.core.schemas`
 
@@ -2517,6 +3938,104 @@ implementation at time of writing.  They are listed here for transparency.*
 
 3. **`cqed_params.json`**: Unversioned legacy file.  Read-only in v2 but
    still written by `save_attributes()` for backward compatibility.
+
+---
+
+## Appendix C: Quick-Reference Cheat Sheet
+
+### Imports
+
+```python
+# Session and core
+from qubox_v2.experiments.session import SessionManager
+from qubox_v2.experiments import ExperimentBase, ExperimentRunner
+from qubox_v2.devices import DeviceRegistry, ContextResolver
+
+# Built-in experiments (import any you need)
+from qubox_v2.experiments import (
+    ResonatorSpectroscopy, QubitSpectroscopy, PowerRabi, TemporalRabi,
+    T1Relaxation, T2Ramsey, T2Echo,
+    IQBlob, ReadoutGEDiscrimination, AllXY, DRAGCalibration,
+    RandomizedBenchmarking, PulseTrainCalibration,
+    StorageSpectroscopy, StorageChiRamsey, FockResolvedT1,
+    QubitStateTomography, StorageWignerTomography,
+)
+
+# Calibration
+from qubox_v2.calibration import (
+    CalibrationStore, CalibrationOrchestrator,
+    CalibrationData, CoherenceParams, DiscriminationParams,
+    PulseCalibration, FitRecord,
+)
+
+# Pulse tools
+from qubox_v2.tools.generators import (
+    register_rotations_from_ref_iq, ensure_displacement_ops,
+)
+from qubox_v2.tools.waveforms import (
+    drag_gaussian_pulse_waveforms, kaiser_pulse_waveforms,
+)
+
+# Gate classes
+from qubox_v2.experiments.gates_legacy import (
+    QubitRotation, Displacement, SQR, SNAP, Idle, Measure, GateArray,
+)
+
+# Result types
+from qubox_v2.experiments.result import AnalysisResult, FitResult
+
+# Utilities
+from qubox_v2.experiments.experiment_base import create_if_frequencies, create_clks_array
+from qubox_v2.core.preflight import preflight_check
+from qubox_v2.core.artifacts import save_config_snapshot
+```
+
+### Common Workflow Patterns
+
+```python
+# Pattern 1: Simple run → analyze → plot
+exp = SomeExperiment(session)
+result = exp.run(...)
+analysis = exp.analyze(result, update_calibration=True)
+exp.plot(analysis)
+
+# Pattern 2: Orchestrator-managed calibration
+orch = CalibrationOrchestrator(session)
+cycle = orch.run_analysis_patch_cycle(exp, run_kwargs={...}, apply=False)
+orch.apply_patch(cycle["patch"], dry_run=False)
+
+# Pattern 3: Custom experiment
+class MyExp(ExperimentBase):
+    def build_program(self, **kw): ...
+    def run(self, **kw): ...
+    def analyze(self, result, **kw): ...
+    def plot(self, analysis, **kw): ...
+```
+
+### ExperimentBase Accessor Quick Reference
+
+| Accessor | Returns | Description |
+|----------|---------|-------------|
+| `self.attr` | `cQED_attributes` | Device parameters (frequencies, element names, etc.) |
+| `self.pulse_mgr` | `PulseOperationManager` | Pulse registration and lookup |
+| `self.hw` | `HardwareController` | QM config, element frequency control |
+| `self.measure_macro` | `measureMacro` | QUA readout code emitter |
+| `self.calibration_store` | `CalibrationStore` | Typed calibration data |
+| `self.device_manager` | `DeviceManager` | External instrument handles |
+| `self.name` | `str` | Class name (for logging/artifacts) |
+
+### ExperimentBase Helper Methods
+
+| Method | Purpose |
+|--------|---------|
+| `set_standard_frequencies()` | Set element IFs to calibrated values |
+| `get_readout_lo()` / `get_qubit_lo()` | Get LO frequencies |
+| `burn_pulses()` | Push POM state to live QM config |
+| `get_therm_clks(channel)` | Resolve thermalization wait time |
+| `run_program(prog, n_total=...)` | Execute QUA program via runner |
+| `save_output(output, tag)` | Persist data artifact |
+| `get_confusion_matrix()` | Readout confusion matrix |
+| `guarded_calibration_commit(...)` | Two-phase calibration persistence |
 
 ---
 

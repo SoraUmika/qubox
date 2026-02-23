@@ -25,8 +25,6 @@ AllXY
     21-gate-pair error benchmarking.
 DRAGCalibration
     DRAG coefficient optimization.
-QubitPulseTrain
-    Amplitude calibration via pulse repetition.
 RandomizedBenchmarking
     Standard and interleaved randomized benchmarking.
 
@@ -54,9 +52,8 @@ from .readout_config import ReadoutConfig
 from .gates import (
     AllXY,
     DRAGCalibration,
-    QubitPulseTrain,
-    QubitPulseTrainLegacy,
     RandomizedBenchmarking,
+    PulseTrainCalibration,
 )
 from .reset import (
     QubitResetBenchmark,
@@ -77,9 +74,8 @@ __all__ = [
     "ReadoutConfig",
     "AllXY",
     "DRAGCalibration",
-    "QubitPulseTrain",
-    "QubitPulseTrainLegacy",
     "RandomizedBenchmarking",
+    "PulseTrainCalibration",
     "QubitResetBenchmark",
     "ActiveQubitResetBenchmark",
     "ReadoutLeakageBenchmarking",

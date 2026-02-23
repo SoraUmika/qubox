@@ -81,8 +81,8 @@ from qubox_v2.experiments import (
     CalibrateReadoutFull,
     AllXY,
     DRAGCalibration,
-    QubitPulseTrain,
     RandomizedBenchmarking,
+    PulseTrainCalibration,
     # Cavity / Fock
     StorageSpectroscopy,
     NumSplittingSpectroscopy,
@@ -237,8 +237,10 @@ from qubox_v2.core.schemas import validate_config_dir
 orch = CalibrationOrchestrator(session)
 
 config_dir = Path(session.experiment_path) / "config"
+device_config_dir = getattr(session, "_device_config_dir", None)
 ss = SessionState.from_config_dir(
     config_dir,
+    device_config_dir=device_config_dir,
     device_id=DEVICE_ID,
     cooldown_id=COOLDOWN_ID,
     wiring_rev=ctx.wiring_rev,
@@ -710,7 +712,7 @@ t2r_cycle = orch.run_analysis_patch_cycle(
         "p0": [0, 20, 1.0, qb_det_MHz, 0.0, 0],
         "p0_time_unit": "us",
         "p0_freq_unit": "MHz",
-        "apply_frequency_correction": False,
+        "apply_frequency_correction": True,
         "freq_correction_sign": -1.0,
     },
     apply=False,
@@ -896,28 +898,80 @@ else:
     am.save_artifact("drag_calibration_candidate", drag_patch.to_dict())
     print("\\nDRAG calibration NOT committed. Candidate saved as artifact.")"""))
 
-# ── 45 Pulse train heading ──────────────────────────────
+# ── 44b Pulse-Train heading ────────────────────────────
 cells.append(make_cell("markdown", """\
-### 6.2 Qubit Pulse Train
+### 6.1c Pulse-Train Rotation Calibration (Tomography)
 
-Repeated gate applications to measure amplitude and phase errors."""))
+Full 3-axis qubit state tomography at each N with multiple preps.
+Fits Bloch-vector evolution via DE+LS global optimisation to extract
+amplitude error, phase error, detuning, and zeta (per-step Z rotation).
+Converts to QubitRotation knob corrections (d_lambda, d_alpha, d_omega).
 
-# ── 46 Pulse train code ─────────────────────────────────
+Uses the unified `run() -> analyze() -> plot()` protocol via `PulseTrainCalibration(session)`."""))
+
+# ── 44c Pulse-Train code ──────────────────────────────
 cells.append(make_cell("code", """\
-ptrain = QubitPulseTrain(session)
-result = ptrain.run(
-    N_values=list(range(1, 51)),
-    rotation_pulse="x180",
-    n_avg=5000,
+from qm.qua import play, align
+from qubox_v2.experiments.gates_legacy import QubitRotation
+
+pt = PulseTrainCalibration(session)
+
+theta = np.pi
+phi = 0.0
+N_values = np.arange(0, 80, 8)
+n_avg = 20000
+
+# Prep using primitives (x90/y90/xn90/yn90/x180)
+def prep_e():  play("x180", attr.qb_el)
+def prep_px(): play("y90", attr.qb_el)
+def prep_mx(): play("yn90", attr.qb_el)
+def prep_py(): play("xn90", attr.qb_el)
+def prep_my(): play("x90", attr.qb_el)
+
+prep_defs = {
+    "g": None, "e": prep_e,
+    "+x": prep_px, "+y": prep_py, "-x": prep_mx, "-y": prep_my,
+}
+
+# Gate under test
+arb_rot = QubitRotation(theta, phi, ref_r180_pulse="ref_r180_pulse", build=True)
+session.burn_pulses()
+
+# Run tomography sweep
+result = pt.run(
+    arb_rot=arb_rot, prep_defs=prep_defs, N_values=N_values,
+    n_avg=n_avg, theta=theta, phi=phi, verbose=True, sanity_check=True,
 )
 
-analysis = ptrain.analyze(result)
-ptrain.plot(analysis)
-print(analysis.metrics)"""))
+# Analyse — knob conversion requires dt_s and n_samp
+_Iw, _Qw, waveform_len, marker = arb_rot.waveforms()
+dt_s = float(getattr(attr, "dt_s", 1e-9))
+n_samp = int(waveform_len)
 
-# ── 47 AllXY heading ────────────────────────────────────
+analysis = pt.analyze(
+    result, fit_zeta=True, multi_seed=True, seeds=range(1, 2),
+    seed_select="ls", verbose=True,
+    dt_s=dt_s, n_samp=n_samp, d_omega_sign=1.0,
+    bounds={"delta": (-0.001, 0.001), "amp_err": (-0.05, +0.05),
+            "phase_err": (-0.2, +0.2), "zeta": (-0.1, 0.1)},
+)
+
+# Plot
+pt.plot(analysis, residual_mode="both")
+
+# Print fit results and knob corrections
+print(f"amp_err    = {analysis.metrics['amp_err']:+.4%}")
+print(f"phase_err  = {analysis.metrics['phase_err']:+.6f} rad")
+print(f"delta      = {analysis.metrics['delta']:+.6f} rad/pulse")
+print(f"zeta       = {analysis.metrics['zeta']:+.6f} rad/step")
+if "d_lambda" in analysis.metrics:
+    print(f"d_lambda   = {analysis.metrics['d_lambda']:+.6e}")
+    print(f"d_alpha    = {analysis.metrics['d_alpha']:+.6f} rad")
+    print(f"d_omega    = {analysis.metrics['d_omega']:+.6e} rad/s")"""))
+
+# ── 45 AllXY heading ────────────────────────────────────
 cells.append(make_cell("markdown", """\
-### 6.3 AllXY
+### 6.2 AllXY
 
 21-point gate error diagnostic. Ideal result is the stepped staircase pattern."""))
 
@@ -944,7 +998,7 @@ confusion"""))
 
 # ── 50 RB heading ───────────────────────────────────────
 cells.append(make_cell("markdown", """\
-### 6.4 Randomized Benchmarking
+### 6.3 Randomized Benchmarking
 
 Single-qubit Clifford RB for average gate fidelity."""))
 
@@ -1306,6 +1360,82 @@ spa_pump = SPAPumpFrequencyOptimization(session)
 # print(f"Best pump power = {analysis.metrics.get('best_pump_power', 'N/A')}")
 # print(f"Best pump detuning = {analysis.metrics.get('best_pump_detuning', 'N/A')}")"""))
 
+# ── 69b Storage pulse defs heading ─────────────────────
+cells.append(make_cell("markdown", """\
+### 8.3 Register Storage Cavity Pulse Definitions
+
+**Required** before running any storage cavity experiments.
+
+Registers:
+- `const_alpha` — constant displacement pulse on the storage element
+- `sel_x180` and derived selective rotations (`sel_y180`, `sel_x90`, etc.) —
+  Kaiser-windowed selective pi pulse for Fock-number-resolved qubit control"""))
+
+# ── 69c Storage pulse defs code ────────────────────────
+cells.append(make_cell("code", """\
+from qubox_v2.tools.waveforms import kaiser_pulse_waveforms
+from qubox_v2.tools.generators import register_rotations_from_ref_iq
+
+pm = session.pulse_mgr
+
+# ---- const_alpha: constant displacement pulse on storage ----
+alpha_len = 48   # ns (must be >= 16, divisible by 4)
+alpha_amp = 0.019580
+b_alpha = 1.0
+
+pm.create_control_pulse(
+    element=attr.st_el,
+    op="const_alpha",
+    length=alpha_len,
+    I_samples=[alpha_amp] * alpha_len,
+    Q_samples=[0.0] * alpha_len,
+    override=True,
+    persist=False,
+)
+
+# Store displacement reference for ensure_displacement_ops
+session._displacement_ref = {
+    "coherent_amp": alpha_amp,
+    "coherent_len": alpha_len,
+    "b_alpha": b_alpha,
+}
+
+print(f"const_alpha registered: len={alpha_len}, amp={alpha_amp}, b_alpha={b_alpha}")
+
+# ---- sel_x180: Kaiser-windowed selective pi pulse ----
+sel_rlen = 1000   # ns
+sel_kaiser_amp = 0.0013420737712946228
+sel_beta = 7.967
+anh = float(getattr(attr, "anharmonicity", 0) or -200e6)
+
+sel_I, sel_Q = kaiser_pulse_waveforms(
+    amplitude=sel_kaiser_amp,
+    length=sel_rlen,
+    beta=sel_beta,
+    detuning=0.0,
+    subtracted=True,
+    alpha=0.0,
+    anharmonicity=anh,
+)
+
+# Register ref + all derived rotations (sel_x180, sel_y180, sel_x90, etc.)
+sel_ops = register_rotations_from_ref_iq(
+    pm,
+    ref_I=sel_I,
+    ref_Q=sel_Q,
+    element=attr.qb_el,
+    prefix="sel_",
+    rotations="all",
+    make_r0=False,
+    override=True,
+    persist=False,
+)
+
+session.burn_pulses()
+
+print(f"sel_x180 registered: len={sel_rlen}, amp={sel_kaiser_amp}, beta={sel_beta}")
+print(f"Selective rotation ops: {list(sel_ops.keys())}")"""))
+
 # ── 70 Storage heading ──────────────────────────────────
 cells.append(make_cell("markdown", "## 9. Storage Cavity"))
 
@@ -1450,7 +1580,7 @@ from qubox_v2.tools.generators import ensure_displacement_ops
 
 n_fock = 3
 
-disp_ref = session.get_displacement_reference()
+disp_ref = getattr(session, '_displacement_ref', None) or session.get_displacement_reference()
 coherent_amp = disp_ref.get("coherent_amp", None)
 coherent_len = disp_ref.get("coherent_len", None)
 b_alpha = disp_ref.get("b_alpha", None)
@@ -1785,14 +1915,14 @@ spectrum analyser alignment or mixer leakage checks."""))
 
 # ── 104 CW code ─────────────────────────────────────────
 cells.append(make_cell("code", """\
-from qubox_v2.programs import cQED_programs
+from qubox_v2.programs.builders.utility import continuous_wave
 
 target_element = attr.qb_el
 cw_pulse = "const_x180"
 cw_gain = 0.5
 truncate_clks = 250
 
-cw_prog = cQED_programs.continuous_wave(
+cw_prog = continuous_wave(
     target_el=target_element,
     pulse=cw_pulse,
     gain=cw_gain,

@@ -1,6 +1,6 @@
 """qubox_v2.programs.calibration
 =================================
-Gate-calibration QUA program factories (AllXY, DRAG, RB, pulse trains).
+Gate-calibration QUA program factories (AllXY, DRAG, RB).
 
 Imports calibration functions from ``builders`` sub-modules::
 
@@ -12,8 +12,6 @@ from .builders.calibration import (
     drag_calibration_YALE,
     drag_calibration_GOOGLE,
     sequential_qb_rotations,
-    qubit_pulse_train,
-    qubit_pulse_train_legacy,
 )
 
 __all__ = [
@@ -22,6 +20,4 @@ __all__ = [
     "drag_calibration_YALE",
     "drag_calibration_GOOGLE",
     "sequential_qb_rotations",
-    "qubit_pulse_train",
-    "qubit_pulse_train_legacy",
 ]

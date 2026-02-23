@@ -129,8 +129,11 @@ class T2Ramsey(ExperimentBase):
             if bool(kw.get("apply_frequency_correction", False)):
                 sign = float(kw.get("freq_correction_sign", -1.0))
                 correction_hz = sign * float(fit.params["f_det"]) * 1e9
-                current_qb = float(self.attr.qb_fq)
+                # Include the input detuning: the qubit was driven at qb_fq + qb_detune
+                qb_detune_hz = float(qb_detune or 0)
+                current_qb = float(self.attr.qb_fq) + qb_detune_hz
                 corrected_qb = current_qb + correction_hz
+                metrics["qb_detune_Hz"] = qb_detune_hz
                 metrics["qb_freq_correction_Hz"] = correction_hz
                 metrics["qb_freq_corrected_Hz"] = corrected_qb
                 metadata.setdefault("proposed_patch_ops", []).append(

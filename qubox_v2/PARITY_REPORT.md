@@ -121,16 +121,12 @@ The shared infrastructure (QUA programs, fitting models, fitting engine, post-pr
 
 ---
 
-### 2.6 QubitPulseTrain — FIXED ✅
+### 2.6 QubitPulseTrain — REMOVED
 
-**File:** `experiments/calibration/gates.py` (class `QubitPulseTrain`)
-
-| Aspect | Before | After | Severity |
-|---|---|---|---|
-| **analyze() state data** | Not extracted | Extracts `"state"` (or `"Pe"`) from output | **MEDIUM** |
-| **Confusion matrix** | Not applied | Optional auto-correction | MEDIUM |
-
-**Root cause:** QUA program saves `"state"` as boolean_to_int averaged, but v2 only used raw I/Q.
+**Status:** `QubitPulseTrain` and `QubitPulseTrainLegacy` have been removed from the
+modular experiment framework. The analysis model function `qubit_pulse_train_model`
+remains in `analysis/cQED_models.py` for use by `calibration/algorithms.py`.
+Legacy method wrappers are preserved in `legacy_experiment.py` for backward compatibility.
 
 ---
 

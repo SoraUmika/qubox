@@ -44,17 +44,6 @@ class PiAmpRule:
         patch.add("SetCalibration", path=f"pulse_calibrations.{target_op}.amplitude", value=ref_amp_new)
         patch.add("SetPulseParam", pulse_name=target_op, field="amplitude", value=ref_amp_new)
 
-        scale = ref_amp_new / ref_amp_old if ref_amp_old != 0 else 1.0
-        if target_op == self.ref_pulse_name:
-            for pulse_name in self.primitive_family:
-                pcal = self.session.calibration.get_pulse_calibration(pulse_name)
-                old_amp = getattr(pcal, "amplitude", None)
-                if old_amp is None:
-                    continue
-                new_amp = float(old_amp) * float(scale)
-                patch.add("SetCalibration", path=f"pulse_calibrations.{pulse_name}.amplitude", value=new_amp)
-                patch.add("SetPulseParam", pulse_name=pulse_name, field="amplitude", value=new_amp)
-
         patch.add("TriggerPulseRecompile", include_volatile=True)
         return patch
 
@@ -243,6 +232,37 @@ class WeightRegistrationRule:
         return patch if patch.updates else None
 
 
+@dataclass
+class PulseTrainRule:
+    """Build pulse-train calibration patch ops (corrected amplitude + phase)."""
+
+    session: Any
+    ref_pulse_name: str = "ref_r180"
+
+    def __call__(self, result: CalibrationResult) -> Patch | None:
+        if result.kind != "pulse_train":
+            return None
+
+        params = result.params or {}
+        corrected_amp = params.get("corrected_amplitude")
+        if corrected_amp is None:
+            return None
+
+        metadata = (result.evidence or {}).get("analysis_metadata", {}) or {}
+        target_op = str(metadata.get("target_op", self.ref_pulse_name))
+
+        patch = Patch(reason="PulseTrainRule", provenance={"kind": result.kind})
+        patch.add("SetCalibration", path=f"pulse_calibrations.{target_op}.amplitude", value=corrected_amp)
+        patch.add("SetPulseParam", pulse_name=target_op, field="amplitude", value=corrected_amp)
+
+        corrected_phase = params.get("corrected_phase")
+        if corrected_phase is not None and abs(corrected_phase) > 1e-12:
+            patch.add("SetCalibration", path=f"pulse_calibrations.{target_op}.phase_offset", value=corrected_phase)
+
+        patch.add("TriggerPulseRecompile", include_volatile=True)
+        return patch
+
+
 def default_patch_rules(session) -> dict[str, list[Any]]:
     qb_el = getattr(session.attributes, "qb_el", "qb")
     ro_el = getattr(session.attributes, "ro_el", "rr")
@@ -258,6 +278,7 @@ def default_patch_rules(session) -> dict[str, list[Any]]:
     disc_rule = DiscriminationRule(element=ro_el)
     quality_rule = ReadoutQualityRule(element=ro_el)
     weight_rule = WeightRegistrationRule()
+    pulse_train_rule = PulseTrainRule(session=session)
 
     return {
         "pi_amp": [pi_rule, weight_rule],
@@ -268,6 +289,7 @@ def default_patch_rules(session) -> dict[str, list[Any]]:
         "qubit_freq": [qb_freq_rule, weight_rule],
         "storage_freq": [st_freq_rule, weight_rule],
         "drag_alpha": [drag_rule, weight_rule],
+        "pulse_train": [pulse_train_rule, weight_rule],
         "ReadoutGEDiscrimination": [disc_rule, weight_rule],
         "ReadoutWeightsOptimization": [weight_rule],
         "ReadoutButterflyMeasurement": [quality_rule, weight_rule],

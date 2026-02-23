@@ -295,11 +295,15 @@ class SessionManager:
 
     def _load_attributes(self) -> cQED_attributes:
         """Load or create cQED experiment attributes."""
-        try:
-            return cQED_attributes.load(self.experiment_path)
-        except FileNotFoundError:
-            _logger.info("No cqed_params.json found — using default attributes")
-            return cQED_attributes()
+        resolved = self._resolve_path("cqed_params.json")
+        if resolved is not None:
+            _logger.info("Loading experiment context from %s", resolved)
+            obj = cQED_attributes.from_json(resolved)
+            obj._log_bindings()
+            obj.validate()
+            return obj
+        _logger.info("No cqed_params.json found — using default attributes")
+        return cQED_attributes()
 
     def _runtime_settings_path(self) -> Path:
         return self.experiment_path / "config" / "session_runtime.json"
