@@ -74,12 +74,25 @@ class QubitSpectroscopy(ExperimentBase):
             metrics["f0"] = fit.params["f0"]
             metrics["gamma"] = fit.params["gamma"]
 
-        analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics)
+        metadata: dict[str, Any] = {
+            "calibration_kind": "qubit_freq",
+            "units": {"f0": "Hz", "f0_MHz": "MHz"},
+        }
+        if fit.params:
+            metrics["f0_MHz"] = float(fit.params["f0"] / 1e6)
 
-        if update_calibration and self.calibration_store and fit.params:
-            self.calibration_store.set_frequencies(
-                self.attr.qb_el, qubit_freq=fit.params["f0"],
+        if update_calibration and fit.params:
+            metadata.setdefault("proposed_patch_ops", []).append(
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": f"frequencies.{self.attr.qb_el}.qubit_freq",
+                        "value": float(fit.params["f0"]),
+                    },
+                }
             )
+
+        analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics, metadata=metadata)
 
         return analysis
 
@@ -187,12 +200,25 @@ class QubitSpectroscopyCoarse(ExperimentBase):
             metrics["f0"] = fit.params["f0"]
             metrics["gamma"] = fit.params["gamma"]
 
-        analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics)
+        metadata: dict[str, Any] = {
+            "calibration_kind": "qubit_freq",
+            "units": {"f0": "Hz", "f0_MHz": "MHz"},
+        }
+        if fit.params:
+            metrics["f0_MHz"] = float(fit.params["f0"] / 1e6)
 
-        if update_calibration and self.calibration_store and fit.params:
-            self.calibration_store.set_frequencies(
-                self.attr.qb_el, qubit_freq=fit.params["f0"],
+        if update_calibration and fit.params:
+            metadata.setdefault("proposed_patch_ops", []).append(
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": f"frequencies.{self.attr.qb_el}.qubit_freq",
+                        "value": float(fit.params["f0"]),
+                    },
+                }
             )
+
+        analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics, metadata=metadata)
 
         return analysis
 

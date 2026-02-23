@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from ..experiment_base import ExperimentBase, create_clks_array
 from ..result import AnalysisResult, FitResult
 from ...analysis import post_process as pp
-from ...analysis.fitting import fit_and_wrap, build_fit_legend
+from ...analysis.fitting import fit_and_wrap
 from ...analysis.cQED_models import T1_relaxation_model
 from ...hardware.program_runner import RunResult
 from ...programs import cQED_programs
@@ -50,35 +50,71 @@ class T1Relaxation(ExperimentBase):
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
         delays = result.output.extract("delays")
         S = result.output.extract("S")
-        mag = np.abs(S)
+        ydata = np.real(S)
 
-        A_guess = float(mag[0] - mag[-1])
+        p0_time_unit = str(kw.pop("p0_time_unit", "us")).lower()
+
+        A_guess = float(ydata[0] - ydata[-1])
         T1_guess = float(delays[-1]) / 3
-        offset_guess = float(mag[-1])
+        offset_guess = float(ydata[-1])
         auto_p0 = [A_guess, T1_guess, offset_guess]
 
-        fit = fit_and_wrap(delays, mag, T1_relaxation_model,
-                           p0 if p0 is not None else auto_p0,
+        if p0 is not None:
+            p0_fit = list(p0)
+            if len(p0_fit) >= 2:
+                if p0_time_unit == "us":
+                    p0_fit[1] = float(p0_fit[1]) * 1e3
+                elif p0_time_unit != "ns":
+                    raise ValueError("p0_time_unit must be 'us' or 'ns'")
+        else:
+            p0_fit = auto_p0
+
+        fit = fit_and_wrap(delays, ydata, T1_relaxation_model,
+                           p0_fit,
                            model_name="T1_relaxation", **kw)
 
         metrics: dict[str, Any] = {}
         if fit.params:
             metrics["T1"] = fit.params["T1"]
+            metrics["T1_us"] = fit.params["T1"] / 1e3
 
-        analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics)
+        metadata: dict[str, Any] = {
+            "calibration_kind": "t1",
+            "units": {"T1": "ns", "T1_us": "us"},
+        }
+        if update_calibration and fit.params:
+            metadata.setdefault("proposed_patch_ops", []).extend([
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": f"coherence.{self.attr.qb_el}.T1",
+                        "value": float(fit.params["T1"]),
+                    },
+                },
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": f"coherence.{self.attr.qb_el}.T1_us",
+                        "value": float(fit.params["T1"] / 1e3),
+                    },
+                },
+            ])
 
-        if update_calibration and self.calibration_store and fit.params:
-            min_r2 = float(kw.get("min_r2", 0.80))
-            self.guarded_calibration_commit(
-                analysis=analysis,
-                run_result=result,
-                calibration_tag="t1_relaxation",
-                min_r2=min_r2,
-                required_metrics={"T1": (1.0, None)},
-                apply_update=lambda: self.calibration_store.set_coherence(
-                    self.attr.qb_el, T1=fit.params["T1"],
-                ),
-            )
+            if bool(kw.get("derive_qb_therm_clks", False)):
+                clk_ns = float(kw.get("clock_period_ns", 4.0))
+                qb_therm_clks = int(np.floor((2.0 * float(fit.params["T1"])) / clk_ns))
+                metrics["qb_therm_clks"] = qb_therm_clks
+                metadata.setdefault("proposed_patch_ops", []).append(
+                    {
+                        "op": "SetCalibration",
+                        "payload": {
+                            "path": f"coherence.{self.attr.qb_el}.qb_therm_clks",
+                            "value": qb_therm_clks,
+                        },
+                    }
+                )
+
+        analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics, metadata=metadata)
 
         return analysis
 
@@ -88,22 +124,28 @@ class T1Relaxation(ExperimentBase):
         if delays is None or S is None:
             return None
 
-        mag = np.abs(S)
+        ydata = np.real(S)
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 5))
         else:
             fig = ax.figure
 
-        ax.scatter(delays / 1e3, mag, s=5, label="Data")
+        ax.scatter(delays / 1e3, ydata, s=5, label="Data")
         if analysis.fit and analysis.fit.params:
             p = analysis.fit.params
             x_fit = np.linspace(delays.min(), delays.max(), 500)
             y_fit = T1_relaxation_model(x_fit, p["A"], p["T1"], p["offset"])
+            eq_str = analysis.fit.metadata.get("equation", "") if analysis.fit.metadata else ""
+            legend = (
+                f"{eq_str}\nA = {p['A']:.4g}\nT1 = {p['T1'] / 1e3:.4g} us\noffset = {p['offset']:.4g}"
+                if eq_str else
+                f"A = {p['A']:.4g}\nT1 = {p['T1'] / 1e3:.4g} us\noffset = {p['offset']:.4g}"
+            )
             ax.plot(x_fit / 1e3, y_fit, "r-", lw=2,
-                    label=build_fit_legend(analysis.fit))
+                    label=legend)
 
         ax.set_xlabel("Delay (us)")
-        ax.set_ylabel("Magnitude")
+        ax.set_ylabel("Re(S)")
         ax.set_title("T1 Relaxation")
         ax.legend(
             bbox_to_anchor=(1.05, 1), loc='upper left',

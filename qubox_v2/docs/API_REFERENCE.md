@@ -1,8 +1,10 @@
 # qubox\_v2 — API Reference & Architecture Guide
 
-**Version**: 1.0.0  
-**Date**: 2026-02-22  
+**Version**: 1.1.0
+**Date**: 2026-02-22
 **Status**: Governing Document
+**Changelog**: v1.1.0 — Added sections 11-15: SessionManager lifecycle detail,
+artifact saving, CalibrationOrchestrator, measureConfig persistence, known gaps.
 
 ---
 
@@ -18,6 +20,11 @@
 8. [Gate System](#8-gate-system)
 9. [Experiment Registry](#9-experiment-registry)
 10. [Comparison with Legacy](#10-comparison-with-legacy)
+11. [SessionManager Lifecycle (Detailed)](#11-sessionmanager-lifecycle-detailed)
+12. [Artifact Saving (Detailed)](#12-artifact-saving-detailed)
+13. [CalibrationOrchestrator](#13-calibrationorchestrator)
+14. [measureConfig / Readout Macro Persistence](#14-measureconfig--readout-macro-persistence)
+15. [Known Gaps and Risks](#15-known-gaps-and-risks)
 
 ---
 
@@ -1413,6 +1420,326 @@ The notebook is the single authoritative site for:
 
 This eliminates hidden side effects and ensures every experimental
 configuration is visible, auditable, and reproducible.
+
+---
+
+## 11. SessionManager Lifecycle (Detailed)
+
+### 11.1 Initialization Sequence (`__init__`)
+
+**Module**: `qubox_v2/experiments/session.py:69-146`
+
+The constructor performs the following in order:
+
+1. **Create experiment directory** (line 81):
+   `experiment_path.mkdir(parents=True, exist_ok=True)`
+
+2. **Load hardware** (lines 86-88):
+   `ConfigEngine(hardware_path=.../hardware.json)` → parses into layered
+   config (hardware_base + hardware_extras).
+
+3. **QM connection** (lines 91-98):
+   `QuantumMachinesManager(host=qop_ip, ...)` — does NOT open a machine
+   yet; just creates the manager.
+
+4. **Hardware controller** (lines 100-104):
+   `HardwareController(qmm, config_engine)` — wraps QM connection.
+
+5. **Program runner + queue** (lines 107-112):
+   `ProgramRunner(qmm, controller, config_engine)` + `QueueManager`.
+
+6. **Pulse management** (lines 115-120):
+   - If `pulses.json` exists: `PulseOperationManager.from_json(path)`.
+   - Otherwise: empty `PulseOperationManager()`.
+   - Also creates empty `PulseRegistry()`.
+
+7. **Calibration store** (lines 122-126):
+   `CalibrationStore(cal_path, auto_save=auto_save_calibration)`.
+   - Path: `{experiment_path}/config/calibration.json`.
+   - Creates default file if absent.
+
+8. **External devices** (lines 129-138):
+   `DeviceManager(devices_path)` + optional `instantiate_all()`.
+
+9. **Physics attributes** (line 141):
+   `cQED_attributes.load(experiment_path)` from `cqed_params.json`.
+
+10. **Runtime settings** (line 142):
+    `_load_runtime_settings()` from `session_runtime.json` with fallback
+    to `cqed_params.json` deprecated fields.
+
+11. **Orchestrator** (line 144):
+    `CalibrationOrchestrator(self)` — wired with default patch rules.
+
+### 11.2 Open Sequence (`open()`)
+
+**Module**: `qubox_v2/experiments/session.py:331-337`
+
+1. **Merge pulses** (line 333):
+   `config_engine.merge_pulses(self.pulse_mgr)` — generates pulse overlay
+   from POM.
+
+2. **Open QM** (line 334):
+   `hardware.open_qm()` — passes compiled QM config to
+   `QuantumMachinesManager.open_qm()`.
+
+3. **Load measureConfig** (line 335):
+   `_load_measure_config()` → `measureMacro.load_json(path)` if
+   `measureConfig.json` exists.
+
+4. **Validate elements** (line 336):
+   `validate_runtime_elements(auto_map=True)` — checks element names
+   from `cqed_params.json` against live QM config.
+
+### 11.3 Close Sequence (`close()`)
+
+**Module**: `qubox_v2/experiments/session.py:482-502`
+
+1. `hardware.close()` — releases QM connection.
+2. Device handles disconnected (loop over `devices.handles`).
+3. `save_pulses()` → writes `pulses.json`.
+4. `save_runtime_settings()` → writes `session_runtime.json`.
+5. `calibration.save()` → writes `calibration.json`.
+
+Each step is wrapped in try/except to ensure teardown completes even if
+individual saves fail.
+
+---
+
+## 12. Artifact Saving (Detailed)
+
+### 12.1 Experiment Output Saving
+
+**Module**: `qubox_v2/experiments/session.py:296-326`
+
+`SessionManager.save_output(output, tag)`:
+
+- **Path**: `{experiment_path}/data/{tag}_{timestamp}.npz`
+- **Companion**: `{experiment_path}/data/{tag}_{timestamp}.meta.json`
+- **Filter**: `split_output_for_persistence(data)` from
+  `core/persistence_policy.py:35-68` — drops arrays > 8192 elements and
+  arrays whose key matches raw-like patterns (`raw`, `shot`, `buffer`,
+  `acq`, etc.).
+- **Side effect**: Also calls `save_attributes()` → writes `cqed_params.json`.
+
+### 12.2 Persistence Policy
+
+**Module**: `qubox_v2/core/persistence_policy.py`
+
+| Function | Purpose |
+|----------|---------|
+| `is_raw_like_key(key)` (line 18-21) | Returns `True` if key matches raw/shot/buffer pattern |
+| `should_persist_array(key, arr)` (line 24-32) | Returns `False` if raw-like or > 8192 elements |
+| `split_output_for_persistence(data)` (line 35-68) | Splits into `(arrays, meta, dropped)` |
+| `sanitize_mapping_for_json(data)` (line 89-108) | Recursively sanitize for JSON; drops large arrays |
+
+Dropped fields are recorded in `_persistence.dropped_fields` metadata.
+
+### 12.3 Calibration Run Artifacts
+
+**Module**: `qubox_v2/experiments/experiment_base.py:390-488`
+
+`guarded_calibration_commit()` always writes an artifact regardless of
+validation outcome:
+
+- **Path**: `{experiment_path}/artifacts/calibration_runs/{tag}_{timestamp}.json`
+- **Content**: timestamp, experiment name, validation errors, fit params,
+  metrics, run metadata.
+- **Phase A**: Artifact always saved.
+- **Phase B**: Calibration update applied only if all gates pass AND
+  `allow_inline_mutations=True`.
+
+### 12.4 Orchestrator Artifacts
+
+**Module**: `qubox_v2/calibration/orchestrator.py:226-252`
+
+`CalibrationOrchestrator.persist_artifact(artifact)`:
+
+- **Path**: `{experiment_path}/artifacts/runtime/{name}_{timestamp}.npz`
+- **Companion**: `.../{name}_{timestamp}.meta.json`
+- **Filter**: Same `split_output_for_persistence()` policy.
+
+### 12.5 Build-Hash Artifacts
+
+**Module**: `qubox_v2/core/artifact_manager.py:41-175`
+
+`ArtifactManager(experiment_path, build_hash)`:
+
+- **Directory**: `{experiment_path}/artifacts/{build_hash}/`
+- **Files**: `session_state.json`, `generated_config.json`, reports.
+- **Cleanup**: `cleanup_artifacts(keep_latest=10)` prunes old hash dirs.
+
+---
+
+## 13. CalibrationOrchestrator
+
+### 13.1 Overview
+
+**Module**: `qubox_v2/calibration/orchestrator.py`
+**Purpose**: Owns the full calibration lifecycle from experiment execution
+through artifact persistence to state mutation.
+
+```python
+class CalibrationOrchestrator:
+    def __init__(self, session, *, patch_rules=None) -> None
+```
+
+**Created by**: `SessionManager.__init__()` at `session.py:144`.
+**Patch rules**: `default_patch_rules(session)` from `patch_rules.py:246-274`.
+
+### 13.2 Lifecycle Methods
+
+| Method | Signature | Return | Side Effects |
+|--------|-----------|--------|--------------|
+| `run_experiment` | `(exp, **kwargs) -> Artifact` | `Artifact` | Executes experiment `run()` |
+| `analyze` | `(exp, artifact, **kwargs) -> CalibrationResult` | `CalibrationResult` | Calls experiment `analyze()` |
+| `build_patch` | `(result) -> Patch` | `Patch` | Applies patch rules |
+| `apply_patch` | `(patch, dry_run=False) -> dict` | Preview dict | Mutates calibration store + pulses |
+| `run_analysis_patch_cycle` | `(exp, *, run_kwargs, analyze_kwargs, persist_artifact, apply) -> dict` | Full result dict | Full lifecycle in one call |
+| `persist_artifact` | `(artifact) -> Path` | Data path | Writes `.npz` + `.meta.json` |
+
+### 13.3 Patch Operations
+
+`apply_patch()` (orchestrator.py:148-224) supports these operation types:
+
+| Op Type | Effect | Code Path |
+|---------|--------|-----------|
+| `SetCalibration` | Update calibration store via dotted path | `_set_calibration_path()` (line 270-302) |
+| `SetPulseParam` | Update pulse calibration entry | `_set_pulse_param()` (line 304-308) |
+| `SetMeasureWeights` | Register integration weights in POM or measureMacro | Lines 170-204 |
+| `PersistMeasureConfig` | Save measureMacro to JSON | Lines 206-210 |
+| `TriggerPulseRecompile` | Call `session.burn_pulses()` | Lines 212-214 |
+
+After all ops (non-dry-run): `session.calibration.save()` and
+`session.save_pulses()` (lines 217-218).
+
+### 13.4 Patch Rules
+
+**Module**: `qubox_v2/calibration/patch_rules.py`
+
+| Rule | Result Kind | What It Patches |
+|------|-------------|-----------------|
+| `PiAmpRule` | `pi_amp` | Reference pulse amplitude + primitive family (x180, y180, x90, etc.) |
+| `T1Rule` | `t1` | `coherence.<element>.T1` |
+| `T2RamseyRule` | `t2_ramsey` | `coherence.<element>.T2_ramsey` + optional frequency correction |
+| `T2EchoRule` | `t2_echo` | `coherence.<element>.T2_echo` |
+| `FrequencyRule` | `qubit_freq` / `storage_freq` | `frequencies.<element>.qubit_freq` + optional kappa |
+| `DragAlphaRule` | `drag_alpha` | `pulse_calibrations.<pulse>.drag_coeff` for all primitives |
+| `DiscriminationRule` | `ReadoutGEDiscrimination` | `discrimination.<element>.*` |
+| `ReadoutQualityRule` | `ReadoutButterflyMeasurement` | `readout_quality.<element>.*` |
+| `WeightRegistrationRule` | Any (with metadata) | Promotes proposed ops from analysis metadata |
+
+Default rule mapping: `default_patch_rules(session)` (patch_rules.py:246-274).
+
+---
+
+## 14. measureConfig / Readout Macro Persistence
+
+### 14.1 The measureMacro Singleton
+
+**Module**: `qubox_v2/programs/macros/measure.py`
+**Type**: Module-level singleton instance.
+
+The `measureMacro` manages:
+
+- **Current pulse operation** binding (element, op, pulse, length, I/Q
+  waveform names, integration weight mapping).
+- **Demodulation config** (dual_demod.full, weight_len).
+- **Discrimination params** (threshold, angle, rotated/unrotated blob
+  centroids, sigma, fidelity).
+- **Quality params** (F, Q, V, t01, t10, confusion matrix, transition
+  matrix, affine_n).
+- **Post-selection config** (policy, blob radii, exclusivity).
+- **State stack** for push/restore snapshots.
+
+### 14.2 JSON Persistence
+
+**Format version**: 5 (`_version` field).
+
+**Save**: `measureMacro.save_json(path)` → writes full state snapshot.
+**Load**: `measureMacro.load_json(path)` → restores from JSON.
+
+**When saved**:
+- `SessionManager.override_readout_operation(persist_measure_config=True)`
+  (session.py:451-453).
+- `CalibrationOrchestrator.apply_patch()` with `PersistMeasureConfig` op
+  (orchestrator.py:206-210).
+- `CalibrateReadoutFull` pipeline (direct calls in readout.py).
+
+**When loaded**:
+- `SessionManager.open()` → `_load_measure_config()` (session.py:335,
+  465-477).
+
+### 14.3 How Readout Values Flow into Downstream Experiments
+
+1. **measureMacro** is a module-level singleton imported by all QUA
+   program factories via `from ..programs.macros.measure import measureMacro`.
+
+2. Programs call `measureMacro.measure(...)` which builds the QUA
+   `measure()` statement using the current discrimination params.
+
+3. The threshold and angle from `measureMacro._ro_disc_params` are used
+   for real-time state discrimination in QUA programs.
+
+4. Experiments like `AllXY` use `measureMacro` confusion matrix for
+   error correction (via `apply_affine_correction()`).
+
+5. The integration weights referenced in `measureMacro._int_weights_mapping`
+   must exist in the POM (registered during readout calibration).
+
+### 14.4 Known Gap: Dual-Truth Problem
+
+Discrimination params exist in both:
+
+- `calibration.json` → `discrimination.<element>.*`
+  (canonical typed store)
+- `measureConfig.json` → `current.ro_disc_params.*`
+  (runtime macro state)
+
+These can diverge.  See `STALE_CALIBRATION_RISK_REPORT.md` Risk R3.
+
+---
+
+## 15. Known Gaps and Risks
+
+### 15.1 No Device Identity
+
+There is no `device_id`, `cooldown_id`, or `wiring_revision` in any
+config file.  The "device" is an opaque filesystem path.
+See `docs/audit/DEVICE_COOLDOWN_CALIBRATION_API.md` Section 1.
+
+### 15.2 No Cooldown Scoping
+
+Calibrations from previous cooldowns are silently reused.
+See `docs/audit/STALE_CALIBRATION_RISK_REPORT.md` Risk R1.
+
+### 15.3 No Hardware-Calibration Coupling
+
+Changes to `hardware.json` do not invalidate `calibration.json`.
+See `docs/audit/STALE_CALIBRATION_RISK_REPORT.md` Risk R2.
+
+### 15.4 Dual-Truth Stores
+
+Discrimination params and frequencies exist in multiple files without
+enforced sync.
+See `docs/audit/PATHS_AND_OWNERSHIP.md` Observations 1 and 2.
+
+### 15.5 Direct Calibration Mutation in analyze()
+
+Several experiment `analyze()` methods directly mutate the calibration
+store, bypassing the state machine and orchestrator.
+See `docs/audit/LEAKS.md` Section A.
+
+### 15.6 Non-Transactional Session Close
+
+`SessionManager.close()` writes multiple files sequentially without
+transactional guarantees.
+See `docs/audit/STALE_CALIBRATION_RISK_REPORT.md` Risk R9.
+
+### 15.7 Modularity Roadmap
+
+Concrete proposals for device/cooldown scoping are documented in
+`docs/audit/MODULARITY_RECOMMENDATIONS.md`.
 
 ---
 

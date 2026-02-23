@@ -120,13 +120,42 @@ class ReadoutConfig:
     ge_kwargs: dict = field(default_factory=dict)
     bfly_kwargs: dict = field(default_factory=dict)
 
+    # ------------------------------------------------------------
+    # Explicit config aliases / controls (legacy-style naming)
+    # ------------------------------------------------------------
+    # Aliases (when set) override the corresponding canonical fields.
+    measure_op: str | None = None
+    n_samples: int | None = None
+
+    # Explicit behavior controls
+    update_weights: bool = True
+    update_threshold: bool = True
+    rotation_method: str = "optimal"
+    weight_extraction_method: str = "legacy_ge_diff_norm"
+    histogram_fitting: str = "two_state_discriminator"
+    threshold_extraction: str = "legacy_discriminator"
+    overwrite_policy: str = "override"
+
+    # Explicit persistence controls
+    save_to_config: bool = True
+    save_calibration_json: bool = True
+    save_calibration_db: bool = False
+    save_measure_config: bool = True
+    save_session_state: bool = False
+
     def validate(self) -> None:
         """Raise :class:`ValueError` if the configuration is invalid."""
+        eff_drive_frequency = self.drive_frequency
+        eff_n_samples_disc = int(self.n_samples) if self.n_samples is not None else self.n_samples_disc
+        eff_ro_op = self.measure_op if self.measure_op is not None else self.ro_op
+
+        if not eff_ro_op:
+            raise ValueError("ro_op/measure_op is required")
         if self.drive_frequency is None:
             raise ValueError("drive_frequency is required")
-        if self.n_samples_disc < self.min_samples_disc:
+        if eff_n_samples_disc < self.min_samples_disc:
             raise ValueError(
-                f"n_samples_disc ({self.n_samples_disc}) < "
+                f"n_samples_disc ({eff_n_samples_disc}) < "
                 f"min_samples_disc ({self.min_samples_disc})"
             )
         if self.max_iterations < 1:
@@ -135,3 +164,30 @@ class ReadoutConfig:
             raise ValueError(
                 f"cv_split_ratio must be in [0, 1), got {self.cv_split_ratio}"
             )
+        if self.rotation_method not in {"optimal"}:
+            raise ValueError(
+                f"rotation_method={self.rotation_method!r} not supported; only 'optimal' is valid"
+            )
+        if self.weight_extraction_method not in {"legacy_ge_diff_norm"}:
+            raise ValueError(
+                "weight_extraction_method must be 'legacy_ge_diff_norm' for parity"
+            )
+        if self.histogram_fitting not in {"two_state_discriminator"}:
+            raise ValueError(
+                "histogram_fitting must be 'two_state_discriminator' for parity"
+            )
+        if self.threshold_extraction not in {"legacy_discriminator"}:
+            raise ValueError(
+                "threshold_extraction must be 'legacy_discriminator' for parity"
+            )
+        if self.overwrite_policy not in {"override", "error_if_exists"}:
+            raise ValueError(
+                f"overwrite_policy={self.overwrite_policy!r} must be 'override' or 'error_if_exists'"
+            )
+        _ = eff_drive_frequency
+
+    def resolved_ro_op(self) -> str:
+        return self.measure_op if self.measure_op is not None else self.ro_op
+
+    def resolved_n_samples_disc(self) -> int:
+        return int(self.n_samples) if self.n_samples is not None else int(self.n_samples_disc)

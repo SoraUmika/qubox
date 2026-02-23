@@ -47,6 +47,7 @@ from .readout import (
     ReadoutWeightsOptimization,
     ReadoutButterflyMeasurement,
     CalibrateReadoutFull,
+    CalibrationReadoutFull,
     ReadoutAmpLenOpt,
 )
 from .readout_config import ReadoutConfig
@@ -71,6 +72,7 @@ __all__ = [
     "ReadoutWeightsOptimization",
     "ReadoutButterflyMeasurement",
     "CalibrateReadoutFull",
+    "CalibrationReadoutFull",
     "ReadoutAmpLenOpt",
     "ReadoutConfig",
     "AllXY",

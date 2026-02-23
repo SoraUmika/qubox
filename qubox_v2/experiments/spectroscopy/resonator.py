@@ -78,14 +78,34 @@ class ResonatorSpectroscopy(ExperimentBase):
             metrics["f0"] = fit.params["f0"]
             metrics["kappa"] = fit.params["kappa"]
 
-        analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics)
+        metadata: dict[str, Any] = {
+            "calibration_kind": "resonator_freq",
+            "units": {"f0": "Hz", "f0_MHz": "MHz", "kappa": "Hz"},
+        }
+        if fit.params:
+            metrics["f0_MHz"] = float(fit.params["f0"] / 1e6)
 
-        if update_calibration and self.calibration_store and fit.params:
-            self.calibration_store.set_frequencies(
-                self.attr.ro_el,
-                lo_freq=self.get_readout_lo(),
-                if_freq=fit.params["f0"] - self.get_readout_lo(),
-            )
+        if update_calibration and fit.params:
+            lo_freq = float(self.get_readout_lo())
+            if_freq = float(fit.params["f0"] - lo_freq)
+            metadata.setdefault("proposed_patch_ops", []).extend([
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": f"frequencies.{self.attr.ro_el}.lo_freq",
+                        "value": lo_freq,
+                    },
+                },
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": f"frequencies.{self.attr.ro_el}.if_freq",
+                        "value": if_freq,
+                    },
+                },
+            ])
+
+        analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics, metadata=metadata)
 
         return analysis
 
@@ -276,8 +296,15 @@ class ResonatorSpectroscopyX180(ExperimentBase):
         )
 
         if update_calibration and self.calibration_store and "chi" in metrics:
-            self.calibration_store.set_frequencies(
-                self.attr.ro_el, chi=metrics["chi"],
+            self.guarded_calibration_commit(
+                analysis=analysis,
+                run_result=result,
+                calibration_tag="resonator_spectroscopy_x180",
+                require_fit=False,
+                required_metrics={"chi": (None, None)},
+                apply_update=lambda: self.calibration_store.set_frequencies(
+                    self.attr.ro_el, chi=metrics["chi"],
+                ),
             )
 
         return analysis
@@ -450,9 +477,16 @@ class ReadoutFrequencyOptimization(ExperimentBase):
 
         if update_calibration and self.calibration_store and "best_freq" in metrics:
             lo = self.get_readout_lo()
-            self.calibration_store.set_frequencies(
-                self.attr.ro_el, lo_freq=lo,
-                if_freq=metrics["best_freq"] - lo,
+            self.guarded_calibration_commit(
+                analysis=analysis,
+                run_result=result,
+                calibration_tag="readout_frequency_optimization",
+                require_fit=False,
+                required_metrics={"best_freq": (None, None)},
+                apply_update=lambda: self.calibration_store.set_frequencies(
+                    self.attr.ro_el, lo_freq=lo,
+                    if_freq=metrics["best_freq"] - lo,
+                ),
             )
 
         return analysis

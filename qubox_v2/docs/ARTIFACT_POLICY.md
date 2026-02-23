@@ -171,3 +171,33 @@ The following must never be placed in the `artifacts/` directory:
 | Calibration history | Permanent | Never |
 
 Cleanup is advisory, not enforced. Users may keep all artifacts if disk space permits.
+
+---
+
+## 8. Known Gaps / Risks (2026-02-22 Audit)
+
+### 8.1 No Cooldown Scoping in Artifact Paths
+
+Artifacts are organized by build hash, but build hashes are not cooldown-aware.
+Two sequential cooldowns with identical config files produce the same hash,
+making artifacts from different cooldowns indistinguishable.
+
+**Recommended fix**: Include `cooldown_id` in the build-hash salt.
+See `docs/audit/MODULARITY_RECOMMENDATIONS.md` Phase 1.
+
+### 8.2 Calibration Run Artifacts Not Linked to Build Hash
+
+Calibration run artifacts (`artifacts/calibration_runs/`) are stored by
+timestamp only, not under a build-hash directory.  This means they cannot
+be automatically associated with the session state that produced them.
+
+**Recommendation**: Either move calibration run artifacts under the build-hash
+directory, or embed the build hash in the artifact metadata.
+
+### 8.3 Raw Shot-Level Array Filtering
+
+The persistence policy (`core/persistence_policy.py`) correctly filters large
+raw arrays (> 8192 elements) and raw-like keys from JSON persistence.  However,
+`.npz` companion files may still contain large arrays.  This is by design
+(compressed binary is efficient), but the policy should be documented more
+explicitly for users who expect all data to be in the `.meta.json`.

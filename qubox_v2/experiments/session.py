@@ -36,6 +36,7 @@ from ..calibration.store import CalibrationStore
 from ..analysis.cQED_attributes import cQED_attributes
 from ..analysis.output import Output
 from ..core.persistence_policy import split_output_for_persistence
+from ..calibration.orchestrator import CalibrationOrchestrator
 
 _logger = get_logger(__name__)
 
@@ -139,6 +140,8 @@ class SessionManager:
         # --- 7. Experiment attributes (cQED parameters) ---
         self.attributes = self._load_attributes()
         self._runtime_settings = self._load_runtime_settings()
+        self.allow_inline_mutations = False
+        self.orchestrator = CalibrationOrchestrator(self)
 
         _logger.info("SessionManager ready.")
 

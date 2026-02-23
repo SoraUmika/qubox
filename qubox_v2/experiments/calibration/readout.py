@@ -548,27 +548,50 @@ class ReadoutGEDiscrimination(ExperimentBase):
         # Build rotated integration weights if run() stored params
         if hasattr(self, "_run_params") and "angle" in metrics:
             apply = self._run_params.get("apply_rotated_weights", True)
+            allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
             if apply:
-                try:
-                    self._build_rotated_weights(metrics)
-                    if self._run_params.get("update_measure_macro", False):
-                        self._apply_rotated_measure_macro(metrics)
-                        if self._run_params.get("persist", False):
-                            self._persist_measure_macro_state()
-                    _logger.info("Rotated integration weights computed AND applied")
-                    # Post-check: validate weights are present in config
-                    validation = self.verify_rotated_weights()
-                    metadata["rotated_weights_validation"] = validation
-                    if validation.get("all_valid"):
-                        _logger.info("Rotated weights validation PASSED")
-                    else:
-                        _logger.warning(
-                            "Rotated weights validation FAILED: %s",
-                            validation.get("errors", []),
+                if allow_inline:
+                    try:
+                        self._build_rotated_weights(metrics)
+                        if self._run_params.get("update_measure_macro", False):
+                            self._apply_rotated_measure_macro(metrics)
+                            if self._run_params.get("persist", False):
+                                self._persist_measure_macro_state()
+                        _logger.info("Rotated integration weights computed AND applied")
+                        # Post-check: validate weights are present in config
+                        validation = self.verify_rotated_weights()
+                        metadata["rotated_weights_validation"] = validation
+                        if validation.get("all_valid"):
+                            _logger.info("Rotated weights validation PASSED")
+                        else:
+                            _logger.warning(
+                                "Rotated weights validation FAILED: %s",
+                                validation.get("errors", []),
+                            )
+                    except Exception as exc:
+                        _logger.warning("Rotated weight construction failed: %s", exc)
+                        warnings.warn(f"Rotated weight construction failed: {exc}")
+                else:
+                    metadata.setdefault("proposed_patch_ops", []).extend([
+                        {
+                            "op": "SetMeasureWeights",
+                            "payload": {
+                                "element": self._run_params.get("readout_element"),
+                                "operation": self._run_params.get("measure_op"),
+                                "weights": "rotated_from_angle",
+                                "angle": metrics.get("angle"),
+                            },
+                        },
+                        {
+                            "op": "TriggerPulseRecompile",
+                            "payload": {"include_volatile": True},
+                        },
+                    ])
+                    if self._run_params.get("persist", False):
+                        metadata.setdefault("proposed_patch_ops", []).append(
+                            {"op": "PersistMeasureConfig", "payload": {}}
                         )
-                except Exception as exc:
-                    _logger.warning("Rotated weight construction failed: %s", exc)
-                    warnings.warn(f"Rotated weight construction failed: {exc}")
+                    _logger.info("Strict mode: rotated weight/macro updates emitted as patch intent")
             else:
                 _logger.info(
                     "Rotated integration weights computed (angle=%.4f rad) "
@@ -579,16 +602,24 @@ class ReadoutGEDiscrimination(ExperimentBase):
         # Auto-update post-selection config (legacy parity: auto_update_postsel)
         if hasattr(self, "_run_params") and self._run_params.get("auto_update_postsel", False):
             if all(k in metrics for k in ("threshold", "rot_mu_g", "rot_mu_e")):
-                try:
-                    blob_k_g = self._run_params.get("blob_k_g", 2.0)
-                    blob_k_e = self._run_params.get("blob_k_e", blob_k_g)
-                    ps_cfg = PostSelectionConfig.from_discrimination_results(
-                        metrics, blob_k_g=blob_k_g, blob_k_e=blob_k_e,
-                    )
-                    measureMacro.set_post_select_config(ps_cfg)
-                    _logger.info("Post-selection config updated from GE discrimination")
-                except Exception as exc:
-                    _logger.warning("Failed to build PostSelectionConfig: %s", exc)
+                allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
+                if allow_inline:
+                    try:
+                        blob_k_g = self._run_params.get("blob_k_g", 2.0)
+                        blob_k_e = self._run_params.get("blob_k_e", blob_k_g)
+                        ps_cfg = PostSelectionConfig.from_discrimination_results(
+                            metrics, blob_k_g=blob_k_g, blob_k_e=blob_k_e,
+                        )
+                        measureMacro.set_post_select_config(ps_cfg)
+                        _logger.info("Post-selection config updated from GE discrimination")
+                    except Exception as exc:
+                        _logger.warning("Failed to build PostSelectionConfig: %s", exc)
+                else:
+                    metadata.setdefault("diagnostics", "")
+                    metadata["diagnostics"] = (
+                        (metadata["diagnostics"] + " | ") if metadata["diagnostics"] else ""
+                    ) + "Strict mode: skipped inline post-selection config update"
+                    _logger.info("Strict mode: skipped inline post-selection config update")
 
         if update_calibration and self.calibration_store and "fidelity" in metrics:
             min_fidelity = float(kw.get("min_fidelity", 70.0))
@@ -1207,13 +1238,38 @@ class ReadoutWeightsOptimization(ExperimentBase):
         # Register weights if run() stored params
         if hasattr(self, "_run_params"):
             try:
-                self._register_optimized_weights(
-                    seg_cosine_cos, seg_cosine_sin,
-                    seg_sine_cos, seg_sine_sin,
-                    seg_minus_sin_cos, seg_minus_sin_sin,
-                    div_clks,
-                )
-                _logger.info("Optimised segmented weights registered in PulseOperationManager")
+                allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
+                if allow_inline:
+                    self._register_optimized_weights(
+                        seg_cosine_cos, seg_cosine_sin,
+                        seg_sine_cos, seg_sine_sin,
+                        seg_minus_sin_cos, seg_minus_sin_sin,
+                        div_clks,
+                    )
+                    _logger.info("Optimised segmented weights registered in PulseOperationManager")
+                else:
+                    params = self._run_params
+                    opt_cos_label = f"opt_{params['cos_w_key']}"
+                    opt_sin_label = f"opt_{params['sin_w_key']}"
+                    opt_m_sin_label = f"opt_{params['m_sin_w_key']}"
+                    metadata.setdefault("proposed_patch_ops", []).append(
+                        {
+                            "op": "SetMeasureWeights",
+                            "payload": {
+                                "element": self.attr.ro_el,
+                                "operation": params.get("ro_op"),
+                                "weights": {
+                                    opt_cos_label: {"cos": seg_cosine_cos, "sin": seg_cosine_sin},
+                                    opt_sin_label: {"cos": seg_sine_cos, "sin": seg_sine_sin},
+                                    opt_m_sin_label: {"cos": seg_minus_sin_cos, "sin": seg_minus_sin_sin},
+                                },
+                            },
+                        }
+                    )
+                    metadata.setdefault("proposed_patch_ops", []).append(
+                        {"op": "TriggerPulseRecompile", "payload": {"include_volatile": True}}
+                    )
+                    _logger.info("Strict mode: optimized weight registration emitted as patch intent")
             except Exception as exc:
                 _logger.error("Weight registration failed: %s", exc)
                 metadata["diagnostics"] = f"Weight registration failed: {exc}"
@@ -1227,11 +1283,27 @@ class ReadoutWeightsOptimization(ExperimentBase):
 
         # Weight version tracking (Section 1D)
         if update_calibration and self.calibration_store:
-            self.calibration_store.store_weight_snapshot(
-                self.attr.ro_el,
-                {"ge_diff_norm_max": metrics["ge_diff_norm_max"],
-                 "trace_length": metrics["trace_length"]},
-            )
+            allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
+            if allow_inline:
+                self.calibration_store.store_weight_snapshot(
+                    self.attr.ro_el,
+                    {"ge_diff_norm_max": metrics["ge_diff_norm_max"],
+                     "trace_length": metrics["trace_length"]},
+                )
+            else:
+                metadata.setdefault("proposed_patch_ops", []).append(
+                    {
+                        "op": "SetCalibration",
+                        "payload": {
+                            "path": f"discrimination.{self.attr.ro_el}.weight_snapshot",
+                            "value": {
+                                "ge_diff_norm_max": metrics["ge_diff_norm_max"],
+                                "trace_length": metrics["trace_length"],
+                            },
+                        },
+                    }
+                )
+                _logger.info("Strict mode: weight snapshot emitted as patch intent")
 
         return AnalysisResult.from_run(result, metrics=metrics, metadata=metadata)
 
@@ -1707,20 +1779,35 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             )
 
         if hasattr(self, "_run_params") and self._run_params.get("update_measure_macro", False):
-            try:
-                payload: dict[str, Any] = {}
-                for key in ("alpha", "beta", "F", "Q", "V", "t01", "t10"):
+            allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
+            if allow_inline:
+                try:
+                    payload: dict[str, Any] = {}
+                    for key in ("alpha", "beta", "F", "Q", "V", "t01", "t10"):
+                        if key in metrics:
+                            payload[key] = metrics[key]
+                    if "confusion_matrix" in metrics:
+                        payload["confusion_matrix"] = metrics["confusion_matrix"]
+                    if "transition_matrix" in metrics:
+                        payload["transition_matrix"] = metrics["transition_matrix"]
+                    if payload:
+                        measureMacro._update_readout_quality(payload)
+                        _logger.info("measureMacro readout quality updated from butterfly analysis")
+                except Exception as exc:
+                    _logger.warning("Failed to update measureMacro readout quality: %s", exc)
+            else:
+                for key in ("F", "Q", "V", "t01", "t10"):
                     if key in metrics:
-                        payload[key] = metrics[key]
-                if "confusion_matrix" in metrics:
-                    payload["confusion_matrix"] = metrics["confusion_matrix"]
-                if "transition_matrix" in metrics:
-                    payload["transition_matrix"] = metrics["transition_matrix"]
-                if payload:
-                    measureMacro._update_readout_quality(payload)
-                    _logger.info("measureMacro readout quality updated from butterfly analysis")
-            except Exception as exc:
-                _logger.warning("Failed to update measureMacro readout quality: %s", exc)
+                        metadata.setdefault("proposed_patch_ops", []).append(
+                            {
+                                "op": "SetCalibration",
+                                "payload": {
+                                    "path": f"readout_quality.{self.attr.ro_el}.{key}",
+                                    "value": metrics.get(key),
+                                },
+                            }
+                        )
+                _logger.info("Strict mode: butterfly readout-quality updates emitted as patch intent")
 
         # T1 decay correction (Section 6D)
         if self.calibration_store and "F" in metrics:
@@ -1926,8 +2013,10 @@ class CalibrateReadoutFull(ExperimentBase):
                 bfly_kwargs=dict(bfly_kwargs or {}),
             )
 
+        cfg.validate()
+
         # Resolve positional ro_op / drive_frequency if not in config
-        eff_ro_op = cfg.ro_op
+        eff_ro_op = cfg.resolved_ro_op()
         eff_drive_freq = cfg.drive_frequency
         if ro_op is not None:
             eff_ro_op = ro_op
@@ -1972,14 +2061,15 @@ class CalibrateReadoutFull(ExperimentBase):
         if "update_measureMacro" in ge_kw and "update_measure_macro" not in ge_kw:
             ge_kw["update_measure_macro"] = ge_kw.pop("update_measureMacro")
 
-        ge_update_measure_macro = bool(ge_kw.pop("update_measure_macro", True))
-        ge_persist = bool(ge_kw.pop("persist", True))
+        ge_update_measure_macro = bool(ge_kw.pop("update_measure_macro", cfg.update_threshold))
+        ge_persist = bool(ge_kw.pop("persist", cfg.update_weights))
+        ge_apply_rotated_weights = bool(ge_kw.pop("apply_rotated_weights", cfg.update_weights))
         ge_n_samples_override = ge_kw.pop("n_samples", None)
 
         if "update_measureMacro" in bfly_kw and "update_measure_macro" not in bfly_kw:
             bfly_kw["update_measure_macro"] = bfly_kw.pop("update_measureMacro")
 
-        bfly_update_measure_macro = bool(bfly_kw.pop("update_measure_macro", True))
+        bfly_update_measure_macro = bool(bfly_kw.pop("update_measure_macro", cfg.update_threshold))
         bfly_n_samples_override = bfly_kw.pop("n_samples", None)
         bfly_max_trials_override = bfly_kw.pop("M0_MAX_TRIALS", cfg.M0_MAX_TRIALS)
 
@@ -2009,7 +2099,8 @@ class CalibrateReadoutFull(ExperimentBase):
                         n_disc, uncertainty,
                     )
 
-            ge_n_samples = int(ge_n_samples_override) if ge_n_samples_override is not None else int(n_disc)
+            cfg_samples_disc = cfg.resolved_n_samples_disc()
+            ge_n_samples = int(ge_n_samples_override) if ge_n_samples_override is not None else int(cfg_samples_disc if n_disc == cfg.n_samples_disc else n_disc)
 
             # Step 2: G/E discrimination
             _logger.info("Step 2: GE discrimination (n_samples=%d)", ge_n_samples)
@@ -2020,6 +2111,7 @@ class CalibrateReadoutFull(ExperimentBase):
                 n_samples=ge_n_samples,
                 base_weight_keys=(opt_cos_key, opt_sin_key, opt_m_sin_key),
                 update_measure_macro=ge_update_measure_macro,
+                apply_rotated_weights=ge_apply_rotated_weights,
                 persist=ge_persist,
                 burn_rot_weights=cfg.burn_rot_weights,
                 blob_k_g=cfg.blob_k_g,
@@ -2082,6 +2174,47 @@ class CalibrateReadoutFull(ExperimentBase):
         if len(iteration_results) > 1:
             results["iterations"] = iteration_results
             results["n_iterations"] = len(iteration_results)
+
+        # Explicit persistence policy (config driven)
+        if cfg.save_to_config:
+            allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
+            if not allow_inline:
+                _logger.info(
+                    "Strict mode: run() skipped inline persistence. "
+                    "Use CalibrationOrchestrator.apply_patch(...) for state updates."
+                )
+                return results
+            if cfg.save_calibration_json and self.calibration_store is not None:
+                try:
+                    self.calibration_store.save()
+                except Exception as exc:
+                    _logger.warning("Failed to save calibration.json: %s", exc)
+
+            if cfg.save_measure_config:
+                try:
+                    exp_path = Path(getattr(self._ctx, "experiment_path", "."))
+                    dst = exp_path / "config" / "measureConfig.json"
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    measureMacro.save_json(str(dst))
+                except Exception as exc:
+                    _logger.warning("Failed to save measureConfig.json: %s", exc)
+
+            if cfg.save_session_state:
+                try:
+                    save_pulses = getattr(self._ctx, "save_pulses", None)
+                    save_attributes = getattr(self._ctx, "save_attributes", None)
+                    if callable(save_pulses):
+                        save_pulses()
+                    if callable(save_attributes):
+                        save_attributes()
+                except Exception as exc:
+                    _logger.warning("Failed to save session-specific config state: %s", exc)
+
+            if cfg.save_calibration_db:
+                _logger.warning(
+                    "save_calibration_db=True requested, but readout pipeline does not "
+                    "produce Octave mixer DB updates; skipping calibration_db.json write."
+                )
 
         _logger.info("CalibrateReadoutFull pipeline complete")
         return results
@@ -2161,6 +2294,29 @@ class CalibrateReadoutFull(ExperimentBase):
             print(f"Iterations: {metrics['n_iterations']}")
 
         return None
+
+
+class CalibrationReadoutFull(CalibrateReadoutFull):
+    """Config-first wrapper for full readout calibration.
+
+    This class enforces explicit configuration through ``readoutConfig``
+    while delegating implementation to :class:`CalibrateReadoutFull`.
+    """
+
+    def run(
+        self,
+        readoutConfig: ReadoutConfig,
+        **kwargs: Any,
+    ) -> dict:
+        if readoutConfig is None:
+            raise ValueError("readoutConfig is required")
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs.keys()))
+            raise ValueError(
+                "CalibrationReadoutFull.run accepts only readoutConfig; "
+                f"unexpected kwargs: {unexpected}"
+            )
+        return super().run(config=readoutConfig)
 
 
 class ReadoutAmpLenOpt(ExperimentBase):

@@ -169,6 +169,7 @@ class PowerRabi(ExperimentBase):
                 pp.proc_attach("gains", gains),
             ],
         )
+        self._run_params = {"op": op}
         self.save_output(result.output, "powerRabi")
         return result
 
@@ -199,28 +200,31 @@ class PowerRabi(ExperimentBase):
         if fit.params:
             metrics["g_pi"] = fit.params["g_pi"]
 
-        analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics)
+        metadata: dict[str, Any] = {
+            "calibration_kind": "pi_amp",
+            "target_op": (self._run_params.get("op") if hasattr(self, "_run_params") else "x180"),
+            "units": {"g_pi": "a.u."},
+        }
 
-        if update_calibration and self.calibration_store and fit.params:
-            min_r2 = float(kw.get("min_r2", 0.80))
-            required = {
-                "g_pi": (float(np.min(gains)), float(np.max(gains))),
-            }
-
-            self.guarded_calibration_commit(
-                analysis=analysis,
-                run_result=result,
-                calibration_tag="power_rabi_x180",
-                min_r2=min_r2,
-                required_metrics=required,
-                extra_metadata={
-                    "sweep_min": float(np.min(gains)),
-                    "sweep_max": float(np.max(gains)),
-                },
-                apply_update=lambda: self.calibration_store.set_pulse_calibration(
-                    name="x180", amplitude=fit.params["g_pi"],
-                ),
+        if update_calibration and fit.params:
+            target_op = metadata["target_op"]
+            metadata.setdefault("proposed_patch_ops", []).append(
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": f"pulse_calibrations.{target_op}.amplitude",
+                        "value": float(fit.params["g_pi"]),
+                    },
+                }
             )
+            metadata.setdefault("proposed_patch_ops", []).append(
+                {
+                    "op": "TriggerPulseRecompile",
+                    "payload": {"include_volatile": True},
+                }
+            )
+
+        analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics, metadata=metadata)
 
         return analysis
 

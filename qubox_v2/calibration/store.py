@@ -61,6 +61,10 @@ class CalibrationStore:
         self._auto_save = auto_save
         self._data = self._load_or_create()
 
+    @property
+    def path(self) -> Path:
+        return self._path
+
     # ------------------------------------------------------------------
     # Load / create
     # ------------------------------------------------------------------
@@ -306,6 +310,15 @@ class CalibrationStore:
     def reload(self) -> None:
         """Reload from disk, discarding in-memory changes."""
         self._data = self._load_or_create()
+
+    def reload_from_dict(self, raw: dict[str, Any]) -> None:
+        """Replace in-memory state from a raw dict.
+
+        This is used by patch/orchestrator flows that stage batched mutations
+        before persisting.
+        """
+        self._data = CalibrationData.model_validate(raw)
+        self._touch()
 
     # ------------------------------------------------------------------
     # Internal

@@ -39631,7 +39631,7 @@
       "length": 16,
       "sigma": 2.6666666666666665,
       "drag_coeff": 0.0,
-      "anharmonicity": 255750000.0
+      "anharmonicity": -255750000.0
     }
   }
 }

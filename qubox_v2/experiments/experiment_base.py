@@ -311,6 +311,23 @@ class ExperimentBase:
 
     def save_output(self, output, tag: str = "") -> None:
         """Persist experiment output to disk."""
+        orchestrator = getattr(self._ctx, "orchestrator", None)
+        if orchestrator is not None:
+            try:
+                from ..calibration.contracts import Artifact
+                from datetime import datetime
+
+                data = dict(output) if hasattr(output, "items") else dict(output)
+                artifact = Artifact(
+                    name=tag or self.name,
+                    data=data,
+                    raw=None,
+                    meta={"timestamp": datetime.now().isoformat(), "source": self.name},
+                )
+                orchestrator.persist_artifact(artifact)
+                return
+            except Exception:
+                pass
         if hasattr(self._ctx, "save_output"):
             self._ctx.save_output(output, tag)
 
@@ -453,12 +470,22 @@ class ExperimentBase:
             )
             return False
 
-        apply_update()
+        allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
+        if allow_inline:
+            apply_update()
+            _logger.info(
+                "Calibration commit applied for %s. Artifact saved at %s",
+                calibration_tag, artifact_path,
+            )
+            return True
+
         _logger.info(
-            "Calibration commit applied for %s. Artifact saved at %s",
-            calibration_tag, artifact_path,
+            "Inline calibration mutation suppressed for %s (strict mode). "
+            "Artifact written at %s; orchestrator patch application required.",
+            calibration_tag,
+            artifact_path,
         )
-        return True
+        return False
 
     @property
     def calibration_store(self):

@@ -258,45 +258,50 @@ class DRAGCalibration(ExperimentBase):
         z_y180 = z_r180 * pi_rot
         z_y90 = z_r90 * pi_rot
 
-        # Register temporary volatile pulses
-        # Legacy parity: pass numpy arrays directly (not .tolist())
-        _tmp_pulses = [
-            PulseOp(
-                element=attr.qb_el, op="x180_tmp", pulse="x180_tmp_pulse",
-                type="control", length=rlen,
-                I_wf_name="gauss_r180_tmp_wf", Q_wf_name="drag_r180_tmp_wf",
-                I_wf=z_r180.real, Q_wf=z_r180.imag,
-            ),
-            PulseOp(
-                element=attr.qb_el, op="y180_tmp", pulse="y180_tmp_pulse",
-                type="control", length=rlen,
-                I_wf_name="y180_tmp_I_wf", Q_wf_name="y180_tmp_Q_wf",
-                I_wf=z_y180.real, Q_wf=z_y180.imag,
-            ),
-            PulseOp(
-                element=attr.qb_el, op="x90_tmp", pulse="x90_tmp_pulse",
-                type="control", length=rlen,
-                I_wf_name="gauss_r90_tmp_wf", Q_wf_name="drag_r90_tmp_wf",
-                I_wf=z_r90.real, Q_wf=z_r90.imag,
-            ),
-            PulseOp(
-                element=attr.qb_el, op="y90_tmp", pulse="y90_tmp_pulse",
-                type="control", length=rlen,
-                I_wf_name="y90_tmp_I_wf", Q_wf_name="y90_tmp_Q_wf",
-                I_wf=z_y90.real, Q_wf=z_y90.imag,
-            ),
-        ]
+        allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
+        if allow_inline:
+            # Register temporary volatile pulses
+            # Legacy parity: pass numpy arrays directly (not .tolist())
+            _tmp_pulses = [
+                PulseOp(
+                    element=attr.qb_el, op="x180_tmp", pulse="x180_tmp_pulse",
+                    type="control", length=rlen,
+                    I_wf_name="gauss_r180_tmp_wf", Q_wf_name="drag_r180_tmp_wf",
+                    I_wf=z_r180.real, Q_wf=z_r180.imag,
+                ),
+                PulseOp(
+                    element=attr.qb_el, op="y180_tmp", pulse="y180_tmp_pulse",
+                    type="control", length=rlen,
+                    I_wf_name="y180_tmp_I_wf", Q_wf_name="y180_tmp_Q_wf",
+                    I_wf=z_y180.real, Q_wf=z_y180.imag,
+                ),
+                PulseOp(
+                    element=attr.qb_el, op="x90_tmp", pulse="x90_tmp_pulse",
+                    type="control", length=rlen,
+                    I_wf_name="gauss_r90_tmp_wf", Q_wf_name="drag_r90_tmp_wf",
+                    I_wf=z_r90.real, Q_wf=z_r90.imag,
+                ),
+                PulseOp(
+                    element=attr.qb_el, op="y90_tmp", pulse="y90_tmp_pulse",
+                    type="control", length=rlen,
+                    I_wf_name="y90_tmp_I_wf", Q_wf_name="y90_tmp_Q_wf",
+                    I_wf=z_y90.real, Q_wf=z_y90.imag,
+                ),
+            ]
 
-        pm = self.pulse_mgr
-        for p in _tmp_pulses:
-            pm.register_pulse_op(p, override=True, persist=False)
+            pm = self.pulse_mgr
+            for p in _tmp_pulses:
+                pm.register_pulse_op(p, override=True, persist=False)
 
-        self.burn_pulses()
+            self.burn_pulses()
+            x180_op, x90_op, y180_op, y90_op = "x180_tmp", "x90_tmp", "y180_tmp", "y90_tmp"
+        else:
+            x180_op, x90_op, y180_op, y90_op = "x180", "x90", "y180", "y90"
 
         # Build QUA program using temporary ops
         prog = cQED_programs.drag_calibration_YALE(
             attr.qb_el, amps,
-            "x180_tmp", "x90_tmp", "y180_tmp", "y90_tmp",
+            x180_op, x90_op, y180_op, y90_op,
             attr.qb_therm_clks, n_avg,
         )
         result = self.run_program(
@@ -343,26 +348,49 @@ class DRAGCalibration(ExperimentBase):
 
         metrics["base_alpha"] = base_alpha
 
-        analysis = AnalysisResult.from_run(result, metrics=metrics)
+        metadata: dict[str, Any] = {
+            "calibration_kind": "drag_alpha",
+            "units": {"optimal_alpha": "a.u."},
+            "quality_gate_required": True,
+        }
 
-        if update_calibration and self.calibration_store:
-            alpha_lo = float(np.min(amps) * base_alpha) if len(amps) else None
-            alpha_hi = float(np.max(amps) * base_alpha) if len(amps) else None
-            self.guarded_calibration_commit(
-                analysis=analysis,
-                run_result=result,
-                calibration_tag="drag_calibration_x180",
-                require_fit=False,
-                required_metrics={"optimal_alpha": (alpha_lo, alpha_hi)},
-                apply_update=lambda: (
-                    self.calibration_store.set_pulse_calibration(
-                        name="ref_r180", drag_coeff=metrics["optimal_alpha"],
-                    ),
-                    self.calibration_store.set_pulse_calibration(
-                        name="x180", drag_coeff=metrics["optimal_alpha"],
-                    ),
-                ),
-            )
+        if update_calibration:
+            metadata.setdefault("proposed_patch_ops", []).extend([
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": "pulse_calibrations.ref_r180.drag_coeff",
+                        "value": float(metrics["optimal_alpha"]),
+                    },
+                },
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": "pulse_calibrations.x180.drag_coeff",
+                        "value": float(metrics["optimal_alpha"]),
+                    },
+                },
+            ])
+
+            if bool(kw.get("propagate_drag_to_primitives", True)):
+                for pulse_name in ("y180", "x90", "xn90", "y90", "yn90"):
+                    metadata.setdefault("proposed_patch_ops", []).append(
+                        {
+                            "op": "SetCalibration",
+                            "payload": {
+                                "path": f"pulse_calibrations.{pulse_name}.drag_coeff",
+                                "value": float(metrics["optimal_alpha"]),
+                            },
+                        }
+                    )
+                metadata.setdefault("proposed_patch_ops", []).append(
+                    {
+                        "op": "TriggerPulseRecompile",
+                        "payload": {"include_volatile": True},
+                    }
+                )
+
+        analysis = AnalysisResult.from_run(result, metrics=metrics, metadata=metadata)
 
         return analysis
 

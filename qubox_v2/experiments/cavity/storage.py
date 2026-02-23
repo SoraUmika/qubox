@@ -76,14 +76,32 @@ class StorageSpectroscopy(ExperimentBase):
             metrics["f_storage"] = fit.params["f0"]
             metrics["kappa"] = fit.params["kappa"]
 
-        analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics)
+        metadata: dict[str, Any] = {
+            "calibration_kind": "storage_freq",
+            "units": {"f_storage": "Hz", "f_storage_MHz": "MHz", "kappa": "Hz"},
+        }
+        if fit.params:
+            metrics["f_storage_MHz"] = float(fit.params["f0"] / 1e6)
 
-        if update_calibration and self.calibration_store and fit.params:
-            self.calibration_store.set_frequencies(
-                self.attr.st_el,
-                qubit_freq=fit.params["f0"],
-                kappa=fit.params["kappa"],
-            )
+        if update_calibration and fit.params:
+            metadata.setdefault("proposed_patch_ops", []).extend([
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": f"frequencies.{self.attr.st_el}.qubit_freq",
+                        "value": float(fit.params["f0"]),
+                    },
+                },
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": f"frequencies.{self.attr.st_el}.kappa",
+                        "value": float(fit.params["kappa"]),
+                    },
+                },
+            ])
+
+        analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics, metadata=metadata)
 
         return analysis
 
@@ -473,8 +491,15 @@ class StorageChiRamsey(ExperimentBase):
         analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics)
 
         if update_calibration and self.calibration_store and fit.params:
-            self.calibration_store.set_frequencies(
-                self.attr.st_el, chi=fit.params["chi"],
+            self.guarded_calibration_commit(
+                analysis=analysis,
+                run_result=result,
+                calibration_tag="storage_chi_ramsey",
+                require_fit=False,
+                required_metrics={"chi": (None, None)},
+                apply_update=lambda: self.calibration_store.set_frequencies(
+                    self.attr.st_el, chi=fit.params["chi"],
+                ),
             )
 
         return analysis

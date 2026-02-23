@@ -311,3 +311,54 @@ The state machine is **opt-in** during the transition period. Existing `update_c
 4. Calibration data from one element contaminating another element's section.
 5. A patch applied against stale data (old_value mismatch).
 6. Calibration history being truncated, edited, or rewritten.
+
+---
+
+## 9. Known Gaps / Risks (2026-02-22 Audit)
+
+The following gaps were identified during the device/cooldown/calibration audit.
+They represent deviations from the policy above that exist in the current codebase.
+
+### 9.1 No Cooldown Scoping
+
+`calibration.json` has no `cooldown_id` or `device_id` field.  Calibrations
+from a previous cooldown are silently loaded on session start without any
+freshness check.  This violates the spirit of the "never auto-update" principle
+because the user is implicitly reusing stale data without explicit confirmation.
+
+**Reference**: `docs/audit/STALE_CALIBRATION_RISK_REPORT.md` Risk R1.
+
+### 9.2 No Hardware-Calibration Coupling
+
+Changing `hardware.json` (LO frequency, port assignments) does not invalidate
+`calibration.json`.  There is no `wiring_revision` or `config_hash` embedded
+in the calibration file to detect wiring drift.
+
+**Reference**: `docs/audit/STALE_CALIBRATION_RISK_REPORT.md` Risk R2.
+
+### 9.3 Direct Calibration Mutation in analyze()
+
+Several experiment `analyze()` methods call `calibration_store.set_*()` directly,
+bypassing the state machine and `CalibrationOrchestrator`.  This is documented
+in `docs/audit/LEAKS.md` Section A (24 instances).  Notably:
+
+- `ResonatorSpectroscopy.analyze()` → `set_frequencies()`
+- `ReadoutGEDiscrimination.analyze()` → `set_discrimination()` + mutates `measureMacro`
+- `CalibrateReadoutFull.run()` → calls `calibration_store.save()`, `measureMacro.save_json()`
+
+These direct mutations circumvent the validation gates required by this policy.
+
+### 9.4 Dual-Truth for Discrimination Params
+
+Discrimination parameters (threshold, angle, fidelity, confusion matrix) exist in
+both `calibration.json` and `measureConfig.json` with no enforced sync mechanism.
+A calibration update to one store does not automatically propagate to the other.
+
+**Reference**: `docs/audit/PATHS_AND_OWNERSHIP.md` Observation 1.
+
+### 9.5 Resolution Plan
+
+See `docs/audit/MODULARITY_RECOMMENDATIONS.md` for the phased plan:
+- Phase 1: Add context metadata to calibration files, validate on load.
+- Phase 2: Cooldown-scoped directory layout.
+- Phase 3: Multi-device selection UX.
