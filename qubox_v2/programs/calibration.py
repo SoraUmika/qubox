@@ -2,11 +2,11 @@
 =================================
 Gate-calibration QUA program factories (AllXY, DRAG, RB, pulse trains).
 
-Re-exports calibration functions from ``cQED_programs``::
+Imports calibration functions from ``builders`` sub-modules::
 
     from qubox_v2.programs.calibration import all_xy, randomized_benchmarking
 """
-from .cQED_programs import (
+from .builders.calibration import (
     all_xy,
     randomized_benchmarking,
     drag_calibration_YALE,

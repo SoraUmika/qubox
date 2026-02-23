@@ -775,7 +775,11 @@ class ReadoutGEDiscrimination(ExperimentBase):
             self.burn_pulses(include_volatile=True)
 
     def _apply_rotated_measure_macro(self, metrics: dict) -> None:
-        """Update measureMacro with legacy-compatible rotated labels."""
+        """Update measureMacro with legacy-compatible rotated labels.
+
+        Discrimination params are proposed via ``proposed_patch_ops`` in the
+        analysis metadata rather than mutated directly on the singleton.
+        """
         params = self._run_params
         pulse_info = params["pulse_info"]
         measure_op = params["measure_op"]
@@ -803,19 +807,36 @@ class ReadoutGEDiscrimination(ExperimentBase):
                     weight_len=pulse_info.length,
                 )
                 mm.set_drive_frequency(drive_frequency)
-                if hasattr(mm, "_update_readout_discrimination"):
-                    mm._update_readout_discrimination(metrics)
             _logger.info("measureMacro updated with rotated readout weights")
         except Exception as exc:
             _logger.warning("Failed to update measureMacro with rotated weights: %s", exc)
 
     def _persist_measure_macro_state(self) -> None:
-        """Persist measureMacro so rotated-weight config reloads on future sessions."""
+        """Persist measureMacro via CalibrationOrchestrator patch application.
+
+        Uses the ``PersistMeasureConfig`` patch operation rather than
+        writing ``measureConfig.json`` directly from experiment code.
+        """
+        if hasattr(self, "_ctx") and hasattr(self._ctx, "calibration_orchestrator"):
+            try:
+                from ...calibration.contracts import Patch
+                patch = Patch(reason="persist_measure_macro_state")
+                patch.add("PersistMeasureConfig")
+                self._ctx.calibration_orchestrator.apply_patch(patch)
+                _logger.info("Persisted measureMacro state via orchestrator patch")
+            except Exception as exc:
+                _logger.warning("Failed to persist measureMacro via orchestrator: %s — falling back to direct save", exc)
+                self._persist_measure_macro_state_direct()
+        else:
+            self._persist_measure_macro_state_direct()
+
+    def _persist_measure_macro_state_direct(self) -> None:
+        """Fallback: persist measureMacro directly (legacy path)."""
         exp_path = Path(getattr(self._ctx, "experiment_path", "."))
         dst = exp_path / "config" / "measureConfig.json"
         dst.parent.mkdir(parents=True, exist_ok=True)
         measureMacro.save_json(str(dst))
-        _logger.info("Persisted measureMacro state to %s", dst)
+        _logger.info("Persisted measureMacro state to %s (direct)", dst)
 
     def verify_rotated_weights(self) -> dict[str, Any]:
         """Validate that rotated integration weights are properly applied.
@@ -1779,35 +1800,36 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             )
 
         if hasattr(self, "_run_params") and self._run_params.get("update_measure_macro", False):
-            allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
-            if allow_inline:
-                try:
-                    payload: dict[str, Any] = {}
-                    for key in ("alpha", "beta", "F", "Q", "V", "t01", "t10"):
-                        if key in metrics:
-                            payload[key] = metrics[key]
-                    if "confusion_matrix" in metrics:
-                        payload["confusion_matrix"] = metrics["confusion_matrix"]
-                    if "transition_matrix" in metrics:
-                        payload["transition_matrix"] = metrics["transition_matrix"]
-                    if payload:
-                        measureMacro._update_readout_quality(payload)
-                        _logger.info("measureMacro readout quality updated from butterfly analysis")
-                except Exception as exc:
-                    _logger.warning("Failed to update measureMacro readout quality: %s", exc)
-            else:
-                for key in ("F", "Q", "V", "t01", "t10"):
-                    if key in metrics:
-                        metadata.setdefault("proposed_patch_ops", []).append(
-                            {
-                                "op": "SetCalibration",
-                                "payload": {
-                                    "path": f"readout_quality.{self.attr.ro_el}.{key}",
-                                    "value": metrics.get(key),
-                                },
-                            }
-                        )
-                _logger.info("Strict mode: butterfly readout-quality updates emitted as patch intent")
+            # Emit proposed patch ops for readout quality update on measureMacro.
+            # The CalibrationOrchestrator will apply these via SetMeasureQuality
+            # rather than directly mutating the singleton from analyze().
+            quality_payload: dict[str, Any] = {}
+            for key in ("alpha", "beta", "F", "Q", "V", "t01", "t10"):
+                if key in metrics:
+                    quality_payload[key] = metrics[key]
+            if "confusion_matrix" in metrics:
+                quality_payload["confusion_matrix"] = metrics["confusion_matrix"]
+            if "transition_matrix" in metrics:
+                quality_payload["transition_matrix"] = metrics["transition_matrix"]
+            if quality_payload:
+                metadata.setdefault("proposed_patch_ops", []).append(
+                    {
+                        "op": "SetMeasureQuality",
+                        "payload": quality_payload,
+                    }
+                )
+            for key in ("F", "Q", "V", "t01", "t10"):
+                if key in metrics:
+                    metadata.setdefault("proposed_patch_ops", []).append(
+                        {
+                            "op": "SetCalibration",
+                            "payload": {
+                                "path": f"readout_quality.{self.attr.ro_el}.{key}",
+                                "value": metrics.get(key),
+                            },
+                        }
+                    )
+            _logger.info("Butterfly readout-quality updates emitted as patch ops")
 
         # T1 decay correction (Section 6D)
         if self.calibration_store and "F" in metrics:
@@ -2192,10 +2214,16 @@ class CalibrateReadoutFull(ExperimentBase):
 
             if cfg.save_measure_config:
                 try:
-                    exp_path = Path(getattr(self._ctx, "experiment_path", "."))
-                    dst = exp_path / "config" / "measureConfig.json"
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    measureMacro.save_json(str(dst))
+                    if hasattr(self._ctx, "calibration_orchestrator"):
+                        from ...calibration.contracts import Patch
+                        patch = Patch(reason="CalibrateReadoutFull_persist_final")
+                        patch.add("PersistMeasureConfig")
+                        self._ctx.calibration_orchestrator.apply_patch(patch)
+                    else:
+                        exp_path = Path(getattr(self._ctx, "experiment_path", "."))
+                        dst = exp_path / "config" / "measureConfig.json"
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        measureMacro.save_json(str(dst))
                 except Exception as exc:
                     _logger.warning("Failed to save measureConfig.json: %s", exc)
 

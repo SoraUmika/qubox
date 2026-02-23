@@ -1,9 +1,16 @@
 # qubox\_v2 — API Reference & Architecture Guide
 
-**Version**: 1.3.0
+**Version**: 1.4.0
 **Date**: 2026-02-22
 **Status**: Governing Document
 **Changelog**:
+- v1.4.0 — Implemented macro refactor (Phases 1-3). Sections 13, 14, 15,
+  20-22 updated to reflect: (a) cQED\_programs split into 8 builder
+  sub-modules under `programs/builders/`, (b) new orchestrator patch ops
+  `SetMeasureDiscrimination` / `SetMeasureQuality`, (c) `sync_from_calibration()`
+  resolving the dual-truth problem, (d) analyze() purity enforced (no direct
+  macro mutation), (e) `SessionManager.close()` now persists measureConfig.json,
+  (f) `ExperimentBase.get_confusion_matrix()` added.
 - v1.3.0 — Added sections 20-22: Macro System Architecture (measureMacro,
   sequenceMacros, cQED_programs), Experiment ↔ Macro Interaction Rules,
   Macro State Ownership & Persistence Boundaries.
@@ -1621,11 +1628,15 @@ class CalibrationOrchestrator:
 | `SetCalibration` | Update calibration store via dotted path | `_set_calibration_path()` (line 270-302) |
 | `SetPulseParam` | Update pulse calibration entry | `_set_pulse_param()` (line 304-308) |
 | `SetMeasureWeights` | Register integration weights in POM or measureMacro | Lines 170-204 |
+| `SetMeasureDiscrimination` | Update `measureMacro._ro_disc_params` via `_update_readout_discrimination()` | Patch-only entry point (v1.4.0) |
+| `SetMeasureQuality` | Update `measureMacro._ro_quality_params` via `_update_readout_quality()` | Patch-only entry point (v1.4.0) |
 | `PersistMeasureConfig` | Save measureMacro to JSON | Lines 206-210 |
 | `TriggerPulseRecompile` | Call `session.burn_pulses()` | Lines 212-214 |
 
-After all ops (non-dry-run): `session.calibration.save()` and
-`session.save_pulses()` (lines 217-218).
+After all ops (non-dry-run): `session.calibration.save()`,
+`session.save_pulses()`, and `measureMacro.sync_from_calibration()`
+(lines 217-227).  The sync step ensures `measureMacro` remains
+consistent with the canonical `CalibrationStore` after every patch.
 
 ### 13.4 Patch Rules
 
@@ -1678,11 +1689,13 @@ The `measureMacro` manages:
   (session.py:451-453).
 - `CalibrationOrchestrator.apply_patch()` with `PersistMeasureConfig` op
   (orchestrator.py:206-210).
-- `CalibrateReadoutFull` pipeline (direct calls in readout.py).
+- `SessionManager.close()` — saves `measureConfig.json` on session
+  teardown (session.py, v1.4.0).
 
 **When loaded**:
 - `SessionManager.open()` → `_load_measure_config()` (session.py:335,
-  465-477).
+  465-477).  After loading, `sync_from_calibration()` is called to pull
+  canonical values from `CalibrationStore` (v1.4.0).
 
 ### 14.3 How Readout Values Flow into Downstream Experiments
 
@@ -1701,16 +1714,26 @@ The `measureMacro` manages:
 5. The integration weights referenced in `measureMacro._int_weights_mapping`
    must exist in the POM (registered during readout calibration).
 
-### 14.4 Known Gap: Dual-Truth Problem
+### 14.4 Dual-Truth Problem — **RESOLVED in v1.4.0**
 
-Discrimination params exist in both:
+~~Discrimination params exist in both:~~
 
-- `calibration.json` → `discrimination.<element>.*`
-  (canonical typed store)
-- `measureConfig.json` → `current.ro_disc_params.*`
-  (runtime macro state)
+~~- `calibration.json` → `discrimination.<element>.*`
+  (canonical typed store)~~
+~~- `measureConfig.json` → `current.ro_disc_params.*`
+  (runtime macro state)~~
 
-These can diverge.  See `STALE_CALIBRATION_RISK_REPORT.md` Risk R3.
+~~These can diverge.  See `STALE_CALIBRATION_RISK_REPORT.md` Risk R3.~~
+
+**Resolution**: `measureMacro.sync_from_calibration(cal_store, element)`
+establishes a one-way sync direction: `CalibrationStore → measureMacro`.
+This sync is triggered:
+
+1. At session open (`_load_measure_config()`, after loading `measureConfig.json`).
+2. After every `CalibrationOrchestrator.apply_patch()` commit.
+
+`CalibrationStore` is canonical for discrimination and quality
+parameters.  `measureConfig.json` is a persistence cache only.
 
 ---
 
@@ -1737,24 +1760,33 @@ Now addressed by `wiring_rev` (SHA-256 of hardware.json) embedded in
 `ExperimentContext` and validated on `CalibrationStore` load
 (Section 17.2).
 
-### 15.4 Dual-Truth Stores
+### 15.4 Dual-Truth Stores — **RESOLVED in v1.4.0**
 
-Discrimination params and frequencies exist in multiple files without
-enforced sync.
-See `docs/audit/PATHS_AND_OWNERSHIP.md` Observations 1 and 2.
-See `docs/audit/MACRO_ENTANGLEMENT_REPORT.md` entries D1, D2, D3.
-**Status**: Partially mitigated — context block adds provenance tracking,
-but `measureConfig.json` and `calibration.json` can still diverge.
-Sync mechanism planned in `docs/audit/MACRO_REFACTOR_PROPOSAL.md` Phase 3.
+~~Discrimination params and frequencies exist in multiple files without
+enforced sync.~~
+~~See `docs/audit/PATHS_AND_OWNERSHIP.md` Observations 1 and 2.~~
+~~See `docs/audit/MACRO_ENTANGLEMENT_REPORT.md` entries D1, D2, D3.~~
 
-### 15.5 Direct Calibration Mutation in analyze()
+Now resolved by `measureMacro.sync_from_calibration()` which establishes
+one-way sync `CalibrationStore → measureMacro`.  Sync is triggered at
+session open and after every orchestrator patch commit.  See Section 14.4.
 
-Several experiment `analyze()` methods directly mutate the calibration
-store, bypassing the state machine and orchestrator.
-See `docs/audit/LEAKS.md` Section A.
-See `docs/audit/MACRO_ENTANGLEMENT_REPORT.md` entries A1, A2, C1.
-**Status**: Open — no structural change yet.  Migration plan in
-`docs/audit/MACRO_REFACTOR_PROPOSAL.md` Phase 2.
+### 15.5 Direct Calibration Mutation in analyze() — **RESOLVED in v1.4.0**
+
+~~Several experiment `analyze()` methods directly mutate the calibration
+store, bypassing the state machine and orchestrator.~~
+~~See `docs/audit/LEAKS.md` Section A.~~
+~~See `docs/audit/MACRO_ENTANGLEMENT_REPORT.md` entries A1, A2, C1.~~
+
+Now resolved:
+- `_update_readout_discrimination()` removed from `_apply_rotated_measure_macro()`.
+- `_update_readout_quality()` replaced by `SetMeasureQuality` patch op
+  (proposed via `metadata["proposed_patch_ops"]`).
+- `save_json()` calls removed from analyze paths; persistence routed
+  through `PersistMeasureConfig` orchestrator op with legacy fallback.
+- Both `_update_readout_discrimination()` and `_update_readout_quality()`
+  emit `DeprecationWarning` when called directly.
+- `legacy_experiment.py` retains direct mutations (accepted legacy debt).
 
 ### 15.6 Non-Transactional Session Close
 
@@ -2199,7 +2231,7 @@ It consists of three components:
 |-----------|--------|------|---------|
 | `measureMacro` | `programs/macros/measure.py` | Global singleton class | QUA readout code generation + readout calibration state |
 | `sequenceMacros` | `programs/macros/sequence.py` | Stateless helper class | QUA sequence code-generation utilities |
-| `cQED_programs` | `programs/cQED_programs.py` | Function library (2914 lines, 46 functions) | QUA program factories for all experiment types |
+| `builders/` | `programs/builders/*.py` (8 sub-modules) | Function library (47 functions) | QUA program factories for all experiment types |
 
 ### 20.2 measureMacro
 
@@ -2212,10 +2244,19 @@ It consists of three components:
 | Pulse binding | `_pulse_op`, `_active_op` | `measureConfig.json` |
 | Demodulation | `_demod_weight_sets`, `_demod_fn`, `_demod_args`, `_demod_kwargs`, `_demod_weight_len` | `measureConfig.json` |
 | Gain/frequency | `_gain`, `_drive_frequency` | `measureConfig.json` |
-| Discrimination | `_ro_disc_params` (threshold, angle, fidelity, mu_g/e, sigma_g/e) | `measureConfig.json` + `calibration.json` (dual-truth) |
-| Quality | `_ro_quality_params` (F, Q, V, confusion_matrix, transition_matrix, affine_n) | `measureConfig.json` + `calibration.json` (dual-truth) |
+| Discrimination | `_ro_disc_params` (threshold, angle, fidelity, mu_g/e, sigma_g/e) | `measureConfig.json` (cache) + `calibration.json` (canonical) |
+| Quality | `_ro_quality_params` (F, Q, V, confusion_matrix, transition_matrix, affine_n) | `measureConfig.json` (cache) + `calibration.json` (canonical) |
 | Post-selection | `_post_select_config` | `measureConfig.json` |
 | State stack | `_state_stack`, `_state_index`, `_state_counter` | Not persisted |
+
+**New in v1.4.0**:
+
+- `sync_from_calibration(cal_store, element)` — One-way sync from
+  `CalibrationStore` to `measureMacro`.  Called at session open and after
+  every orchestrator patch commit.
+- `_update_readout_discrimination()` and `_update_readout_quality()` are
+  deprecated.  Use `CalibrationOrchestrator.apply_patch()` with
+  `SetMeasureDiscrimination` / `SetMeasureQuality` instead.
 
 **QUA code generation**: The `measure()` method emits a QUA `measure()`
 statement using the currently configured pulse operation, demodulation
@@ -2246,37 +2287,51 @@ The `using_defaults()` context manager provides automatic push/restore.
 | `prepare_state` | Active qubit reset with acceptance policies | **Yes** |
 | `post_select` | Post-selection acceptance rule | **Yes** |
 
-### 20.4 cQED\_programs
+### 20.4 Program Builders (`programs/builders/`)
 
-**Type**: Monolithic module of 46 QUA program factory functions.
+**Type**: 8 domain-specific modules containing 47 QUA program factory functions.
 
-**Import structure:**
+**Refactored in v1.4.0** from the monolithic `cQED_programs.py` (2914 lines).
+The original file is retained as a backward-compatible re-export shim.
+
+**Module layout:**
+
+| Module | Functions | Description |
+|--------|-----------|-------------|
+| `builders/spectroscopy.py` | 6 | `readout_trace`, `resonator_spectroscopy`, `resonator_power_spectroscopy`, `qubit_spectroscopy`, `qubit_spectroscopy_ef`, `resonator_spectroscopy_x180` |
+| `builders/time_domain.py` | 10 | `temporal_rabi`, `power_rabi`, `time_rabi_chevron`, `power_rabi_chevron`, `ramsey_chevron`, `T1_relaxation`, `T2_ramsey`, `T2_echo`, `ac_stark_shift`, `residual_photon_ramsey` |
+| `builders/readout.py` | 8 | `iq_blobs`, `readout_ge_raw_trace`, `readout_ge_integrated_trace`, `readout_core_efficiency_calibration`, `readout_butterfly_measurement`, `readout_leakage_benchmarking`, `qubit_reset_benchmark`, `active_qubit_reset_benchmark` |
+| `builders/calibration.py` | 7 | `sequential_qb_rotations`, `all_xy`, `randomized_benchmarking`, `qubit_pulse_train_legacy`, `qubit_pulse_train`, `drag_calibration_YALE`, `drag_calibration_GOOGLE` |
+| `builders/cavity.py` | 11 | `storage_spectroscopy`, `num_splitting_spectroscopy`, `sel_r180_calibration0`, `fock_resolved_spectroscopy`, `fock_resolved_T1_relaxation`, `fock_resolved_power_rabi`, `fock_resolved_qb_ramsey`, `storage_wigner_tomography`, `phase_evolution_prog`, `storage_chi_ramsey`, `storage_ramsey` |
+| `builders/tomography.py` | 2 | `qubit_state_tomography`, `fock_resolved_state_tomography` |
+| `builders/utility.py` | 2 | `continuous_wave`, `SPA_flux_optimization` |
+| `builders/simulation.py` | 1 | `sequential_simulation` |
+
+**Import structure** (each builder module):
 ```python
-from .macros.measure import measureMacro
-from .macros.sequence import sequenceMacros
-from ..experiments.gates_legacy import Gate, GateArray, Measure
+from ..macros.measure import measureMacro
+from ..macros.sequence import sequenceMacros
 ```
 
-**Program families:**
+**Backward-compatible shim** (`cQED_programs.py`):
+```python
+from .builders.spectroscopy import *    # noqa: F401,F403
+from .builders.time_domain import *     # noqa: F401,F403
+from .builders.readout import *         # noqa: F401,F403
+from .builders.calibration import *     # noqa: F401,F403
+from .builders.cavity import *          # noqa: F401,F403
+from .builders.tomography import *      # noqa: F401,F403
+from .builders.utility import *         # noqa: F401,F403
+from .builders.simulation import *      # noqa: F401,F403
+```
 
-| Family | Count | Functions |
-|--------|-------|-----------|
-| Spectroscopy | 8 | `readout_trace`, `resonator_spectroscopy`, `resonator_power_spectroscopy`, `qubit_spectroscopy`, `qubit_spectroscopy_ef`, `resonator_spectroscopy_x180`, `storage_spectroscopy`, `num_splitting_spectroscopy` |
-| Time-domain | 10 | `temporal_rabi`, `power_rabi`, `time_rabi_chevron`, `power_rabi_chevron`, `ramsey_chevron`, `T1_relaxation`, `T2_ramsey`, `T2_echo`, `ac_stark_shift`, `residual_photon_ramsey` |
-| Readout | 6 | `iq_blobs`, `readout_ge_raw_trace`, `readout_ge_integrated_trace`, `readout_core_efficiency_calibration`, `readout_butterfly_measurement`, `readout_leakage_benchmarking` |
-| Calibration | 7 | `all_xy`, `randomized_benchmarking`, `sequential_qb_rotations`, `qubit_pulse_train`, `qubit_pulse_train_legacy`, `drag_calibration_YALE`, `drag_calibration_GOOGLE` |
-| Cavity | 11 | `storage_spectroscopy`, `num_splitting_spectroscopy`, `sel_r180_calibration0`, `fock_resolved_spectroscopy`, `fock_resolved_T1_relaxation`, `fock_resolved_power_rabi`, `fock_resolved_qb_ramsey`, `storage_wigner_tomography`, `phase_evolution_prog`, `storage_chi_ramsey`, `storage_ramsey` |
-| Tomography | 3 | `qubit_state_tomography`, `fock_resolved_state_tomography`, `sequential_simulation` |
-| Reset | 2 | `qubit_reset_benchmark`, `active_qubit_reset_benchmark` |
-| Utility | 2 | `continuous_wave`, `SPA_flux_optimization` |
+**Re-export wrappers** in `programs/spectroscopy.py`,
+`programs/time_domain.py`, `programs/readout.py`, `programs/calibration.py`,
+`programs/cavity.py`, and `programs/tomography.py` now import directly from
+`builders/` sub-modules (not from `cQED_programs`).
 
 All functions except `continuous_wave` depend on `measureMacro` for readout
 code generation.
-
-**Re-export wrappers** exist in `programs/spectroscopy.py`,
-`programs/time_domain.py`, `programs/readout.py`, `programs/calibration.py`,
-`programs/cavity.py`, and `programs/tomography.py`.  These are pure
-re-exports — no code has been migrated.
 
 ---
 
@@ -2293,17 +2348,18 @@ re-exports — no code has been migrated.
 | Emit QUA measure | `measureMacro.measure(...)` | Inside `with program()` block |
 | Temporary macro config | `measureMacro.using_defaults(...)` context manager | Around program construction in `run()` |
 | Push/restore | `measureMacro.push_settings()` / `restore_settings()` | Around program construction in `run()` |
-| Read confusion matrix | `self.get_confusion_matrix()` (pending) or `self.measure_macro._ro_quality_params["confusion_matrix"]` | Inside `analyze()` |
+| Read confusion matrix | `self.get_confusion_matrix()` | Inside `analyze()` |
 | Read calibration values | `self.measure_macro.get_readout_calibration()` | Inside `analyze()` |
 
 **Prohibited interactions:**
 
-| Action | Why Prohibited | Current Violations |
-|--------|----------------|--------------------|
-| Calling `_update_readout_discrimination()` | Bypasses calibration state machine | `readout.py:807` |
-| Calling `_update_readout_quality()` | Bypasses calibration state machine | `readout.py:1794` |
-| Calling `save_json()` from `analyze()` | Violates analyze idempotency | `readout.py:817,2198` |
-| Mutating `_ro_disc_params` directly | Untracked state change | `session.py:550` |
+| Action | Why Prohibited | Status |
+|--------|----------------|--------|
+| Calling `_update_readout_discrimination()` | Bypasses orchestrator; deprecated with `DeprecationWarning` | **Removed** from readout.py; routed via `SetMeasureDiscrimination` patch |
+| Calling `_update_readout_quality()` | Bypasses orchestrator; deprecated with `DeprecationWarning` | **Removed** from readout.py; routed via `SetMeasureQuality` patch |
+| Calling `save_json()` from `analyze()` | Violates analyze idempotency | **Removed**; routed via `PersistMeasureConfig` patch |
+| Mutating `_ro_disc_params` directly | Untracked state change | Use `sync_from_calibration()` or orchestrator patch |
+| Accessing `_ro_quality_params["confusion_matrix"]` directly | Bypasses CalibrationStore | Use `self.get_confusion_matrix()` |
 | Calling `set_pulse_op()` without push/restore | Leaks config to subsequent cells | (partially guarded) |
 
 ### 21.2 Correct Pattern: Readout Configuration Before Program Build
@@ -2341,16 +2397,15 @@ def analyze(self, result, *, update_calibration=False, **kw):
 ### 21.4 Correct Pattern: Confusion Matrix Access
 
 ```python
-# In ExperimentBase.analyze() — CORRECT pattern (current)
-confusion = kw.get("confusion", None)
-if confusion is None:
-    confusion = self.measure_macro._ro_quality_params.get("confusion_matrix")
-
-# RECOMMENDED replacement (future):
+# In ExperimentBase.analyze() — CORRECT pattern (v1.4.0)
 confusion = kw.get("confusion", None)
 if confusion is None:
     confusion = self.get_confusion_matrix()
 ```
+
+`ExperimentBase.get_confusion_matrix(element=None)` (added in v1.4.0)
+prefers `CalibrationStore` and falls back to `measureMacro._ro_quality_params`.
+All call sites in `gates.py` and `qubit_tomo.py` have been migrated.
 
 ---
 
@@ -2377,7 +2432,7 @@ if confusion is None:
 |------|--------|---------|
 | `SessionManager.override_readout_operation()` | `measureMacro.save_json()` | Explicit user action |
 | `CalibrationOrchestrator.apply_patch()` | `PersistMeasureConfig` op | Orchestrator-driven |
-| `SessionManager.close()` | (Not currently saved — gap) | Session teardown |
+| `SessionManager.close()` | `measureMacro.save_json()` | Session teardown (v1.4.0) |
 
 **Where `measureConfig.json` must NOT be written:**
 
@@ -2396,10 +2451,10 @@ Only via `CalibrationStore.save()`, triggered by:
 
 ### 22.3 Dual-Truth Resolution Status
 
-| Pair | Status | Resolution Path |
-|------|--------|-----------------|
-| `calibration.json` ↔ `measureConfig.json` (discrimination) | **Open** — both written independently | Planned: `CalibrationStore → measureMacro` sync (see `docs/audit/MACRO_REFACTOR_PROPOSAL.md` Phase 3) |
-| `calibration.json` ↔ `measureConfig.json` (quality) | **Open** | Same |
+| Pair | Status | Resolution |
+|------|--------|------------|
+| `calibration.json` ↔ `measureConfig.json` (discrimination) | **Resolved** in v1.4.0 | `sync_from_calibration()`: CalibrationStore → measureMacro on session open + after each patch commit |
+| `calibration.json` ↔ `measureConfig.json` (quality) | **Resolved** in v1.4.0 | Same |
 | `calibration.json` ↔ `cqed_params.json` (frequencies) | **Partially resolved** | `cqed_params.json` is read-only in v2; `calibration.json` is canonical |
 
 ### 22.4 Macro System Audit Documents

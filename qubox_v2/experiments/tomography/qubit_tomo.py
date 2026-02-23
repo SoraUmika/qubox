@@ -60,7 +60,7 @@ class QubitStateTomography(ExperimentBase):
             prog, n_total=n_avg,
             processors=[pp.ro_state_correct_proc],
             targets=[("state_x", "sx"), ("state_y", "sy"), ("state_z", "sz")],
-            confusion=mm._ro_quality_params.get("confusion_matrix"),
+            confusion=self.get_confusion_matrix(),
             to_sigmaz=True,
         )
 

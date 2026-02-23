@@ -177,7 +177,7 @@ class sequenceMacros:
         **prep_kwargs :
             - Common:
                 threshold : float (optional)
-                    If provided, overrides measureMacro._threshold for this call.
+                    If provided, overrides the discrimination threshold for this call.
 
             - policy == "ZSCORE":
                 mu_g, sigma_g, mu_e, sigma_e, k=2.5
@@ -377,7 +377,7 @@ class sequenceMacros:
         policy_norm = policy.upper() if isinstance(policy, str) else None
 
         # threshold used by default scalar policy (and often for correction outside)
-        thr = float(kwargs.get("threshold", getattr(measureMacro, "_threshold", 0.0)))
+        thr = float(kwargs.get("threshold", measureMacro._ro_disc_params.get("threshold", 0.0)))
 
         # ---- ZSCORE ----
         if policy_norm == "ZSCORE":

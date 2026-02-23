@@ -2,11 +2,11 @@
 ================================
 Time-domain QUA program factories (Rabi, T1, T2, chevrons, etc.).
 
-Re-exports time-domain functions from ``cQED_programs``::
+Imports time-domain functions from ``builders`` sub-modules::
 
     from qubox_v2.programs.time_domain import temporal_rabi, T1_relaxation
 """
-from .cQED_programs import (
+from .builders.time_domain import (
     temporal_rabi,
     power_rabi,
     time_rabi_chevron,

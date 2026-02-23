@@ -2,18 +2,19 @@
 =================================
 Spectroscopy QUA program factories.
 
-Re-exports spectroscopy-related functions from the monolithic
-``cQED_programs`` module for cleaner categorical imports::
+Imports spectroscopy-related functions from ``builders`` sub-modules::
 
     from qubox_v2.programs.spectroscopy import resonator_spectroscopy
 """
-from .cQED_programs import (
+from .builders.spectroscopy import (
     readout_trace,
     resonator_spectroscopy,
     resonator_power_spectroscopy,
     resonator_spectroscopy_x180,
     qubit_spectroscopy,
     qubit_spectroscopy_ef,
+)
+from .builders.cavity import (
     storage_spectroscopy,
     num_splitting_spectroscopy,
 )

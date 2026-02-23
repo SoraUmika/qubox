@@ -2,11 +2,11 @@
 ============================
 Cavity / storage-mode QUA program factories.
 
-Re-exports cavity-related functions from ``cQED_programs``::
+Imports cavity-related functions from ``builders`` sub-modules::
 
     from qubox_v2.programs.cavity import storage_chi_ramsey
 """
-from .cQED_programs import (
+from .builders.cavity import (
     storage_wigner_tomography,
     storage_chi_ramsey,
     storage_ramsey,
@@ -16,6 +16,8 @@ from .cQED_programs import (
     fock_resolved_power_rabi,
     fock_resolved_qb_ramsey,
     sel_r180_calibration0,
+)
+from .builders.utility import (
     SPA_flux_optimization,
     continuous_wave,
 )

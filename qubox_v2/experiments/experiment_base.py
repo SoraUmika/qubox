@@ -491,3 +491,28 @@ class ExperimentBase:
     def calibration_store(self):
         """Access the CalibrationStore from the context, if available."""
         return getattr(self._ctx, "calibration", None)
+
+    def get_confusion_matrix(self, element: str | None = None):
+        """Return the readout confusion matrix, preferring CalibrationStore.
+
+        Falls back to ``measureMacro._ro_quality_params`` if the calibration
+        store is unavailable or has no confusion matrix for the element.
+
+        Parameters
+        ----------
+        element : str or None
+            Readout element.  Defaults to ``self.attr.ro_el``.
+
+        Returns
+        -------
+        numpy.ndarray or None
+        """
+        import numpy as _np
+        el = element or self.attr.ro_el
+        cal = self.calibration_store
+        if cal is not None:
+            rq = cal.get_readout_quality(el)
+            if rq is not None and rq.confusion_matrix is not None:
+                return _np.asarray(rq.confusion_matrix)
+        # Fallback to macro
+        return self.measure_macro._ro_quality_params.get("confusion_matrix")

@@ -2,13 +2,15 @@
 ================================
 Tomography QUA program factories.
 
-Re-exports tomography functions from ``cQED_programs``::
+Imports tomography functions from ``builders`` sub-modules::
 
     from qubox_v2.programs.tomography import qubit_state_tomography
 """
-from .cQED_programs import (
+from .builders.tomography import (
     qubit_state_tomography,
     fock_resolved_state_tomography,
+)
+from .builders.simulation import (
     sequential_simulation,
 )
 

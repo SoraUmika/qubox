@@ -569,7 +569,8 @@ class SessionManager:
         }
 
     def _load_measure_config(self) -> None:
-        """Load measureMacro state from measureConfig.json if it exists."""
+        """Load measureMacro state from measureConfig.json if it exists,
+        then sync discrimination/quality params from CalibrationStore."""
         from ..programs.macros.measure import measureMacro
 
         path = self._resolve_path("measureConfig.json", required=False)
@@ -581,6 +582,19 @@ class SessionManager:
                 "No measureConfig.json found — measureMacro will use defaults. "
                 "Run readout calibration to populate it."
             )
+
+        # Sync discrimination/quality params from CalibrationStore → measureMacro.
+        # CalibrationStore is the canonical source of truth; this ensures the
+        # macro reflects any CalibrationStore updates that may have occurred
+        # after the last measureConfig.json save.
+        cal = getattr(self, "calibration", None)
+        ro_el = getattr(getattr(self, "attributes", None), "ro_el", None)
+        if cal is not None and ro_el is not None:
+            try:
+                measureMacro.sync_from_calibration(cal, ro_el)
+                _logger.info("Synced measureMacro from CalibrationStore (element=%s)", ro_el)
+            except Exception as exc:
+                _logger.warning("Failed to sync measureMacro from CalibrationStore: %s", exc)
 
     # ------------------------------------------------------------------
     # Teardown
@@ -605,6 +619,13 @@ class SessionManager:
         except Exception as e:
             _logger.warning("Error saving runtime settings: %s", e)
         self.calibration.save()
+        try:
+            from ..programs.macros.measure import measureMacro
+            dst = self.experiment_path / "config" / "measureConfig.json"
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            measureMacro.save_json(str(dst))
+        except Exception as e:
+            _logger.warning("Error saving measureConfig.json on close: %s", e)
         _logger.info("SessionManager closed.")
 
     def __enter__(self) -> "SessionManager":

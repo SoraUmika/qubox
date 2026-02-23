@@ -87,8 +87,7 @@ class AllXY(ExperimentBase):
             # Optional confusion-matrix correction (legacy parity).
             confusion = kw.get("confusion", None)
             if confusion is None:
-                from ...programs.macros.measure import measureMacro
-                confusion = measureMacro._ro_quality_params.get("confusion_matrix", None)
+                confusion = self.get_confusion_matrix()
 
             if confusion is not None:
                 states = pp.ro_state_correct_proc(
@@ -544,8 +543,7 @@ class QubitPulseTrain(ExperimentBase):
             Pe = np.asarray(Pe, dtype=float)
             confusion = kw.get("confusion", None)
             if confusion is None:
-                from ...programs.macros.measure import measureMacro
-                confusion = measureMacro._ro_quality_params.get("confusion_matrix", None)
+                confusion = self.get_confusion_matrix()
             if confusion is not None:
                 corrected = pp.ro_state_correct_proc(
                     {"Pe": Pe},
@@ -880,8 +878,7 @@ class RandomizedBenchmarking(ExperimentBase):
             # Apply confusion-matrix correction if available
             confusion = kw.pop("confusion", None)
             if confusion is None:
-                from ...programs.macros.measure import measureMacro
-                confusion = measureMacro._ro_quality_params.get("confusion_matrix", None)
+                confusion = self.get_confusion_matrix()
             if confusion is not None:
                 corrected = pp.ro_state_correct_proc(
                     {"Pe": survival},

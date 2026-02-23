@@ -209,6 +209,14 @@ class CalibrationOrchestrator:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 measureMacro.save_json(str(dst))
 
+            elif op == "SetMeasureDiscrimination":
+                from ..programs.macros.measure import measureMacro
+                measureMacro._update_readout_discrimination(payload)
+
+            elif op == "SetMeasureQuality":
+                from ..programs.macros.measure import measureMacro
+                measureMacro._update_readout_quality(payload)
+
             elif op == "TriggerPulseRecompile":
                 include_volatile = bool(payload.get("include_volatile", True))
                 self.session.burn_pulses(include_volatile=include_volatile)
@@ -216,6 +224,16 @@ class CalibrationOrchestrator:
         if not dry_run:
             self.session.calibration.save()
             self.session.save_pulses()
+
+            # Sync measureMacro from CalibrationStore after every commit
+            # so discrimination/quality params stay in sync.
+            try:
+                from ..programs.macros.measure import measureMacro
+                ro_el = getattr(self.session.attributes, "ro_el", None)
+                if ro_el is not None:
+                    measureMacro.sync_from_calibration(self.session.calibration, ro_el)
+            except Exception:
+                pass  # non-fatal; sync is best-effort
 
         return {
             "dry_run": dry_run,

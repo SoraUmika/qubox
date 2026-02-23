@@ -2,11 +2,11 @@
 ============================
 Readout-specific QUA program factories (IQ blobs, traces, butterfly, etc.).
 
-Re-exports readout functions from ``cQED_programs``::
+Imports readout functions from ``builders`` sub-modules::
 
     from qubox_v2.programs.readout import iq_blobs, readout_butterfly_measurement
 """
-from .cQED_programs import (
+from .builders.readout import (
     iq_blobs,
     readout_ge_raw_trace,
     readout_ge_integrated_trace,

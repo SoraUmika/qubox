@@ -357,6 +357,13 @@ class measureMacro:
 
     @classmethod
     def _update_readout_discrimination(cls, out: dict):
+        import warnings
+        warnings.warn(
+            "Direct call to measureMacro._update_readout_discrimination() is deprecated. "
+            "Use CalibrationOrchestrator.apply_patch() with SetMeasureDiscrimination instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         dp = cls._ro_disc_params
 
         # numeric scalars (robust defaults)
@@ -380,6 +387,13 @@ class measureMacro:
 
     @classmethod
     def _update_readout_quality(cls, out: dict):
+        import warnings
+        warnings.warn(
+            "Direct call to measureMacro._update_readout_quality() is deprecated. "
+            "Use CalibrationOrchestrator.apply_patch() with SetMeasureQuality instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         alpha = out.get("a0", None)
         beta  = out.get("a1", None)
         if alpha is not None:
@@ -460,6 +474,52 @@ class measureMacro:
             cls._ro_quality_params["posterior_model_2d"] = out["posterior_model_2d"]
 
     """
+
+    @classmethod
+    def sync_from_calibration(cls, cal_store, element: str) -> None:
+        """Populate discrimination and quality params from the canonical CalibrationStore.
+
+        Direction: CalibrationStore → measureMacro (never reverse).
+        Called by ``SessionManager.open()`` and after calibration commits.
+
+        Parameters
+        ----------
+        cal_store : CalibrationStore
+            The calibration store to read from.
+        element : str
+            Readout element name (e.g. ``"resonator"``).
+        """
+        import warnings as _warnings
+
+        disc = cal_store.get_discrimination(element)
+        if disc is not None:
+            dp = cls._ro_disc_params
+            if disc.threshold is not None:
+                dp["threshold"] = float(disc.threshold)
+            if disc.angle is not None:
+                dp["angle"] = float(disc.angle)
+            if disc.fidelity is not None:
+                dp["fidelity"] = float(disc.fidelity)
+            if hasattr(disc, "mu_g") and disc.mu_g is not None:
+                dp["rot_mu_g"] = complex(disc.mu_g[0], disc.mu_g[1]) if isinstance(disc.mu_g, (list, tuple)) else disc.mu_g
+            if hasattr(disc, "mu_e") and disc.mu_e is not None:
+                dp["rot_mu_e"] = complex(disc.mu_e[0], disc.mu_e[1]) if isinstance(disc.mu_e, (list, tuple)) else disc.mu_e
+            if hasattr(disc, "sigma_g") and disc.sigma_g is not None:
+                dp["sigma_g"] = float(disc.sigma_g)
+            if hasattr(disc, "sigma_e") and disc.sigma_e is not None:
+                dp["sigma_e"] = float(disc.sigma_e)
+
+        quality = cal_store.get_readout_quality(element)
+        if quality is not None:
+            qp = cls._ro_quality_params
+            for key in ("alpha", "beta", "F", "Q", "V", "t01", "t10"):
+                val = getattr(quality, key, None)
+                if val is not None:
+                    qp[key] = float(val)
+            if quality.confusion_matrix is not None:
+                qp["confusion_matrix"] = np.asarray(quality.confusion_matrix)
+            if hasattr(quality, "affine_n") and quality.affine_n is not None:
+                qp["affine_n"] = quality.affine_n
 
 
     @classmethod
