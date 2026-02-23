@@ -759,16 +759,21 @@ class ReadoutGEDiscrimination(ExperimentBase):
         map_rot_m_sin = _name(op_prefix, "rot_m_sin")
 
         try:
-            mm = measureMacro
-            mm.set_pulse_op(
-                pulse_info,
-                active_op=measure_op,
-                weights=([map_rot_cos, map_rot_sin], [map_rot_m_sin, map_rot_cos]),
-                weight_len=pulse_info.length,
-            )
-            mm.set_drive_frequency(drive_frequency)
-            if hasattr(mm, "_update_readout_discrimination"):
-                mm._update_readout_discrimination(metrics)
+            macro_refs = [measureMacro]
+            prog_measure_macro = getattr(cQED_programs, "measureMacro", None)
+            if prog_measure_macro is not None and all(prog_measure_macro is not ref for ref in macro_refs):
+                macro_refs.append(prog_measure_macro)
+
+            for mm in macro_refs:
+                mm.set_pulse_op(
+                    pulse_info,
+                    active_op=measure_op,
+                    weights=([map_rot_cos, map_rot_sin], [map_rot_m_sin, map_rot_cos]),
+                    weight_len=pulse_info.length,
+                )
+                mm.set_drive_frequency(drive_frequency)
+                if hasattr(mm, "_update_readout_discrimination"):
+                    mm._update_readout_discrimination(metrics)
             _logger.info("measureMacro updated with rotated readout weights")
         except Exception as exc:
             _logger.warning("Failed to update measureMacro with rotated weights: %s", exc)
@@ -1520,16 +1525,21 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             }
 
         cos_key, sin_key, m_sin_key = triplet
-        measureMacro.set_pulse_op(
-            pulse_info,
-            active_op=operation,
-            weights=[[cos_key, sin_key], [m_sin_key, cos_key]],
-            weight_len=pulse_info.length,
-        )
+        macro_refs = [measureMacro]
+        prog_measure_macro = getattr(cQED_programs, "measureMacro", None)
+        if prog_measure_macro is not None and all(prog_measure_macro is not ref for ref in macro_refs):
+            macro_refs.append(prog_measure_macro)
 
         drive_frequency = measureMacro.get_drive_frequency()
-        if drive_frequency is not None:
-            measureMacro.set_drive_frequency(drive_frequency)
+        for mm in macro_refs:
+            mm.set_pulse_op(
+                pulse_info,
+                active_op=operation,
+                weights=[[cos_key, sin_key], [m_sin_key, cos_key]],
+                weight_len=pulse_info.length,
+            )
+            if drive_frequency is not None:
+                mm.set_drive_frequency(drive_frequency)
 
         return {
             "requested": True,
@@ -1681,6 +1691,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                 analysis=analysis,
                 run_result=result,
                 calibration_tag="readout_butterfly",
+                require_fit=False,
                 required_metrics={
                     "F": (min_F, 1.0),
                     "Q": (min_Q, 1.0),
