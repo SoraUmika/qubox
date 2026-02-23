@@ -81,7 +81,7 @@ _SCHEMA_DEFS: dict[str, tuple[str, list[Any], list[str]]] = {
     ),
     "calibration": (
         "version",
-        ["3.0.0"],
+        ["3.0.0", "4.0.0"],
         [],
     ),
     "measure_config": (
@@ -229,6 +229,17 @@ def _validate_calibration(data: dict, errors: list[str], warnings: list[str]) ->
             f"got {type(version).__name__}"
         )
 
+    # Validate context block if present
+    context = data.get("context")
+    if context is not None:
+        if not isinstance(context, dict):
+            errors.append("calibration 'context' must be a dict")
+        else:
+            for key in ("device_id", "cooldown_id", "wiring_rev"):
+                val = context.get(key)
+                if val is not None and not isinstance(val, str):
+                    errors.append(f"context.{key} must be a string, got {type(val).__name__}")
+
 
 # ---------------------------------------------------------------------------
 # Migration registry
@@ -247,6 +258,21 @@ MIGRATIONS: dict[str, dict[int, MigrationFunc]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Built-in migrations
+# ---------------------------------------------------------------------------
+
+def _migrate_calibration_3_to_4(data: dict) -> dict:
+    """Migrate calibration data from v3.0.0 to v4.0.0.
+
+    Adds the ``context`` field (initially None) and bumps the version
+    string.  No data is lost or restructured.
+    """
+    data["version"] = "4.0.0"
+    data.setdefault("context", None)
+    return data
+
+
 def register_migration(file_type: str, target_version: int, func: MigrationFunc) -> None:
     """Register a migration function for a single version step.
 
@@ -263,6 +289,10 @@ def register_migration(file_type: str, target_version: int, func: MigrationFunc)
         MIGRATIONS[file_type] = {}
     MIGRATIONS[file_type][target_version] = func
     _logger.debug("Registered migration: %s v%d", file_type, target_version)
+
+
+# Register built-in migrations
+register_migration("calibration", 4, _migrate_calibration_3_to_4)
 
 
 def migrate(

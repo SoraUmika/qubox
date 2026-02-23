@@ -33,3 +33,7 @@ class PulseError(QuboxError):
 
 class CalibrationError(QuboxError):
     """Octave or element calibration failure."""
+
+
+class ContextMismatchError(ConfigError):
+    """Device/cooldown/wiring context mismatch during calibration load."""

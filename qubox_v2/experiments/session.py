@@ -50,8 +50,9 @@ class SessionManager:
 
     Parameters
     ----------
-    experiment_path : str | Path
+    experiment_path : str | Path | None
         Root directory for this experiment (config, data, calibration live here).
+        Required when ``device_id`` is not provided (legacy mode).
     qop_ip : str | None
         OPX+ IP / hostname.  Resolved from hardware JSON if *None*.
     cluster_name : str | None
@@ -62,22 +63,78 @@ class SessionManager:
         Path to Octave calibration database.
     auto_save_calibration : bool
         If True, calibration data auto-saves on every mutation.
+    device_id : str | None
+        Device identifier.  When set together with ``cooldown_id``,
+        enables context mode with full device/cooldown scoping.
+    cooldown_id : str | None
+        Cooldown cycle identifier (requires ``device_id``).
+    registry_base : str | Path | None
+        Root directory for the device registry.  Defaults to
+        ``experiment_path`` or current directory.
+    strict_context : bool
+        If True (default), device/wiring mismatches raise
+        ``ContextMismatchError`` when loading calibration.
     kwargs
         Forwarded to ``ConfigEngine`` / ``HardwareController``.
     """
 
     def __init__(
         self,
-        experiment_path: str | Path,
+        experiment_path: str | Path | None = None,
         *,
         qop_ip: str | None = None,
         cluster_name: str | None = None,
         load_devices: bool | list[str] = True,
         oct_cal_path: str | Path | None = None,
         auto_save_calibration: bool = False,
+        device_id: str | None = None,
+        cooldown_id: str | None = None,
+        registry_base: str | Path | None = None,
+        strict_context: bool = True,
         **kwargs: Any,
     ) -> None:
-        self.experiment_path = Path(experiment_path)
+        # --- Context resolution ---
+        self._experiment_context = None
+        self._device_config_dir: Path | None = None
+
+        if device_id is not None and cooldown_id is not None:
+            # Context mode: resolve paths from device registry
+            from ..devices.device_registry import DeviceRegistry
+            from ..devices.context_resolver import ContextResolver
+
+            base = Path(registry_base) if registry_base else (
+                Path(experiment_path) if experiment_path else Path.cwd()
+            )
+            registry = DeviceRegistry(base)
+            if not registry.device_exists(device_id):
+                raise ConfigError(
+                    f"Device '{device_id}' not found in registry at {base}. "
+                    f"Available: {registry.list_devices()}"
+                )
+            if not registry.cooldown_exists(device_id, cooldown_id):
+                raise ConfigError(
+                    f"Cooldown '{cooldown_id}' not found for device '{device_id}'. "
+                    f"Available: {registry.list_cooldowns(device_id)}"
+                )
+
+            resolver = ContextResolver(registry)
+            self._experiment_context = resolver.resolve(device_id, cooldown_id)
+
+            # Set experiment_path to the cooldown directory
+            self.experiment_path = registry.cooldown_path(device_id, cooldown_id)
+            self._device_config_dir = registry.device_path(device_id) / "config"
+            _logger.info(
+                "Context mode: device=%s cooldown=%s wiring=%s",
+                device_id, cooldown_id, self._experiment_context.wiring_rev,
+            )
+        elif experiment_path is not None:
+            self.experiment_path = Path(experiment_path)
+        else:
+            raise ConfigError(
+                "Either 'experiment_path' or both 'device_id' and 'cooldown_id' "
+                "must be provided."
+            )
+
         self.experiment_path.mkdir(parents=True, exist_ok=True)
 
         _logger.info("SessionManager initialising at %s", self.experiment_path)
@@ -122,7 +179,10 @@ class SessionManager:
         # --- 5. Calibration store ---
         cal_path = self.experiment_path / "config" / "calibration.json"
         self.calibration = CalibrationStore(
-            cal_path, auto_save=auto_save_calibration,
+            cal_path,
+            auto_save=auto_save_calibration,
+            context=self._experiment_context,
+            strict_context=strict_context,
         )
 
         # --- 6. External devices ---
@@ -163,11 +223,57 @@ class SessionManager:
         """Alias used by legacy experiment code."""
         return self.hardware
 
+    @property
+    def context(self):
+        """The ExperimentContext for this session, or None in legacy mode."""
+        return self._experiment_context
+
+    @classmethod
+    def from_device(
+        cls,
+        device_id: str,
+        cooldown_id: str,
+        registry_base: str | Path,
+        **kwargs: Any,
+    ) -> "SessionManager":
+        """Convenience constructor for context mode.
+
+        Parameters
+        ----------
+        device_id : str
+            Device identifier in the registry.
+        cooldown_id : str
+            Cooldown cycle identifier.
+        registry_base : str | Path
+            Root directory for the device registry.
+        **kwargs
+            Forwarded to :class:`SessionManager` constructor.
+        """
+        return cls(
+            device_id=device_id,
+            cooldown_id=cooldown_id,
+            registry_base=registry_base,
+            **kwargs,
+        )
+
     # ------------------------------------------------------------------
     # Path resolution
     # ------------------------------------------------------------------
     def _resolve_path(self, filename: str, *, required: bool = False) -> Path | None:
-        """Look for *filename* in config/ or experiment root."""
+        """Look for *filename* in config/ or experiment root.
+
+        In context mode, device-level files (hardware.json, devices.json,
+        cqed_params.json, pulse_specs.json) are resolved from the device
+        config directory first.
+        """
+        # Context mode: check device-level config dir for device files
+        if self._device_config_dir is not None:
+            from ..devices.device_registry import DEVICE_LEVEL_FILES
+            if filename in DEVICE_LEVEL_FILES:
+                p = self._device_config_dir / filename
+                if p.exists():
+                    return p
+
         candidates = [
             self.experiment_path / "config" / filename,
             self.experiment_path / filename,

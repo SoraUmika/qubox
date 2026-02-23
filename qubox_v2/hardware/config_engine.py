@@ -137,6 +137,14 @@ class ConfigEngine:
         self.hardware_extras = select_keys(raw, self._hardware_extras_keys)
         _logger.info("Hardware loaded from %s", self.hardware_path)
 
+    @property
+    def wiring_rev(self) -> str | None:
+        """SHA-256 first 8 hex chars of hardware.json content, or None."""
+        if self.hardware_path is None or not self.hardware_path.exists():
+            return None
+        from ..core.experiment_context import ExperimentContext
+        return ExperimentContext.compute_wiring_rev(self.hardware_path)
+
     def save_hardware(self, path: str | Path | None = None) -> None:
         require(self.hardware_base is not None, "No hardware loaded to save.", ConfigError)
         dst = Path(path) if path else (self.hardware_path or Path("hardware.json"))

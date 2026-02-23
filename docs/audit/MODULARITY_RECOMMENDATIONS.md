@@ -243,7 +243,7 @@ def _validate_context(self, expected_device_id, expected_cooldown_id, hardware_h
 
 ### Phase 0: Docs + Audit (This Task)
 
-**Status**: In progress.
+**Status**: Complete.
 
 **Deliverables**:
 - `docs/audit/DEVICE_COOLDOWN_CALIBRATION_API.md` — current state audit
@@ -258,6 +258,8 @@ def _validate_context(self, expected_device_id, expected_cooldown_id, hardware_h
 ---
 
 ### Phase 1: Introduce Explicit Context Metadata + Safe Loading
+
+**Status**: Implemented.
 
 **Goal**: Add context metadata to calibration files and validate on load.
 Minimal code changes; backward-compatible.
@@ -282,6 +284,8 @@ an empty `context` block.
 ---
 
 ### Phase 2: Calibration Registry + Cooldown Scoping
+
+**Status**: Implemented (merged with Phase 1).
 
 **Goal**: Implement the per-cooldown directory layout.  Enable cooldown
 isolation.

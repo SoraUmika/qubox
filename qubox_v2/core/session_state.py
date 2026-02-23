@@ -64,9 +64,19 @@ class SessionState:
     build_hash: str = ""
     build_timestamp: str = ""
     git_commit: str | None = None
+    device_id: str | None = None
+    cooldown_id: str | None = None
+    wiring_rev: str | None = None
 
     @classmethod
-    def from_config_dir(cls, config_dir: str | Path) -> SessionState:
+    def from_config_dir(
+        cls,
+        config_dir: str | Path,
+        *,
+        device_id: str | None = None,
+        cooldown_id: str | None = None,
+        wiring_rev: str | None = None,
+    ) -> SessionState:
         """Construct SessionState by reading all config files from a directory.
 
         Parameters
@@ -158,6 +168,9 @@ class SessionState:
             build_hash=build_hash,
             build_timestamp=datetime.now().isoformat(),
             git_commit=git_commit,
+            device_id=device_id,
+            cooldown_id=cooldown_id,
+            wiring_rev=wiring_rev,
         )
 
     def summary(self) -> str:
@@ -166,6 +179,9 @@ class SessionState:
             f"SessionState (build_hash={self.build_hash})",
             f"  timestamp: {self.build_timestamp}",
             f"  git_commit: {self.git_commit or 'unknown'}",
+            f"  device_id: {self.device_id or '(legacy)'}",
+            f"  cooldown_id: {self.cooldown_id or '(legacy)'}",
+            f"  wiring_rev: {self.wiring_rev or '(unknown)'}",
             f"  schemas:",
         ]
         for s in self.schemas:
@@ -189,6 +205,9 @@ class SessionState:
             "build_hash": self.build_hash,
             "build_timestamp": self.build_timestamp,
             "git_commit": self.git_commit,
+            "device_id": self.device_id,
+            "cooldown_id": self.cooldown_id,
+            "wiring_rev": self.wiring_rev,
             "schemas": [
                 {"file_type": s.file_type, "path": s.path,
                  "version": s.version, "size_bytes": s.size_bytes}

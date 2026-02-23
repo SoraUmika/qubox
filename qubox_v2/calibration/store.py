@@ -30,6 +30,7 @@ from typing import Any
 from ..core.logging import get_logger
 from ..core.persistence_policy import sanitize_mapping_for_json
 from .models import (
+    CalibrationContext,
     CalibrationData,
     CoherenceParams,
     DiscriminationParams,
@@ -54,12 +55,29 @@ class CalibrationStore:
         Path to the calibration JSON file.  Created if it does not exist.
     auto_save : bool
         If True, every mutating method automatically saves to disk.
+    context : ExperimentContext, optional
+        If provided, the store validates that the on-disk calibration
+        matches this device/cooldown/wiring context.
+    strict_context : bool
+        If True (default), a device or wiring mismatch raises
+        ``ContextMismatchError``.  If False, mismatches are logged as
+        warnings only.
     """
 
-    def __init__(self, path: str | Path, *, auto_save: bool = False) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        auto_save: bool = False,
+        context: Any = None,
+        strict_context: bool = True,
+    ) -> None:
         self._path = Path(path)
         self._auto_save = auto_save
+        self._context = context
         self._data = self._load_or_create()
+        if context is not None:
+            self._validate_context(strict=strict_context)
 
     @property
     def path(self) -> Path:
@@ -73,10 +91,30 @@ class CalibrationStore:
             _logger.info("Loading calibration from %s", self._path)
             with open(self._path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
+            # Auto-migrate v3 → v4 in memory (adds context=None)
+            version_str = raw.get("version", "3.0.0")
+            if version_str == "3.0.0":
+                raw["version"] = "4.0.0"
+                raw.setdefault("context", None)
+                _logger.info("Auto-migrated calibration in-memory from v3.0.0 to v4.0.0")
             return CalibrationData.model_validate(raw)
         # Write defaults to disk immediately so the file actually exists.
         # Cannot call self.save() here because self._data is not yet assigned.
-        data = CalibrationData(created=datetime.now().isoformat())
+        ctx_block = None
+        if self._context is not None:
+            ctx_block = CalibrationContext(
+                device_id=self._context.device_id,
+                cooldown_id=self._context.cooldown_id,
+                wiring_rev=self._context.wiring_rev,
+                schema_version=self._context.schema_version,
+                config_hash=getattr(self._context, "config_hash", "") or "",
+                created=datetime.now().isoformat(),
+            )
+        data = CalibrationData(
+            version="4.0.0",
+            context=ctx_block,
+            created=datetime.now().isoformat(),
+        )
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._atomic_write(data)
         _logger.info("Default calibration created at %s", self._path)
@@ -318,6 +356,74 @@ class CalibrationStore:
         before persisting.
         """
         self._data = CalibrationData.model_validate(raw)
+        self._touch()
+
+    # ------------------------------------------------------------------
+    # Context validation
+    # ------------------------------------------------------------------
+    def _validate_context(self, *, strict: bool = True) -> None:
+        """Check that the on-disk context matches the session context.
+
+        Parameters
+        ----------
+        strict : bool
+            If True, device or wiring mismatches raise
+            ``ContextMismatchError``.  Cooldown mismatches always warn.
+        """
+        from ..core.errors import ContextMismatchError
+
+        stored = self._data.context
+        ctx = self._context
+        if ctx is None:
+            return
+
+        # No context block on disk (legacy v3 file) — skip
+        if stored is None:
+            _logger.warning(
+                "Calibration file has no context block (legacy v3). "
+                "Skipping context validation for %s", self._path,
+            )
+            return
+
+        # Device mismatch
+        if stored.device_id and ctx.device_id and stored.device_id != ctx.device_id:
+            msg = (
+                f"Device mismatch: calibration was made for device "
+                f"'{stored.device_id}' but session uses '{ctx.device_id}'"
+            )
+            if strict:
+                raise ContextMismatchError(msg)
+            _logger.warning(msg)
+
+        # Wiring mismatch
+        if stored.wiring_rev and ctx.wiring_rev and stored.wiring_rev != ctx.wiring_rev:
+            msg = (
+                f"Wiring revision mismatch: calibration has '{stored.wiring_rev}' "
+                f"but hardware.json hashes to '{ctx.wiring_rev}'"
+            )
+            if strict:
+                raise ContextMismatchError(msg)
+            _logger.warning(msg)
+
+        # Cooldown mismatch — always warn, never raise
+        if stored.cooldown_id and ctx.cooldown_id and stored.cooldown_id != ctx.cooldown_id:
+            _logger.warning(
+                "Cooldown mismatch: calibration was made for cooldown "
+                "'%s' but session uses '%s'. Calibrations may be stale.",
+                stored.cooldown_id, ctx.cooldown_id,
+            )
+
+    def stamp_context(self, context: Any) -> None:
+        """Write or overwrite the context block from an ExperimentContext."""
+        self._data.context = CalibrationContext(
+            device_id=context.device_id,
+            cooldown_id=context.cooldown_id,
+            wiring_rev=context.wiring_rev,
+            schema_version=context.schema_version,
+            config_hash=getattr(context, "config_hash", "") or "",
+            created=datetime.now().isoformat(),
+        )
+        self._data.version = "4.0.0"
         self._touch()
 
     # ------------------------------------------------------------------

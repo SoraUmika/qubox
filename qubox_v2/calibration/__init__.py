@@ -7,6 +7,7 @@ with snapshot/history support.
 """
 from .store import CalibrationStore
 from .models import (
+    CalibrationContext,
     CalibrationData,
     CoherenceParams,
     DiscriminationParams,
@@ -53,6 +54,7 @@ __all__ = [
     # Store
     "CalibrationStore",
     # Models
+    "CalibrationContext",
     "CalibrationData",
     "CoherenceParams",
     "DiscriminationParams",

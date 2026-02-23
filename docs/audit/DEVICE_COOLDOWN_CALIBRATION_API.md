@@ -384,3 +384,32 @@ specs into the POM.
 
 6. **Pulses dual-path**: Both `pulses.json` (legacy) and
    `pulse_specs.json` (declarative) coexist; the transition is incomplete.
+
+---
+
+## 10. Implementation Status (Phase 1+2)
+
+**Date**: 2026-02-22
+
+The following changes have been implemented to address findings 1-3 above:
+
+| Component | File | Status |
+|-----------|------|--------|
+| `ExperimentContext` frozen dataclass | `core/experiment_context.py` | NEW |
+| `ContextMismatchError` exception | `core/errors.py` | Added |
+| `CalibrationContext` Pydantic model | `calibration/models.py` | Added |
+| `context` field on `CalibrationData` | `calibration/models.py` | Added |
+| v3->v4 calibration schema migration | `core/schemas.py` | Added |
+| Context validation in `CalibrationStore` | `calibration/store.py` | Added |
+| `DeviceRegistry` + `DeviceInfo` | `devices/device_registry.py` | NEW |
+| `ContextResolver` | `devices/context_resolver.py` | NEW |
+| `wiring_rev` property on `ConfigEngine` | `hardware/config_engine.py` | Added |
+| Context fields on `SessionState` | `core/session_state.py` | Added |
+| Context-mode constructor on `SessionManager` | `experiments/session.py` | Added |
+| Context stamping in orchestrator artifacts | `calibration/orchestrator.py` | Added |
+| Package `__init__` exports | `core/`, `calibration/`, `devices/` | Updated |
+| Context-mode demo notebook | `notebooks/post_cavity_experiment_context.ipynb` | NEW |
+
+**Backward compatibility**: `SessionManager("./seq_1_device")` continues to
+work.  Legacy v3 calibration files auto-migrate in-memory to v4 (context=None).
+Context validation is skipped when no context block is present.

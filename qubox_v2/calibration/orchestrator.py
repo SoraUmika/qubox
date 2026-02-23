@@ -240,6 +240,11 @@ class CalibrationOrchestrator:
         meta["artifact_meta"] = artifact.meta
         meta["artifact_id"] = artifact.artifact_id
 
+        # Stamp experiment context if available
+        ctx = getattr(self.session, "context", None)
+        if ctx is not None:
+            meta["experiment_context"] = ctx.to_dict()
+
         import numpy as np
 
         np.savez_compressed(data_path, **arrays)
