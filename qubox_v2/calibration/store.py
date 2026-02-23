@@ -170,8 +170,6 @@ class CalibrationStore:
                 merged.update({k: v for k, v in kw.items() if v is not None})
                 freqs = ElementFrequencies(**merged)
             else:
-                kw.setdefault("lo_freq", 0.0)
-                kw.setdefault("if_freq", 0.0)
                 freqs = ElementFrequencies(**kw)
         self._data.frequencies[element] = freqs
         self._touch()
@@ -209,7 +207,6 @@ class CalibrationStore:
                 cal = PulseCalibration(**merged)
             else:
                 kw.setdefault("pulse_name", name)
-                kw.setdefault("element", "")
                 cal = PulseCalibration(**kw)
         self._data.pulse_calibrations[name] = cal
         self._touch()
@@ -430,11 +427,18 @@ class CalibrationStore:
     # Internal
     # ------------------------------------------------------------------
     def _atomic_write(self, data: CalibrationData) -> None:
-        """Write data to JSON via temp file + os.replace (atomic on same FS)."""
+        """Write data to JSON via temp file + os.replace (atomic on same FS).
+
+        Uses ``exclude_none=True`` so that unset optional fields are omitted
+        from the persisted JSON rather than stored as ``null`` placeholders.
+        Calibration records should reflect actual pipeline outputs only.
+        """
         tmp_fd, tmp_path = tempfile.mkstemp(
             dir=self._path.parent, prefix=".cal_tmp_", suffix=".json",
         )
-        payload, dropped = sanitize_mapping_for_json(data.model_dump())
+        payload, dropped = sanitize_mapping_for_json(
+            data.model_dump(exclude_none=True)
+        )
         if dropped:
             payload["_persistence"] = {
                 "raw_data_policy": "drop_shot_level_arrays",

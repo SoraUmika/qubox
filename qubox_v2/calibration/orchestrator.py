@@ -326,6 +326,6 @@ class CalibrationOrchestrator:
 
     def _set_pulse_param(self, pulse_name: str, field: str, value: Any) -> None:
         cal = self.session.calibration.get_pulse_calibration(pulse_name)
-        old = cal.model_dump() if cal is not None else {"pulse_name": pulse_name, "element": ""}
+        old = cal.model_dump() if cal is not None else {"pulse_name": pulse_name}
         old[field] = value
         self.session.calibration.set_pulse_calibration(pulse_name, **old)

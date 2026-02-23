@@ -196,7 +196,7 @@ def run_demo(config_dir: str | Path, *, verbose: bool = False) -> bool:
         # Create and attach a patch
         patch = CalibrationPatch(experiment="demo_power_rabi")
         patch.add_change(
-            path="pulse_calibrations.qubit.x180.amplitude",
+            path="pulse_calibrations.ref_r180.amplitude",
             old_value=0.11165,
             new_value=0.11234,
             dtype="float",

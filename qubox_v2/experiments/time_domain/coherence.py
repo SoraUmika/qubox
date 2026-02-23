@@ -68,6 +68,8 @@ class T2Ramsey(ExperimentBase):
         ydata = np.real(S)
         qb_detune = result.output.extract("qb_detune")
 
+        apply_frequency_correction = bool(kw.pop("apply_frequency_correction", False))
+        freq_correction_sign = float(kw.pop("freq_correction_sign", -1.0))
         p0_time_unit = str(kw.pop("p0_time_unit", "us")).lower()
         p0_freq_unit = str(kw.pop("p0_freq_unit", "MHz")).lower()
 
@@ -126,8 +128,8 @@ class T2Ramsey(ExperimentBase):
                 },
             ])
 
-            if bool(kw.get("apply_frequency_correction", False)):
-                sign = float(kw.get("freq_correction_sign", -1.0))
+            if apply_frequency_correction:
+                sign = freq_correction_sign
                 correction_hz = sign * float(fit.params["f_det"]) * 1e9
                 # Include the input detuning: the qubit was driven at qb_fq + qb_detune
                 qb_detune_hz = float(qb_detune or 0)

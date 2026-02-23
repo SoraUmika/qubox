@@ -52,6 +52,8 @@ class T1Relaxation(ExperimentBase):
         S = result.output.extract("S")
         ydata = np.real(S)
 
+        derive_qb_therm_clks = bool(kw.pop("derive_qb_therm_clks", False))
+        clock_period_ns = float(kw.pop("clock_period_ns", 4.0))
         p0_time_unit = str(kw.pop("p0_time_unit", "us")).lower()
 
         A_guess = float(ydata[0] - ydata[-1])
@@ -106,9 +108,9 @@ class T1Relaxation(ExperimentBase):
                 },
             ])
 
-            if bool(kw.get("derive_qb_therm_clks", False)):
-                clk_ns = float(kw.get("clock_period_ns", 4.0))
-                qb_therm_clks = int(np.floor((2.0 * float(fit.params["T1"])) / clk_ns))
+            if derive_qb_therm_clks:
+                clk_ns = clock_period_ns
+                qb_therm_clks = int(np.floor((6.0 * float(fit.params["T1"])) / clk_ns))
                 metrics["qb_therm_clks"] = qb_therm_clks
                 metadata.setdefault("proposed_patch_ops", []).append(
                     {

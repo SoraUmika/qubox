@@ -823,7 +823,6 @@ drag_cycle = orch.run_analysis_patch_cycle(
     },
     analyze_kwargs={
         "update_calibration": True,
-        "propagate_drag_to_primitives": True,
     },
     apply=False,
     persist_artifact=True,

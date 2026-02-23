@@ -39,6 +39,12 @@ class DiscriminationParams(BaseModel):
     fidelity: float | None = None
     confusion_matrix: list[list[float]] | None = None
 
+    # Readout calibration metadata — for reproducibility
+    n_shots: int | None = None
+    integration_time_ns: int | None = None
+    demod_weights: list[str] | None = None
+    state_prep_ops: list[str] | None = None
+
 
 class ReadoutQuality(BaseModel):
     """Readout quality metrics from butterfly measurement."""
@@ -53,15 +59,42 @@ class ReadoutQuality(BaseModel):
     confusion_matrix: list[list[float]] | None = None
     affine_n: dict[str, list[float]] | None = None
 
+    # Readout calibration metadata — for reproducibility
+    n_shots: int | None = None
+    integration_time_ns: int | None = None
+    demod_weights: list[str] | None = None
+    state_prep_ops: list[str] | None = None
+
 
 # ---------------------------------------------------------------------------
 # Element frequency calibration
 # ---------------------------------------------------------------------------
 class ElementFrequencies(BaseModel):
-    """Calibrated frequencies for a quantum element."""
+    """Calibrated frequencies for a quantum element.
 
-    lo_freq: float                 # Hz
-    if_freq: float                 # Hz
+    Frequency convention
+    --------------------
+    An element may store its drive frequency in one of two ways:
+
+    1. **LO + IF pair** — ``rf_freq = lo_freq + if_freq``.
+       Standard for OPX elements driven through an Octave up-converter.
+       ``if_freq`` may be negative (lower sideband).
+
+    2. **Explicit rf_freq** — absolute RF frequency in Hz.
+       Used when the element is driven directly or when only the
+       calibrated transition frequency is known (e.g. ``qubit_freq``).
+
+    Both representations may coexist.  When present, the relationship
+    ``rf_freq == lo_freq + if_freq`` must hold.
+
+    Only fields with actual calibrated values should be populated.
+    Unset fields default to ``None`` and are omitted from the persisted
+    JSON to avoid misleading placeholders.
+    """
+
+    lo_freq: float | None = None   # Hz — local oscillator frequency
+    if_freq: float | None = None   # Hz — intermediate frequency (may be negative)
+    rf_freq: float | None = None   # Hz — absolute RF drive frequency
     qubit_freq: float | None = None
     anharmonicity: float | None = None
     fock_freqs: list[float] | None = None
@@ -89,10 +122,16 @@ class CoherenceParams(BaseModel):
 # Pulse calibration record
 # ---------------------------------------------------------------------------
 class PulseCalibration(BaseModel):
-    """Calibrated pulse parameters (e.g., from Rabi, DRAG cal)."""
+    """Calibrated pulse parameters (e.g., from Rabi, DRAG cal).
+
+    Only true calibration primitives (e.g. ``ref_r180``, ``sel_ref_r180``)
+    should be stored here.  Derived pulses like ``x180``, ``y180``, etc.
+    are generated programmatically from the reference pulse and must NOT
+    appear in ``calibration.json``.
+    """
 
     pulse_name: str
-    element: str
+    element: str | None = None
     amplitude: float | None = None
     length: int | None = None      # ns
     sigma: float | None = None
@@ -143,7 +182,7 @@ class CalibrationData(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    version: str = "3.0.0"
+    version: str = "4.0.0"
     context: CalibrationContext | None = None
 
     # Keyed by element name

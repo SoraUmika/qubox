@@ -51,6 +51,7 @@ class TemporalRabi(ExperimentBase):
         durations = result.output.extract("pulse_durations")
         S = result.output.extract("S")
         mag = np.abs(S)
+        min_r2 = float(kw.pop("min_r2", 0.80))
 
         # Estimate Rabi frequency from FFT
         dt = float(durations[1] - durations[0]) if len(durations) > 1 else 1.0
@@ -78,7 +79,6 @@ class TemporalRabi(ExperimentBase):
 
         if update_calibration and self.calibration_store and fit.params:
             if fit.params["f_Rabi"] != 0:
-                min_r2 = float(kw.get("min_r2", 0.80))
                 sweep_lo = float(np.min(durations))
                 sweep_hi = float(np.max(durations))
                 self.guarded_calibration_commit(
@@ -89,7 +89,7 @@ class TemporalRabi(ExperimentBase):
                     required_metrics={"pi_length": (sweep_lo, sweep_hi)},
                     extra_metadata={"sweep_min_ns": sweep_lo, "sweep_max_ns": sweep_hi},
                     apply_update=lambda: self.calibration_store.set_pulse_calibration(
-                        name="x180", pi_length=1.0 / (2 * fit.params["f_Rabi"]),
+                        name="ref_r180", pi_length=1.0 / (2 * fit.params["f_Rabi"]),
                     ),
                 )
 
@@ -135,7 +135,7 @@ class PowerRabi(ExperimentBase):
         self,
         max_gain: float,
         dg: float = 1e-3,
-        op: str = "x180",
+        op: str = "ref_r180",
         length: int | None = None,
         truncate_clks: int | None = None,
         n_avg: int = 1000,
@@ -202,7 +202,7 @@ class PowerRabi(ExperimentBase):
 
         metadata: dict[str, Any] = {
             "calibration_kind": "pi_amp",
-            "target_op": (self._run_params.get("op") if hasattr(self, "_run_params") else "x180"),
+            "target_op": (self._run_params.get("op") if hasattr(self, "_run_params") else "ref_r180"),
             "units": {"g_pi": "a.u."},
         }
 

@@ -1,9 +1,21 @@
 # qubox\_v2 — API Reference & Architecture Guide
 
-**Version**: 1.5.0
+**Version**: 1.6.0
 **Date**: 2026-02-23
 **Status**: Governing Document
 **Changelog**:
+- v1.6.0 — Schema refactor: calibration schema version 4.0.0 is now canonical.
+  `ElementFrequencies.lo_freq`/`if_freq` made optional; `rf_freq` field added.
+  `PulseCalibration.element` made optional.  Readout metadata fields added to
+  `DiscriminationParams` and `ReadoutQuality` (`n_shots`, `integration_time_ns`,
+  `demod_weights`, `state_prep_ops`).  Derived primitive pulses (`x180`, `y180`,
+  etc.) removed from `calibration.json` — only true calibration primitives
+  (`ref_r180`, `sel_ref_r180`) are stored.  Null-handling policy: unset optional
+  fields are omitted from persisted JSON via `exclude_none=True`.  Frequency
+  convention documented: LO+IF pair or explicit `rf_freq`.  Readout calibration
+  pipeline requires explicit patch step (no hidden in-place mutation).
+  `DragAlphaRule` now patches only `ref_r180` — derived pulses inherit via
+  `PulseFactory`.  CHANGELOG.md introduced with append-only change-log policy.
 - v1.5.0 — Added section 23: Writing Custom Experiments.  Added usage examples
   throughout sections 2-9 and 13 (drawn from `post_cavity_experiment_context.ipynb`).
   Expanded sections 8 (Gate System) and Appendix A with gate-legacy API.
@@ -1022,21 +1034,50 @@ class PatchValidation:
 
 ### 4.4 Calibration Data Models
 
-**Module**: `qubox_v2.calibration.models`  
+**Module**: `qubox_v2.calibration.models`
 All models are Pydantic v2 `BaseModel` subclasses.
 
 | Model | Purpose | Key Fields |
 |-------|---------|------------|
-| `DiscriminationParams` | Single-shot readout discrimination | `threshold`, `angle`, `mu_g`, `mu_e`, `sigma_g`, `sigma_e`, `fidelity?`, `confusion_matrix?` |
-| `ReadoutQuality` | Butterfly measurement metrics | `F?`, `Q?`, `V?`, `t01?`, `t10?`, `confusion_matrix?` |
-| `ElementFrequencies` | Calibrated frequencies (Hz) | `lo_freq`, `if_freq`, `qubit_freq?`, `anharmonicity?`, `fock_freqs?`, `chi?`, `kappa?`, `kerr?` |
+| `DiscriminationParams` | Single-shot readout discrimination | `threshold`, `angle`, `mu_g`, `mu_e`, `sigma_g`, `sigma_e`, `fidelity?`, `confusion_matrix?`, `n_shots?`, `integration_time_ns?`, `demod_weights?`, `state_prep_ops?` |
+| `ReadoutQuality` | Butterfly measurement metrics | `F?`, `Q?`, `V?`, `t01?`, `t10?`, `confusion_matrix?`, `n_shots?`, `integration_time_ns?`, `demod_weights?`, `state_prep_ops?` |
+| `ElementFrequencies` | Calibrated frequencies (Hz) | `lo_freq?`, `if_freq?`, `rf_freq?`, `qubit_freq?`, `anharmonicity?`, `fock_freqs?`, `chi?`, `kappa?`, `kerr?` |
 | `CoherenceParams` | Coherence times | `T1?`, `T2_ramsey?`, `T2_echo?` |
-| `PulseCalibration` | Calibrated pulse params | `pulse_name`, `element`, `amplitude?`, `length?`, `sigma?`, `drag_coeff?` |
+| `PulseCalibration` | Calibrated pulse params | `pulse_name`, `element?`, `amplitude?`, `length?`, `sigma?`, `drag_coeff?` |
 | `FitRecord` | Generic fit result | `experiment`, `model_name`, `params`, `uncertainties?`, `reduced_chi2?` |
 | `PulseTrainResult` | Pulse-train tomography | `amp_err`, `phase_err`, `delta`, `zeta` |
 | `FockSQRCalibration` | Per-Fock SQR gate | `fock_number`, `model_type`, `params`, `fidelity?` |
 | `MultiStateCalibration` | Multi-alpha affine calibration | `alpha_values`, `affine_matrix`, `offset_vector` |
-| `CalibrationData` | **Root container** (schema v3.0.0) | All of the above, plus `version`, `created`, `last_modified` |
+| `CalibrationData` | **Root container** (schema v4.0.0) | All of the above, plus `version`, `context?`, `created`, `last_modified` |
+
+**Null-handling policy:**
+
+- Unset optional fields default to `None` in the Pydantic model.
+- The `CalibrationStore` serializes with `exclude_none=True` — fields that are
+  `None` are **omitted entirely** from the persisted JSON.
+- This ensures calibration records reflect actual pipeline outputs only.
+- When loading, Pydantic fills absent optional fields with `None` automatically.
+- Placeholder values like `0.0` or `""` must **never** be used as stand-ins
+  for unset data.  Use `None` (which is omitted on write).
+
+**Frequency convention:**
+
+- `ElementFrequencies` supports two frequency representations:
+  1. **LO + IF pair**: `rf_freq = lo_freq + if_freq`.
+     Standard for OPX elements driven through an Octave up-converter.
+     `if_freq` may be negative (lower sideband convention).
+  2. **Explicit rf\_freq**: absolute RF frequency in Hz.
+- Both may coexist; when all three are present, `rf_freq == lo_freq + if_freq` must hold.
+- `qubit_freq` stores the calibrated qubit transition frequency (independent of the hardware mixing chain).
+- Elements that do not use LO+IF mixing (e.g. direct RF drive) should omit `lo_freq`/`if_freq`.
+
+**Pulse calibration storage policy:**
+
+- Only **true calibration primitives** (`ref_r180`, `sel_ref_r180`) are stored
+  in `pulse_calibrations`.
+- **Derived pulses** (`x180`, `y180`, `x90`, `xn90`, `y90`, `yn90`) are
+  generated programmatically from the reference pulse via `PulseFactory`
+  `rotation_derived` and must **not** appear in `calibration.json`.
 
 ### 4.5 Calibration Flow Examples
 
@@ -1053,9 +1094,9 @@ rabi.plot(analysis)
 # DRAG → stores optimal alpha
 drag = DRAGCalibration(session)
 result = drag.run(amps=np.linspace(-0.5, 0.5, 20), n_avg=5000, base_alpha=1.0)
-analysis = drag.analyze(result, update_calibration=True, propagate_drag_to_primitives=True)
+analysis = drag.analyze(result, update_calibration=True)
 drag.plot(analysis)
-# → updates PulseCalibration("ref_r180").drag_coeff + all primitive pulses
+# → updates PulseCalibration("ref_r180").drag_coeff; derived pulses inherit via PulseFactory
 
 # GE Discrimination → stores threshold, angle, fidelity, rotated weights
 ge = ReadoutGEDiscrimination(session)
@@ -1130,7 +1171,7 @@ if patch.is_approved():
     sm.transition(CalibrationState.COMMITTED)
 ```
 
-**Full readout calibration pipeline:**
+**Full readout calibration pipeline (explicit patch model):**
 
 ```python
 from qubox_v2.experiments.calibration.readout import CalibrateReadoutFull, ReadoutConfig
@@ -1149,13 +1190,31 @@ readoutConfig = ReadoutConfig(
     threshold_extraction="legacy_discriminator",
 )
 
+# Step 1: Run pipeline — acquire data
 cal = CalibrationReadoutFull(session)
 result = cal.run(readoutConfig=readoutConfig)
-analysis = cal.analyze(result, update_calibration=True)
 
-print(f"GE fidelity = {analysis.metrics['ge_fidelity']:.4f}")
-print(f"F = {analysis.metrics['bfly_F']:.4f}")
-print(f"Q = {analysis.metrics['bfly_Q']:.4f}")
+# Step 2: Analyze — compute metrics (NO inline calibration mutation)
+analysis = cal.analyze(result, update_calibration=False)
+
+# Step 3: Explicit patch — apply calibration after review
+ge_metrics = analysis.metadata["ge_analysis"].metrics
+bfly_metrics = analysis.metadata["bfly_analysis"].metrics
+
+session.calibration.set_discrimination(attr.ro_el,
+    threshold=ge_metrics["threshold"],
+    angle=ge_metrics["angle"],
+    fidelity=ge_metrics["fidelity"],
+    n_shots=readoutConfig.n_samples,
+    state_prep_ops=["identity", readoutConfig.r180],
+)
+session.calibration.set_readout_quality(attr.ro_el,
+    F=bfly_metrics["F"],
+    Q=bfly_metrics["Q"],
+    V=bfly_metrics["V"],
+    n_shots=readoutConfig.n_shots_butterfly,
+)
+session.calibration.save()
 ```
 
 ### 4.6 When `calibration.json` is Written
@@ -1417,7 +1476,7 @@ the `"module:Class"` format, supporting QCoDeS and InstrumentServer backends.
 | Waveform sample arrays | **Memory only** | Compiled from specs; never persisted as source of truth |
 | `hardware.json` | **Disk** (source of truth) | Manual edits only |
 | `pulse_specs.json` | **Disk** (source of truth) | Written via `set_pulse_definition()` |
-| `calibration.json` | **Disk** (source of truth) | Only via `CalibrationStore` in `COMMITTING` state |
+| `calibration.json` | **Disk** (source of truth) | Only via `CalibrationStore`; serialized with `exclude_none=True` |
 | `cqed_params.json` | **Disk** (legacy compat) | Written by `save_attributes()`; read-only in v2 path |
 | `measureConfig.json` | **Disk** | Written by measureMacro lifecycle |
 | `devices.json` | **Disk** | Manual edits; written by `DeviceManager.save()` |
@@ -1429,23 +1488,43 @@ the `"module:Class"` format, supporting QCoDeS and InstrumentServer backends.
 
 ```json
 {
-  "version": "3.0.0",
+  "version": "4.0.0",
+  "context": {
+    "device_id": "...",
+    "cooldown_id": "...",
+    "wiring_rev": "...",
+    "schema_version": "4.0.0",
+    "config_hash": "...",
+    "created": "..."
+  },
   "discrimination": {
-    "<element>": { "threshold": ..., "angle": ..., "mu_g": [...], ... }
+    "<element>": {
+      "threshold": ..., "angle": ..., "mu_g": [...], "mu_e": [...],
+      "sigma_g": ..., "sigma_e": ..., "fidelity": ...,
+      "confusion_matrix": [[...], [...]],
+      "n_shots": ..., "integration_time_ns": ...,
+      "demod_weights": ["..."], "state_prep_ops": ["..."]
+    }
   },
   "readout_quality": {
-    "<element>": { "F": ..., "Q": ..., "V": ..., ... }
+    "<element>": {
+      "F": ..., "Q": ..., "V": ..., "t01": ..., "t10": ...,
+      "confusion_matrix": [[...], [...]],
+      "n_shots": ..., "state_prep_ops": ["..."]
+    }
   },
   "frequencies": {
-    "<element>": { "lo_freq": ..., "if_freq": ..., "qubit_freq": ..., ... }
+    "<resonator_element>": { "lo_freq": ..., "if_freq": ... },
+    "<qubit_element>":     { "qubit_freq": ... }
   },
   "coherence": {
-    "<element>": { "T1": ..., "T2_ramsey": ..., ... }
+    "<element>": { "T1": ..., "T2_ramsey": ..., "T2_echo": ... }
   },
   "pulse_calibrations": {
-    "<name>": { "pulse_name": "x180", "element": "qubit", "amplitude": ..., ... }
+    "ref_r180":     { "pulse_name": "ref_r180", "element": "qubit", "amplitude": ..., "length": ..., "sigma": ..., "drag_coeff": ... },
+    "sel_ref_r180": { "pulse_name": "sel_ref_r180", "element": "qubit", "amplitude": ... }
   },
-  "fit_history": [ ... ],
+  "fit_history": { ... },
   "pulse_train_results": { ... },
   "fock_sqr_calibrations": { ... },
   "multi_state_calibration": { ... },
@@ -1453,6 +1532,20 @@ the `"module:Class"` format, supporting QCoDeS and InstrumentServer backends.
   "last_modified": "..."
 }
 ```
+
+**Important conventions:**
+
+- Fields with `None` / unset values are **omitted** from the JSON (not stored as `null`).
+- Only calibration primitives (`ref_r180`, `sel_ref_r180`) appear in `pulse_calibrations`.
+  Derived pulses (`x180`, `y180`, etc.) are computed by `PulseFactory` at runtime.
+- The `context` block is present in v4.0.0; absent (or `null`) in legacy v3.0.0 files.
+- `discrimination` and `readout_quality` entries should only contain fields that
+  were actually produced by the calibration pipeline.  Do not include `confusion_matrix`
+  unless one was computed.
+- Readout metadata (`n_shots`, `integration_time_ns`, `demod_weights`, `state_prep_ops`)
+  ensures reproducibility across cooldowns.
+- Frequency blocks store only physically relevant parameters per element:
+  a resonator stores `lo_freq`/`if_freq`; a qubit stores `qubit_freq`.
 
 ### 7.3 Relationship Between Config Files
 
@@ -1484,7 +1577,7 @@ unsupported versions and never silently upgrades.
 |------|---------------|-----------------|
 | `hardware.json` | `version` | 1 |
 | `pulse_specs.json` | `schema_version` | 1 |
-| `calibration.json` | `version` | `"3.0.0"` |
+| `calibration.json` | `version` | `"4.0.0"` |
 | `measureConfig.json` | `_version` | 5 |
 | `devices.json` | `schema_version` | 1 |
 | `pulses.json` (deprecated) | `_schema_version` | 2 |
@@ -1846,8 +1939,7 @@ print(f"Gate error = {analysis.metrics['gate_error']:.4f}")
 # DRAG calibration
 drag = DRAGCalibration(session)
 result = drag.run(amps=np.linspace(-0.5, 0.5, 20), n_avg=5000, base_alpha=1.0)
-analysis = drag.analyze(result, update_calibration=True,
-                        propagate_drag_to_primitives=True)
+analysis = drag.analyze(result, update_calibration=True)
 print(f"Optimal alpha = {analysis.metrics['optimal_alpha']}")
 
 # Randomized benchmarking

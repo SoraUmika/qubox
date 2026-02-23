@@ -361,6 +361,9 @@ class DRAGCalibration(ExperimentBase):
         }
 
         if update_calibration:
+            # Only patch the reference pulse — derived primitives (x180, y180, …)
+            # inherit drag_coeff via the PulseFactory rotation_derived mechanism
+            # and must NOT be stored in calibration.json.
             metadata.setdefault("proposed_patch_ops", []).extend([
                 {
                     "op": "SetCalibration",
@@ -370,31 +373,10 @@ class DRAGCalibration(ExperimentBase):
                     },
                 },
                 {
-                    "op": "SetCalibration",
-                    "payload": {
-                        "path": "pulse_calibrations.x180.drag_coeff",
-                        "value": float(metrics["optimal_alpha"]),
-                    },
+                    "op": "TriggerPulseRecompile",
+                    "payload": {"include_volatile": True},
                 },
             ])
-
-            if bool(kw.get("propagate_drag_to_primitives", True)):
-                for pulse_name in ("y180", "x90", "xn90", "y90", "yn90"):
-                    metadata.setdefault("proposed_patch_ops", []).append(
-                        {
-                            "op": "SetCalibration",
-                            "payload": {
-                                "path": f"pulse_calibrations.{pulse_name}.drag_coeff",
-                                "value": float(metrics["optimal_alpha"]),
-                            },
-                        }
-                    )
-                metadata.setdefault("proposed_patch_ops", []).append(
-                    {
-                        "op": "TriggerPulseRecompile",
-                        "payload": {"include_volatile": True},
-                    }
-                )
 
         analysis = AnalysisResult.from_run(result, metrics=metrics, metadata=metadata)
 
