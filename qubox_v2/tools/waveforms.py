@@ -541,9 +541,6 @@ def CLEAR_waveform(
 
     return env
 
-import numpy as np
-from collections.abc import Sequence
-
 def design_clear_kicks_from_rates(
     kappa_rad_s: float,
     chi_rad_s: float,

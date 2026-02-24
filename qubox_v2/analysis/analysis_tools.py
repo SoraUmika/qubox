@@ -25,7 +25,7 @@ def compute_probabilities(values: Sequence[bool] | np.ndarray) -> Mapping[str, f
     total = arr.size
     count_true = int(arr.sum())       # True counts as 1
     p_true = count_true / total
-    return np.array([1.0 - p_true, p_true])
+    return {"P(True)": p_true, "P(False)": 1.0 - p_true}
 
 def complex_encoder(obj):
     """Encode complex numbers and numpy arrays as JSON-safe dicts."""
@@ -63,7 +63,6 @@ def complex_decoder(d):
     # 3) Anything else: leave as normal dict
     return d
 
-from qualang_tools.units import unit
 def demod2volts(S, duration, axis=0):
     u = unit()
     S = np.asarray(S)
@@ -667,8 +666,6 @@ def two_state_discriminator(
                 fig.tight_layout()
 
     return out
-
-import numpy as np
 
 # -----------------------------
 # Shared helpers

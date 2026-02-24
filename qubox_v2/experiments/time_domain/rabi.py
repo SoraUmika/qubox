@@ -44,6 +44,7 @@ class TemporalRabi(ExperimentBase):
                 pp.proc_attach("pulse_durations", pulse_clks * 4),
             ],
         )
+        self._run_params = {"op": pulse}
         self.save_output(result.output, "temporalRabi")
         return result
 
@@ -79,17 +80,18 @@ class TemporalRabi(ExperimentBase):
 
         if update_calibration and self.calibration_store and fit.params:
             if fit.params["f_Rabi"] != 0:
+                target_op = self._run_params.get("op") if hasattr(self, "_run_params") else "ref_r180"
                 sweep_lo = float(np.min(durations))
                 sweep_hi = float(np.max(durations))
                 self.guarded_calibration_commit(
                     analysis=analysis,
                     run_result=result,
-                    calibration_tag="temporal_rabi_x180",
+                    calibration_tag=f"temporal_rabi_{target_op}",
                     min_r2=min_r2,
                     required_metrics={"pi_length": (sweep_lo, sweep_hi)},
-                    extra_metadata={"sweep_min_ns": sweep_lo, "sweep_max_ns": sweep_hi},
+                    extra_metadata={"sweep_min_ns": sweep_lo, "sweep_max_ns": sweep_hi, "target_op": target_op},
                     apply_update=lambda: self.calibration_store.set_pulse_calibration(
-                        name="ref_r180", pi_length=1.0 / (2 * fit.params["f_Rabi"]),
+                        name=target_op, pi_length=1.0 / (2 * fit.params["f_Rabi"]),
                     ),
                 )
 
@@ -288,3 +290,26 @@ class SequentialQubitRotations(ExperimentBase):
                 pp.proc_attach("rotations", rotations),
             ],
         )
+
+    def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        S = result.output.extract("S")
+        rotations = result.output.extract("rotations")
+        metrics: dict[str, Any] = {"n_rotations": len(rotations) if rotations is not None else 0}
+        return AnalysisResult.from_run(result, metrics=metrics)
+
+    def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
+        S = analysis.data.get("S")
+        if S is None:
+            return None
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 5))
+        else:
+            fig = ax.figure
+        ax.plot(np.abs(S), "o-", ms=4)
+        ax.set_xlabel("Rotation Index")
+        ax.set_ylabel("Magnitude")
+        ax.set_title("Sequential Qubit Rotations")
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+        return fig

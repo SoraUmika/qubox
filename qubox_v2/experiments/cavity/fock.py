@@ -69,12 +69,23 @@ class FockResolvedSpectroscopy(ExperimentBase):
         )
         result = self.run_program(
             prog, n_total=n_avg,
-            processors=[pp.proc_default],
+            processors=[
+                lambda out: pp.proc_default(out, targets=[("I_sel", "Q_sel", "")]),
+                pp.proc_attach("frequencies", np.array(probe_fqs, dtype=float)),
+            ],
         )
         self.save_output(result.output, "fockResolvedSpectroscopy")
         return result
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        if "S" not in result.output:
+            logger.warning(
+                "FockResolvedSpectroscopy: 'S' not found in output. "
+                "Available keys: %s. Check that run() processors specify the "
+                "correct I/Q targets for this program.",
+                list(result.output.keys()) if hasattr(result.output, 'keys') else '(unknown)',
+            )
+            return AnalysisResult.from_run(result, metrics={})
         S = result.output.extract("S")
         metrics: dict[str, Any] = {}
 
@@ -98,15 +109,21 @@ class FockResolvedSpectroscopy(ExperimentBase):
         if S is None:
             return None
 
+        freqs = analysis.data.get("frequencies")
+        has_freqs = freqs is not None and len(freqs) > 0
+        x_vals = freqs / 1e6 if has_freqs else None
+        x_label = "Frequency (MHz)" if has_freqs else "Point Index"
+
         if S.ndim == 2:
             n_fock = S.shape[0]
             fig, axes = plt.subplots(1, n_fock, figsize=(5 * n_fock, 4), squeeze=False)
             axes = axes[0]
             for n in range(n_fock):
                 mag = np.abs(S[n])
-                axes[n].plot(mag, "o-", ms=3)
+                x = x_vals if has_freqs else np.arange(len(mag))
+                axes[n].plot(x, mag, "o-", ms=3)
                 axes[n].set_title(f"Fock |{n}>")
-                axes[n].set_xlabel("Point Index")
+                axes[n].set_xlabel(x_label)
                 axes[n].set_ylabel("Magnitude")
                 axes[n].grid(True, alpha=0.3)
         else:
@@ -115,8 +132,9 @@ class FockResolvedSpectroscopy(ExperimentBase):
             else:
                 fig = ax.figure
             mag = np.abs(S)
-            ax.plot(mag, "o-", ms=3)
-            ax.set_xlabel("Point Index")
+            x = x_vals if has_freqs else np.arange(len(mag))
+            ax.plot(x, mag, "o-", ms=3)
+            ax.set_xlabel(x_label)
             ax.set_ylabel("Magnitude")
             ax.set_title("Fock-Resolved Spectroscopy")
             ax.grid(True, alpha=0.3)

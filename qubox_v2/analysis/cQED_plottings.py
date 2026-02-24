@@ -440,7 +440,7 @@ def plot_wigner(W: np.ndarray,
     
 def plot_IQ(datasets, labels=None, ax=None, **scatter_kwargs):
     """
-    Scatterâ€plot one or more complex IQ datasets on the Iâ€“Q plane.
+    Scatter-plot one or more complex IQ datasets on the I-Q plane.
 
     Parameters
     ----------

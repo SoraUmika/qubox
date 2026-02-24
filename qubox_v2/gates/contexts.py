@@ -1,10 +1,6 @@
 # qubox_v2/gates/contexts.py
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional
-from .hash_utils import stable_hash
-
-from dataclasses import dataclass
 from typing import Optional, Dict
 from .hash_utils import stable_hash
 

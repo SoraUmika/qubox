@@ -114,5 +114,5 @@ class DisplacementHardware(GateHardware):
         from qm import qua
         qua.play(self.op, self.target)
         if align_after:
-            qua.align(self.target)
+            qua.align()
 

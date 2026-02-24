@@ -5,12 +5,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from ..analysis.pulseOp import PulseOp
 from ..analysis.algorithms import compute_waveform_fft
+from ..core.types import MAX_AMPLITUDE, BASE_AMPLITUDE
 import logging
 
 _logger = logging.getLogger(__name__)
-
-MAX_AMPLITUDE  = 0.45
-BASE_AMPLITUDE = 0.24
 
 class _ResourceStore:
     """Container for waveforms, pulses, weights and element-op mappings."""

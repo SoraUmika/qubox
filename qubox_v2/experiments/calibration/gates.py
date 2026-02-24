@@ -193,6 +193,7 @@ class DRAGCalibration(ExperimentBase):
         n_avg: int = 1000,
         *,
         base_alpha: float = 1.0,
+        calibration_op: str = "ref_r180",
         x180: str = "x180",
         x90: str = "x90",
         y180: str = "y180",
@@ -211,6 +212,9 @@ class DRAGCalibration(ExperimentBase):
             The effective DRAG coefficient at each point is
             ``base_alpha * amps[i]``.  Set to 1.0 (default) so that the
             ``amps`` axis directly represents the DRAG coefficient.
+        calibration_op : str
+            Reference pulse calibration entry to read parameters from
+            and to target for DRAG coefficient updates (default: ``"ref_r180"``).
         x180, x90, y180, y90 : str
             Fallback pulse operation names (used only when ``base_alpha``
             is exactly 0, i.e. no temporary waveform generation).
@@ -242,7 +246,7 @@ class DRAGCalibration(ExperimentBase):
         # ----- Legacy parity: generate DRAG waveforms with base_alpha -----
         # Retrieve pulse parameters from calibration store or attributes
         cal = self.calibration_store
-        ref_cal = cal.get_pulse_calibration("ref_r180") if cal else None
+        ref_cal = cal.get_pulse_calibration(calibration_op) if cal else None
 
         rlen = int(ref_cal.length) if (ref_cal and ref_cal.length) else getattr(attr, "rlen", 16)
         sigma = float(ref_cal.sigma) if (ref_cal and ref_cal.sigma) else rlen / 6.0
@@ -320,6 +324,7 @@ class DRAGCalibration(ExperimentBase):
             ],
             targets=[("I1", "Q1"), ("I2", "Q2")],
         )
+        self._run_params = {"calibration_op": calibration_op}
         self.save_output(result.output, "dragCalibration")
         return result
 
@@ -356,11 +361,13 @@ class DRAGCalibration(ExperimentBase):
 
         metadata: dict[str, Any] = {
             "calibration_kind": "drag_alpha",
+            "target_op": (self._run_params.get("calibration_op") if hasattr(self, "_run_params") else "ref_r180"),
             "units": {"optimal_alpha": "a.u."},
             "quality_gate_required": True,
         }
 
         if update_calibration:
+            target_op = metadata["target_op"]
             # Only patch the reference pulse — derived primitives (x180, y180, …)
             # inherit drag_coeff via the PulseFactory rotation_derived mechanism
             # and must NOT be stored in calibration.json.
@@ -368,7 +375,7 @@ class DRAGCalibration(ExperimentBase):
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": "pulse_calibrations.ref_r180.drag_coeff",
+                        "path": f"pulse_calibrations.{target_op}.drag_coeff",
                         "value": float(metrics["optimal_alpha"]),
                     },
                 },

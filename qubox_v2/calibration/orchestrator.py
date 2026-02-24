@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -28,6 +27,7 @@ class CalibrationOrchestrator:
 
     def __init__(self, session, *, patch_rules: dict[str, list[Any]] | None = None):
         self.session = session
+        self._applied_patches: list[str] = []
         rules = default_patch_rules(session)
         if patch_rules:
             for kind, kind_rules in patch_rules.items():
@@ -235,11 +235,18 @@ class CalibrationOrchestrator:
             except Exception:
                 pass  # non-fatal; sync is best-effort
 
+            tag = getattr(patch, "reason", None) or f"patch_{len(self._applied_patches)}"
+            self._applied_patches.append(tag)
+
         return {
             "dry_run": dry_run,
             "n_updates": len(patch.updates),
             "preview": preview,
         }
+
+    def list_applied_patches(self) -> list[str]:
+        """Return list of patch tags applied during this session."""
+        return list(self._applied_patches)
 
     def persist_artifact(self, artifact: Artifact) -> Path:
         root = Path(self.session.experiment_path) / "artifacts" / "runtime"

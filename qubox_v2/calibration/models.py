@@ -113,8 +113,12 @@ class CoherenceParams(BaseModel):
     """Coherence time calibration results."""
 
     T1: float | None = None        # seconds
+    T1_us: float | None = None     # microseconds (convenience, from T1 experiment)
     T2_ramsey: float | None = None  # seconds
+    T2_star_us: float | None = None  # microseconds (convenience, from Ramsey)
     T2_echo: float | None = None   # seconds
+    T2_echo_us: float | None = None  # microseconds (convenience, from echo)
+    qb_therm_clks: int | None = None  # qubit thermalization wait (clock cycles)
     timestamp: str | None = None
 
 
@@ -137,6 +141,7 @@ class PulseCalibration(BaseModel):
     sigma: float | None = None
     drag_coeff: float | None = None
     detuning: float | None = None
+    phase_offset: float | None = None  # radians (from pulse-train tomography)
     timestamp: str | None = None
 
 

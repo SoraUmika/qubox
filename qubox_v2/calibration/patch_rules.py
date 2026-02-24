@@ -145,11 +145,14 @@ class DragAlphaRule:
             return None
 
         alpha = params["optimal_alpha"]
+        metadata = (result.evidence or {}).get("analysis_metadata", {}) or {}
+        target_op = str(metadata.get("target_op", "ref_r180"))
+
         patch = Patch(reason="DragAlphaRule", provenance={"kind": result.kind})
-        # Only patch the reference pulse — derived primitives (x180, y180, …)
+        # Only patch the target reference pulse — derived primitives (x180, y180, …)
         # inherit drag_coeff via the PulseFactory rotation_derived mechanism
         # and must NOT be stored in calibration.json.
-        patch.add("SetCalibration", path="pulse_calibrations.ref_r180.drag_coeff", value=alpha)
+        patch.add("SetCalibration", path=f"pulse_calibrations.{target_op}.drag_coeff", value=alpha)
         patch.add("TriggerPulseRecompile", include_volatile=True)
         return patch
 

@@ -948,89 +948,56 @@ class DeviceSpec:
 Acquire  →  Analyze  →  Plot  →  User Confirm  →  Commit
 ```
 
-### 4.2 Calibration State Machine
+### 4.2 CalibrationOrchestrator
 
-**Module**: `qubox_v2.calibration.state_machine`
+**Module**: `qubox_v2.calibration.orchestrator`
 
-```python
-class CalibrationState(str, Enum):
-    IDLE             = "idle"
-    CONFIGURED       = "configured"
-    ACQUIRING        = "acquiring"
-    ACQUIRED         = "acquired"
-    ANALYZING        = "analyzing"
-    ANALYZED         = "analyzed"
-    PLOTTED          = "plotted"
-    PENDING_APPROVAL = "pending_approval"
-    COMMITTING       = "committing"
-    COMMITTED        = "committed"
-    FAILED           = "failed"
-    ABORTED          = "aborted"
-    ROLLED_BACK      = "rolled_back"
+The `CalibrationOrchestrator` owns the full calibration lifecycle:
+
 ```
-
-**Transition rules:**
-
-- Only transitions listed in `ALLOWED_TRANSITIONS` are legal.
-- `FAILED` and `ABORTED` are reachable from any state.
-- `calibration.json` may only be written when state is `COMMITTING`.
-- Transition to `COMMITTING` requires passing through `PENDING_APPROVAL`.
-- No state may be skipped.
-- Every transition is logged with a timestamp.
-
-```python
-class CalibrationStateMachine:
-    def __init__(self, experiment: str) -> None
-
-    def transition(self, target: CalibrationState) -> None
-    def can_transition(self, target: CalibrationState) -> bool
-    def is_committable(self) -> bool
-    def abort(self, reason: str = "") -> None
-    def fail(self, error: str) -> None
-    def summary(self) -> dict[str, Any]
-```
-
-**Failure mode**: `CalibrationStateError` raised on illegal transition.
-
-### 4.3 CalibrationPatch
-
-**Module**: `qubox_v2.calibration.state_machine`  
-**Purpose**: Explicit diff object for calibration updates.
-
-```python
-@dataclass
-class CalibrationPatch:
-    experiment: str
-    timestamp: str                          # Auto ISO-8601
-    changes: list[PatchEntry] = field(...)
-    validation: PatchValidation = field(...)
-    metadata: dict[str, Any] = field(...)
+run_experiment -> Artifact
+persist_artifact
+analyze -> CalibrationResult
+build_patch -> Patch
+apply_patch (dry_run=True for preview, False to commit)
 ```
 
 ```python
-@dataclass(frozen=True)
-class PatchEntry:
-    path: str       # Dotted key path, e.g. "readout.ge_angle"
-    old_value: Any
-    new_value: Any
-    dtype: str = ""
+class CalibrationOrchestrator:
+    def __init__(self, session, *, patch_rules=None) -> None
+    def run_experiment(self, exp, **run_kwargs) -> Artifact
+    def analyze(self, exp, artifact, **analyze_kwargs) -> CalibrationResult
+    def build_patch(self, result: CalibrationResult) -> Patch
+    def apply_patch(self, patch: Patch, dry_run: bool = False) -> dict
+    def run_analysis_patch_cycle(self, exp, *, run_kwargs=None,
+        analyze_kwargs=None, persist_artifact=True, apply=False) -> dict
+    def persist_artifact(self, artifact: Artifact) -> Path
+    def list_applied_patches(self) -> list[str]
 ```
 
-```python
-@dataclass(frozen=True)
-class PatchValidation:
-    passed: bool
-    checks: dict[str, bool] = field(default_factory=dict)
-    reasons: list[str] = field(default_factory=list)
-```
+Convenience method `run_analysis_patch_cycle()` runs the full flow in one
+call and returns a dict with `artifact`, `calibration_result`, `patch`,
+`dry_run` preview, and optional `apply_result`.
 
-| Method | Signature | Return |
-|--------|-----------|--------|
-| `add_change` | `(path, old_value, new_value, dtype="") -> None` | `None` |
-| `override_validation` | `(gate, reason, user="") -> None` | `None` |
-| `is_approved` | `() -> bool` | `bool` |
-| `summary` | `() -> str` | `str` |
-| `to_dict` | `() -> dict[str, Any]` | `dict` |
+### 4.3 Calibration Contracts
+
+**Module**: `qubox_v2.calibration.contracts`
+
+| Dataclass | Purpose | Key Fields |
+|-----------|---------|------------|
+| `Artifact` | Raw experiment output snapshot | `name`, `data`, `raw`, `meta`, `artifact_id` |
+| `CalibrationResult` | Typed analysis result for patch rules | `kind`, `params`, `uncertainties`, `quality`, `evidence` |
+| `Patch` | Ordered list of calibration updates | `reason`, `updates: list[UpdateOp]`, `provenance` |
+| `UpdateOp` | Single calibration mutation | `op` (str), `payload` (dict) |
+
+Supported `UpdateOp.op` values:
+- `SetCalibration` — write to calibration store via dotted path
+- `SetPulseParam` — update a pulse parameter
+- `SetMeasureWeights` — update integration weights
+- `SetMeasureDiscrimination` — update discrimination params
+- `SetMeasureQuality` — update readout quality params
+- `PersistMeasureConfig` — write measureConfig.json
+- `TriggerPulseRecompile` — rebuild pulse waveforms
 
 ### 4.4 Calibration Data Models
 
@@ -1134,43 +1101,6 @@ for item in t1_cycle["dry_run"]["preview"]:
 # orch.apply_patch(t1_cycle["patch"], dry_run=False)
 ```
 
-**State machine pattern (manual calibration lifecycle):**
-
-```python
-from qubox_v2.calibration.state_machine import (
-    CalibrationStateMachine, CalibrationState,
-    CalibrationPatch, PatchValidation,
-)
-
-sm = CalibrationStateMachine(experiment="drag_calibration")
-sm.transition(CalibrationState.CONFIGURED)
-sm.transition(CalibrationState.ACQUIRING)
-sm.transition(CalibrationState.ACQUIRED)
-sm.transition(CalibrationState.ANALYZING)
-
-# Build patch from analysis results
-patch = CalibrationPatch(experiment="drag_calibration")
-patch.add_change(
-    path="pulse_calibrations.ref_r180.drag_coeff",
-    old_value=0.0,
-    new_value=float(optimal_alpha),
-)
-patch.validation = PatchValidation(
-    passed=True,
-    checks={"alpha_finite": True, "alpha_bounds": abs(optimal_alpha) < 5.0},
-)
-sm.patch = patch
-
-sm.transition(CalibrationState.ANALYZED)
-sm.transition(CalibrationState.PENDING_APPROVAL)
-
-# Review and commit
-print(patch.summary())
-if patch.is_approved():
-    sm.transition(CalibrationState.COMMITTING)
-    sm.transition(CalibrationState.COMMITTED)
-```
-
 **Full readout calibration pipeline (explicit patch model):**
 
 ```python
@@ -1219,7 +1149,7 @@ session.calibration.save()
 
 ### 4.6 When `calibration.json` is Written
 
-1. **Only** during the `COMMITTING` state of `CalibrationStateMachine`.
+1. Via `CalibrationOrchestrator.apply_patch(patch, dry_run=False)` — the recommended path.
 2. **Or** via `CalibrationStore.save()` / auto-save after `set_*()`.
 3. **Never** during `__init__()` or `analyze()` without validation gates.
 
@@ -1600,7 +1530,7 @@ validate_config_dir(config_dir) -> list[ValidationResult]
 
 ### 7.5 What Must Never Auto-Overwrite
 
-1. `calibration.json` — only written during `COMMITTING` state.
+1. `calibration.json` — only written via `CalibrationOrchestrator.apply_patch()` or explicit `CalibrationStore.save()`.
 2. `hardware.json` — manual edits only.
 3. `calibration_history.jsonl` — append-only, never truncated.
 

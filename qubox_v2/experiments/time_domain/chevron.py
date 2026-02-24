@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase, create_clks_array
+from ..result import AnalysisResult
 from ...analysis import post_process as pp
 from ...hardware.program_runner import RunResult
 from ...programs import cQED_programs
@@ -45,6 +47,32 @@ class TimeRabiChevron(ExperimentBase):
         self.save_output(result.output, "timeRabiChevron")
         return result
 
+    def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        durations = result.output.extract("pulse_durations")
+        detunings = result.output.extract("detunings")
+        S = result.output.extract("S")
+        mag = np.abs(S)
+        return AnalysisResult.from_run(result, metrics={"shape": mag.shape})
+
+    def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
+        S = analysis.data.get("S")
+        durations = analysis.data.get("pulse_durations")
+        detunings = analysis.data.get("detunings")
+        if S is None or durations is None or detunings is None:
+            return None
+        mag = np.abs(S)
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+        else:
+            fig = ax.figure
+        ax.pcolormesh(durations, detunings / 1e6, mag, shading="auto")
+        ax.set_xlabel("Pulse Duration (ns)")
+        ax.set_ylabel("Detuning (MHz)")
+        ax.set_title("Time Rabi Chevron")
+        plt.tight_layout()
+        plt.show()
+        return fig
+
 
 class PowerRabiChevron(ExperimentBase):
     """2-D sweep: Rabi oscillations vs detuning and amplitude."""
@@ -82,6 +110,32 @@ class PowerRabiChevron(ExperimentBase):
         self.save_output(result.output, "powerRabiChevron")
         return result
 
+    def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        gains = result.output.extract("gains")
+        detunings = result.output.extract("detunings")
+        S = result.output.extract("S")
+        mag = np.abs(S)
+        return AnalysisResult.from_run(result, metrics={"shape": mag.shape})
+
+    def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
+        S = analysis.data.get("S")
+        gains = analysis.data.get("gains")
+        detunings = analysis.data.get("detunings")
+        if S is None or gains is None or detunings is None:
+            return None
+        mag = np.abs(S)
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+        else:
+            fig = ax.figure
+        ax.pcolormesh(gains, detunings / 1e6, mag, shading="auto")
+        ax.set_xlabel("Amplitude (a.u.)")
+        ax.set_ylabel("Detuning (MHz)")
+        ax.set_title("Power Rabi Chevron")
+        plt.tight_layout()
+        plt.show()
+        return fig
+
 
 class RamseyChevron(ExperimentBase):
     """2-D sweep: Ramsey fringes vs detuning and delay."""
@@ -117,3 +171,29 @@ class RamseyChevron(ExperimentBase):
         )
         self.save_output(result.output, "ramseyChevron")
         return result
+
+    def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        delays = result.output.extract("delays")
+        detunings = result.output.extract("detunings")
+        S = result.output.extract("S")
+        mag = np.abs(S)
+        return AnalysisResult.from_run(result, metrics={"shape": mag.shape})
+
+    def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
+        S = analysis.data.get("S")
+        delays = analysis.data.get("delays")
+        detunings = analysis.data.get("detunings")
+        if S is None or delays is None or detunings is None:
+            return None
+        mag = np.abs(S)
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+        else:
+            fig = ax.figure
+        ax.pcolormesh(delays, detunings / 1e6, mag, shading="auto")
+        ax.set_xlabel("Delay (ns)")
+        ax.set_ylabel("Detuning (MHz)")
+        ax.set_title("Ramsey Chevron")
+        plt.tight_layout()
+        plt.show()
+        return fig

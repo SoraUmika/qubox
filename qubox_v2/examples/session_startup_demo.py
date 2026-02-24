@@ -7,8 +7,7 @@ Demonstrates the new declarative architecture flow:
 2. SessionState construction (immutable snapshot + build hash)
 3. PulseFactory compilation from pulse_specs.json
 4. ArtifactManager setup (build-hash keyed)
-5. CalibrationStateMachine lifecycle
-6. Verification checks
+5. Verification checks
 
 This script runs in "dry" mode — no hardware connection required.
 It exercises all new modules against the config directory.
@@ -165,77 +164,9 @@ def run_demo(config_dir: str | Path, *, verbose: bool = False) -> bool:
     print()
 
     # ---------------------------------------------------------------
-    # Step 5: CalibrationStateMachine Demo
+    # Step 5: Verification Checks
     # ---------------------------------------------------------------
-    print("Step 5: CalibrationStateMachine Lifecycle")
-    print("-" * 40)
-
-    try:
-        from ..calibration.state_machine import (
-            CalibrationStateMachine,
-            CalibrationState,
-            CalibrationPatch,
-            PatchValidation,
-        )
-
-        sm = CalibrationStateMachine(experiment="demo_power_rabi")
-        print(f"  Initial state: {sm.state.value}")
-
-        # Walk through a typical lifecycle
-        transitions = [
-            CalibrationState.CONFIGURED,
-            CalibrationState.ACQUIRING,
-            CalibrationState.ACQUIRED,
-            CalibrationState.ANALYZING,
-        ]
-
-        for target in transitions:
-            sm.transition(target)
-            print(f"  → {sm.state.value}")
-
-        # Create and attach a patch
-        patch = CalibrationPatch(experiment="demo_power_rabi")
-        patch.add_change(
-            path="pulse_calibrations.ref_r180.amplitude",
-            old_value=0.11165,
-            new_value=0.11234,
-            dtype="float",
-        )
-        patch.validation = PatchValidation(
-            passed=True,
-            checks={"min_r2": True, "bounds_check": True},
-        )
-        sm.patch = patch
-
-        sm.transition(CalibrationState.ANALYZED)
-        print(f"  → {sm.state.value}")
-
-        sm.transition(CalibrationState.PENDING_APPROVAL)
-        print(f"  → {sm.state.value}")
-        print(f"  Committable: {sm.is_committable()}")
-
-        # Show patch summary
-        print()
-        print("  Patch Summary:")
-        for line in patch.summary().split("\n"):
-            print(f"    {line}")
-
-        print()
-        print(f"  State machine summary:")
-        summary = sm.summary()
-        print(f"    Transitions: {summary['transitions']}")
-        print(f"    Has patch: {summary['has_patch']}")
-
-    except Exception as exc:
-        print(f"  StateMachine error: {exc}")
-        all_ok = False
-
-    print()
-
-    # ---------------------------------------------------------------
-    # Step 6: Verification Checks
-    # ---------------------------------------------------------------
-    print("Step 6: Verification Checks")
+    print("Step 5: Verification Checks")
     print("-" * 40)
 
     # Schema model checks

@@ -315,13 +315,19 @@ class NumSplittingSpectroscopy(ExperimentBase):
             return None
 
         mag = np.abs(S)
+        freqs = analysis.data.get("frequencies")
+
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 5))
         else:
             fig = ax.figure
 
-        ax.plot(mag, "o-", ms=4, label="Data")
-        ax.set_xlabel("Point Index")
+        if freqs is not None and len(freqs) == len(mag):
+            ax.plot(freqs / 1e6, mag, "o-", ms=4, label="Data")
+            ax.set_xlabel("Frequency (MHz)")
+        else:
+            ax.plot(mag, "o-", ms=4, label="Data")
+            ax.set_xlabel("Point Index")
         ax.set_ylabel("Magnitude")
         ax.set_title("Number Splitting Spectroscopy")
         ax.legend()

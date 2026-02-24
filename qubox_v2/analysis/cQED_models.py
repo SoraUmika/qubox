@@ -841,9 +841,6 @@ number_split_frequency_model.equation = r'$f(n) = f_{q,0} + \chi\,n + \chi_2\,n(
 
 
 
-from scipy.special import factorial
-
-
 
 def coherent_population_model(n, alpha):
 

@@ -148,3 +148,90 @@ or orchestrator defaults.
 - `notebooks/post_cavity_experiment.ipynb`
 - `tools/build_context_notebook.py`
 - `qubox_v2/examples/session_startup_demo.py`
+
+### 2026-02-23 — Codebase Audit Cleanup (Post-Refactor Sweep)
+
+**Classification: Major**
+
+Comprehensive codebase audit and cleanup covering ~30 distinct issues across
+all modules. Removes dead `CalibrationStateMachine` subsystem per architecture
+decision to standardize on `CalibrationOrchestrator`.
+
+**Summary:**
+
+1. **Architecture: Remove CalibrationStateMachine (H1/H2)**
+   - Deleted `calibration/state_machine.py` and `calibration/patch.py` (dead code).
+   - Removed CalibrationStateMachine demo from `examples/session_startup_demo.py`.
+   - Updated notebook cells referencing state machines (cells 44, 45, 104, 112).
+   - Updated `API_REFERENCE.md` sections 4.2, 4.3, 4.6 and 7.5 to remove
+     CalibrationStateMachine references, replaced with CalibrationOrchestrator
+     and Contracts documentation.
+
+2. **Critical field mismatches (C1)**
+   - Added `T1_us`, `T2_star_us`, `T2_echo_us`, `qb_therm_clks` to
+     `CoherenceParams` in `calibration/models.py`.
+   - Added `phase_offset` to `PulseCalibration` in `calibration/models.py`.
+
+3. **Return type fix (C2)**
+   - `compute_probabilities()` in `analysis/analysis_tools.py` now returns
+     `dict` matching its `-> Mapping[str, float]` annotation.
+
+4. **Missing exports (C3, C4, H5)**
+   - Exported `SNAPHardware` from `gates/hardware/__init__.py`.
+   - Exported `PulseTrainRule` from `calibration/__init__.py`.
+   - Exported `PulseError`, `CalibrationError` from `core/__init__.py`.
+
+5. **Standardize qua.align() (H6)**
+   - `DisplacementHardware.play_qua()`: `qua.align(self.target)` → `qua.align()`.
+
+6. **Stub analyze/plot methods (H3)**
+   - Added `analyze()` and `plot()` to `TimeRabiChevron`, `PowerRabiChevron`,
+     `RamseyChevron` in `experiments/time_domain/chevron.py`.
+   - Added `analyze()` and `plot()` to `SequentialQubitRotations` in
+     `experiments/time_domain/rabi.py`.
+
+7. **Orchestrator: list_applied_patches() (notebook support)**
+   - Added `_applied_patches` tracking list and `list_applied_patches()` method
+     to `CalibrationOrchestrator`.
+
+8. **Deduplicate constants (M6)**
+   - `pulses/manager.py` now imports `MAX_AMPLITUDE`, `BASE_AMPLITUDE` from
+     `core/types.py` instead of redefining them.
+
+9. **Remove duplicate imports (M7)**
+   - Cleaned duplicate imports in `tools/waveforms.py`, `gates/contexts.py`,
+     `analysis/analysis_tools.py`, `analysis/cQED_models.py`.
+
+10. **Fix analysis/__all__ (M8)**
+    - Removed misleading `"calibration_algorithms"` from `analysis/__init__.py`
+      `__all__` (lazy-loaded module, not eagerly imported).
+
+11. **Unused import removal (L1)**
+    - Removed unused `from dataclasses import asdict` in `calibration/orchestrator.py`.
+
+12. **Encoding artifact fix (L5)**
+    - Fixed UTF-8 mojibake in `analysis/cQED_plottings.py` line 443.
+
+**Files affected:**
+
+- `qubox_v2/calibration/state_machine.py` (deleted)
+- `qubox_v2/calibration/patch.py` (deleted)
+- `qubox_v2/calibration/models.py`
+- `qubox_v2/calibration/__init__.py`
+- `qubox_v2/calibration/orchestrator.py`
+- `qubox_v2/analysis/analysis_tools.py`
+- `qubox_v2/analysis/cQED_models.py`
+- `qubox_v2/analysis/cQED_plottings.py`
+- `qubox_v2/analysis/__init__.py`
+- `qubox_v2/core/__init__.py`
+- `qubox_v2/gates/hardware/__init__.py`
+- `qubox_v2/gates/hardware/displacement.py`
+- `qubox_v2/gates/contexts.py`
+- `qubox_v2/pulses/manager.py`
+- `qubox_v2/tools/waveforms.py`
+- `qubox_v2/experiments/time_domain/chevron.py`
+- `qubox_v2/experiments/time_domain/rabi.py`
+- `qubox_v2/examples/session_startup_demo.py`
+- `qubox_v2/docs/API_REFERENCE.md`
+- `qubox_v2/docs/CHANGELOG.md`
+- `notebooks/post_cavity_experiment_context.ipynb`
