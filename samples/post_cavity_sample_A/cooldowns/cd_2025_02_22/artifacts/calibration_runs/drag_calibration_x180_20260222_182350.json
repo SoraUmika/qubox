@@ -1,0 +1,33 @@
+{
+  "timestamp": "20260222_182350",
+  "experiment": "DRAGCalibration",
+  "calibration_tag": "drag_calibration_x180",
+  "validation_passed": true,
+  "validation_errors": [],
+  "fit": {
+    "model": null,
+    "params": null,
+    "uncertainties": null,
+    "r_squared": null
+  },
+  "metrics": {
+    "optimal_alpha": -0.0,
+    "alpha_candidates": [
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0,
+      -0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "base_alpha": 0.0
+  },
+  "run_metadata": {
+    "n_total": 5000
+  },
+  "extra_metadata": {}
+}

@@ -25,6 +25,152 @@ Each entry must include:
 
 ## Entries
 
+### 2026-02-24 — Namespace Rename: device -> sample
+
+**Classification: Major**
+
+Renamed the experiment database namespace from "device" to "sample" across
+the entire codebase.  The sample registry, experiment context, calibration
+context, session manager, notebook builder, and on-disk data all now use
+`sample_id` as the canonical identifier for physical chip samples.
+
+**Summary:**
+
+1. **Core rename (`qubox_v2/devices/sample_registry.py`)**
+   - `DeviceRegistry` -> `SampleRegistry`, `DeviceInfo` -> `SampleInfo`.
+   - Field renames: `device_id` -> `sample_id`, `sample_info` -> `metadata`.
+   - `DEVICE_LEVEL_FILES` -> `SAMPLE_LEVEL_FILES`.
+   - All method renames: `create_device` -> `create_sample`,
+     `device_exists` -> `sample_exists`, `device_path` -> `sample_path`,
+     `list_devices` -> `list_samples`, `load_device_info` -> `load_sample_info`.
+   - On-disk directory: `devices/` -> `samples/`, `device.json` -> `sample.json`.
+
+2. **Experiment context (`qubox_v2/core/experiment_context.py`)**
+   - `ExperimentContext.device_id` -> `sample_id`.
+   - `matches_device()` -> `matches_sample()`.
+   - `from_dict()` accepts legacy `"device_id"` key as fallback.
+
+3. **Session state (`qubox_v2/core/session_state.py`)**
+   - `device_id` field -> `sample_id`.
+   - `device_config_dir` param -> `sample_config_dir`.
+
+4. **Calibration layer**
+   - `CalibrationContext.device_id` -> `sample_id` (`calibration/models.py`).
+   - `CalibrationStore` migrates legacy `context.device_id` on load (`calibration/store.py`).
+   - `schemas.py` validation accepts both `sample_id` and `device_id` in context.
+
+5. **Context resolver (`qubox_v2/devices/context_resolver.py`)**
+   - All `device_id` params -> `sample_id`.
+
+6. **Session manager (`qubox_v2/experiments/session.py`)**
+   - Constructor param `device_id` -> `sample_id`.
+   - `_device_config_dir` -> `_sample_config_dir`.
+   - `from_device()` -> `from_sample()` (alias preserved).
+
+7. **Notebook and tools**
+   - `tools/build_context_notebook.py` updated (~25 edits).
+   - Notebook regenerated (110 cells).
+   - `tools/migrate_device_to_samples.py` created for on-disk data migration.
+
+8. **On-disk data migration**
+   - `devices/post_cavity_sample_A/` -> `samples/post_cavity_sample_A/`.
+   - `device.json` -> `sample.json` with key renames.
+   - 980 files migrated and validated.
+
+9. **Backward compatibility**
+   - `DeviceRegistry = SampleRegistry` alias in `devices/__init__.py`.
+   - `DeviceInfo = SampleInfo` alias.
+   - `SessionManager.from_device = from_sample` alias.
+   - `SampleRegistry` falls back to `devices/` dir if `samples/` missing.
+   - `from_dict()` methods accept legacy `"device_id"` keys.
+
+10. **Documentation**
+    - `API_REFERENCE.md` updated: 74 occurrences across 13 sections.
+    - Version bumped to 1.7.0.
+
+**Files affected:**
+- qubox_v2/devices/sample_registry.py (renamed from device_registry.py)
+- qubox_v2/devices/__init__.py
+- qubox_v2/devices/context_resolver.py
+- qubox_v2/core/experiment_context.py
+- qubox_v2/core/session_state.py
+- qubox_v2/core/schemas.py
+- qubox_v2/calibration/models.py
+- qubox_v2/calibration/store.py
+- qubox_v2/experiments/session.py
+- qubox_v2/docs/API_REFERENCE.md
+- qubox_v2/docs/CHANGELOG.md
+- tools/build_context_notebook.py
+- tools/migrate_device_to_samples.py (new)
+- notebooks/post_cavity_experiment_context.ipynb (regenerated)
+
+---
+
+### 2026-02-23 — Time-Unit Audit + Frequency Binding Hardening
+
+**Classification: Major**
+
+Targeted audit and fixes for time-unit consistency (`_clks` vs `ns`) and
+runtime frequency binding to calibrated state.
+
+**Summary:**
+
+1. **Canonical coherence unit enforcement (seconds)**
+   - T1 analysis now emits explicit `T1_ns`, `T1_s`, and `T1_us` metrics.
+   - Patch generation writes `coherence.<qb>.T1` in **seconds**.
+   - Added backward-compatible T1 patch rule handling for legacy keys.
+
+2. **Legacy coherence migration guard**
+   - Calibration store now normalizes legacy coherence values that were
+     accidentally persisted in ns to canonical seconds (using `*_us` when
+     available as authoritative companion values).
+
+3. **Butterfly T1-decay correction unit fix**
+   - `measureMacro.active_length()` is now treated explicitly as ns.
+   - Conversion path is explicit and validated:
+     `ns -> clks (internal canonical) -> seconds`.
+   - Added metrics for `readout_duration_ns`, `readout_duration_clks`, and
+     robust legacy T1 fallback handling.
+
+4. **Additional time mismatch fix from codebase sweep**
+   - `programs/builders/spectroscopy.py` had a confirmed mismatch:
+     depletion wait argument documented/passed as clock cycles but divided
+     by 4 internally.
+   - Fixed to use clock cycles directly.
+   - Added backward-compatible alias handling (`depletion_len` ->
+     `depletion_clks`) with validation.
+
+5. **Explicit time naming for residual-photon Ramsey**
+   - `ResidualPhotonRamsey.run()` now uses explicit `t_relax_ns` and
+     `t_buffer_ns` naming, with backward-compatible aliases
+     (`t_relax`, `t_buffer`) and 4 ns grid validation.
+
+6. **Frequency binding to calibrated state**
+   - Added calibrated-frequency resolution helpers in `ExperimentBase`.
+   - Ramsey and related detuned paths now use calibrated qubit frequency
+     source first, then attributes fallback.
+   - After patch commit, session now refreshes runtime attributes from
+     calibration frequencies so `attr.qb_fq` tracks the calibrated state.
+
+7. **Notebook context diagnostics (Section 7.5 builder)**
+   - Added explicit prints for butterfly readout duration in ns/clks,
+     T1 decay factor, and calibrated-vs-runtime qubit frequency delta.
+
+**Files affected:**
+
+- `qubox_v2/experiments/time_domain/relaxation.py`
+- `qubox_v2/calibration/patch_rules.py`
+- `qubox_v2/calibration/store.py`
+- `qubox_v2/experiments/calibration/readout.py`
+- `qubox_v2/programs/builders/spectroscopy.py`
+- `qubox_v2/experiments/time_domain/coherence.py`
+- `qubox_v2/experiments/experiment_base.py`
+- `qubox_v2/experiments/session.py`
+- `qubox_v2/calibration/orchestrator.py`
+- `qubox_v2/experiments/calibration/gates.py`
+- `tools/build_context_notebook.py`
+- `qubox_v2/docs/CHANGELOG.md`
+
 ### 2026-02-23 — Calibration Schema + Notebook Refactor + Changelog Policy
 
 **Classification: Major**

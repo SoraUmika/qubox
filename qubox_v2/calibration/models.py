@@ -161,17 +161,17 @@ class FitRecord(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Calibration context (device + cooldown identity)
+# Calibration context (sample + cooldown identity)
 # ---------------------------------------------------------------------------
 class CalibrationContext(BaseModel):
-    """Device and cooldown context embedded in calibration data.
+    """Sample and cooldown context embedded in calibration data.
 
     When present, this block binds a calibration file to a specific
-    device, cooldown cycle, and hardware wiring revision so that
+    sample, cooldown cycle, and hardware wiring revision so that
     stale calibrations cannot be silently reused across setups.
     """
 
-    device_id: str = ""
+    sample_id: str = ""
     cooldown_id: str = ""
     wiring_rev: str = ""
     schema_version: str = "4.0.0"

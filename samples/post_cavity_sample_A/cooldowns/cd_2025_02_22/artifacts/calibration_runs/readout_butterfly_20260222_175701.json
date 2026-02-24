@@ -1,0 +1,121 @@
+{
+  "timestamp": "20260222_175701",
+  "experiment": "ReadoutButterflyMeasurement",
+  "calibration_tag": "readout_butterfly",
+  "validation_passed": false,
+  "validation_errors": [
+    "No fit object available"
+  ],
+  "fit": {
+    "model": null,
+    "params": null,
+    "uncertainties": null,
+    "r_squared": null
+  },
+  "metrics": {
+    "butterfly_df": "    Ground (g)  Excited (e)\nm0     0.99340      0.99482\nm1     0.72602      0.71028\nm2     0.72500      0.68768",
+    "F": 0.7181500000000001,
+    "Q": 0.9729314691725877,
+    "V": 0.4363,
+    "t01": 0.0023378409351363476,
+    "t10": 0.051799220719688295,
+    "confusion_matrix": "        |0>_i    |1>_i\nm1=0  0.72602  0.28972\nm1=1  0.27398  0.71028",
+    "transition_matrix": "          |0>_i     |1>_i\n|0>_o  0.997662  0.051799\n|1>_o  0.002338  0.948201",
+    "Lambda_M_valid": true,
+    "acceptance_rate": 0.98963,
+    "average_tries": 3.7733999999999996
+  },
+  "run_metadata": {
+    "n_total": 50000
+  },
+  "extra_metadata": {},
+  "_persistence": {
+    "raw_data_policy": "drop_shot_level_arrays",
+    "dropped_fields": {
+      "metrics.S0_g": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.S0_e": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.S1_g": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.S1_e": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.S2_g": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.S2_e": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.m0_g": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.m0_e": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.m1_g": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.m1_e": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.m2_g": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.m2_e": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      }
+    }
+  }
+}

@@ -70,6 +70,7 @@ class HardwareController:
 
         # Octave calibration DB directory (set by SessionManager)
         self._cal_db_dir: Path | None = None
+        self._last_auto_calibration: dict[str, Any] | None = None
 
     # ─── Connection lifecycle ─────────────────────────────────────
     def open_qm(self, config_dict: Optional[dict] = None, *, close_other_machines: bool = True) -> None:
@@ -121,6 +122,54 @@ class HardwareController:
             if_freq = info.get("intermediate_frequency", 0.0)
             elems[el] = {"LO": lo_freq, "IF": if_freq}
         return elems
+
+    def _resolve_active_mixer_elements(self) -> tuple[list[str], list[str]]:
+        """Return (valid_active_elements, skipped_internal_or_unknown)."""
+        self._require_qm()
+        cfg = self.qm.get_config()
+        elements_cfg = (cfg.get("elements") or {})
+        hw_elements = set((self.elements or {}).keys())
+
+        active: list[str] = []
+        skipped: list[str] = []
+        for el_name, el_cfg in elements_cfg.items():
+            mix_inputs = (el_cfg.get("mixInputs") or {})
+            has_mixer = bool(mix_inputs and "mixer" in mix_inputs)
+            known_to_hw = el_name in hw_elements
+            is_internal = el_name.startswith("__oct__") or el_name.endswith("_analyzer")
+            if has_mixer and known_to_hw and not is_internal:
+                active.append(el_name)
+            elif has_mixer and (is_internal or not known_to_hw):
+                skipped.append(el_name)
+
+        preferred = []
+        for attr_name in ("ro_el", "qb_el", "st_el"):
+            try:
+                val = getattr(self.config.attr, attr_name, None)
+            except Exception:
+                val = None
+            if isinstance(val, str):
+                preferred.append(val)
+
+        ordered: list[str] = []
+        for el_name in preferred:
+            if el_name in active and el_name not in ordered:
+                ordered.append(el_name)
+        for el_name in active:
+            if el_name not in ordered:
+                ordered.append(el_name)
+
+        return ordered, skipped
+
+    def get_active_mixer_elements(self, *, include_skipped: bool = False):
+        """Get active, calibratable mixer elements from the live QM config.
+
+        Filters out internal Octave analyser helper elements and unknown entries.
+        """
+        active, skipped = self._resolve_active_mixer_elements()
+        if include_skipped:
+            return {"active": active, "skipped": skipped}
+        return active
 
     def _require_qm(self) -> None:
         require(self.qm is not None, "QM not initialized; call open_qm() or apply_changes().", ConfigError)
@@ -188,6 +237,51 @@ class HardwareController:
         info = self._external_lo_info(el)
         return info.get("device") if info else None
 
+    def get_external_lo_power(self, el: str) -> float | None:
+        """Get external LO source power (dBm) for an element when available."""
+        self._check_el(el)
+        if not self._is_external_lo(el):
+            return None
+        if self._device_manager is None:
+            return None
+        dev_name = self._external_lo_device_name(el)
+        if not dev_name:
+            return None
+
+        try:
+            try:
+                snap = self._device_manager.snapshot(dev_name)
+            except TypeError:
+                all_snaps = self._device_manager.snapshot()
+                snap = (all_snaps or {}).get(dev_name)
+        except Exception:
+            _logger.exception("Failed to snapshot external LO device '%s'", dev_name)
+            return None
+
+        params = (((snap or {}).get("instrument") or {}).get("parameters") or {})
+        p = params.get("power")
+        if p is None:
+            return None
+        try:
+            return float(p)
+        except Exception:
+            return None
+
+    def set_external_lo_power(self, el: str, power_dbm: float) -> None:
+        """Set external LO source power (dBm) for an element."""
+        self._check_el(el)
+        if not self._is_external_lo(el):
+            raise ConfigError(f"Element '{el}' is not configured for external LO.")
+        if self._device_manager is None:
+            raise ConfigError("DeviceManager required for external LO control. Set it via set_device_manager().")
+
+        dev_name = self._external_lo_device_name(el)
+        if not dev_name:
+            raise ConfigError(f"No external LO device mapping found for element '{el}'.")
+
+        self._device_manager.apply(dev_name, power=float(power_dbm))
+        _logger.info("Set external LO power for '%s' via '%s' to %.2f dBm", el, dev_name, float(power_dbm))
+
     def _configure_lo_source(self, el: str) -> None:
         """Tell the Octave which physical LO input port to route for an external-LO element."""
         info = self._external_lo_info(el)
@@ -235,6 +329,97 @@ class HardwareController:
             _logger.info("Set LO for '%s' to %.3f MHz", el, el_lo * 1e-6)
 
         self.elements[el]["LO"] = el_lo
+
+    def scan_external_lo_power(
+        self,
+        el: str,
+        powers_dbm: Iterable[float],
+        *,
+        target_LO: Optional[float] = None,
+        target_IF: Optional[float] = None,
+        sa_device_name: str = "sa124b",
+        mixer_cal_config: Any = None,
+        settle_s: float = 0.05,
+        keep_best: bool = True,
+    ) -> dict[str, Any]:
+        """Sweep external LO power and measure LO/IRR with CW + SA.
+
+        Returns per-power SA metrics and keeps best power by LO+IRR score when
+        ``keep_best=True``. Otherwise restores initial power if readable.
+        """
+        from ..calibration.mixer_calibration import MixerCalibrationConfig, SAMeasurementHelper
+        from ..programs import cQED_programs
+
+        self._require_qm()
+        self._check_el(el)
+        if not self._is_external_lo(el):
+            raise ConfigError(f"Element '{el}' is not configured for external LO.")
+        if self._device_manager is None:
+            raise ConfigError("DeviceManager required for external LO scan. Set it via set_device_manager().")
+
+        sa_dev = self._device_manager.get(sa_device_name)
+        if sa_dev is None:
+            raise ConfigError(f"SA device '{sa_device_name}' not found in DeviceManager.")
+
+        cfg = mixer_cal_config if isinstance(mixer_cal_config, MixerCalibrationConfig) else MixerCalibrationConfig()
+        sa_helper = SAMeasurementHelper(sa_dev, cfg)
+        lo_hz = float(self.get_element_lo(el) if target_LO is None else target_LO)
+        if_hz = float(self.get_element_if(el) if target_IF is None else target_IF)
+
+        initial_power = self.get_external_lo_power(el)
+        rows: list[dict[str, float]] = []
+
+        self.set_octave_output(el, RFOutputMode.on)
+        prog = cQED_programs.continuous_wave(
+            target_el=el,
+            pulse=cfg.cw_pulse,
+            gain=float(cfg.cw_gain),
+            truncate_clks=int(cfg.cw_truncate_clks),
+        )
+        job = self.qm.execute(prog)
+        try:
+            for pwr in powers_dbm:
+                pwr = float(pwr)
+                self.set_external_lo_power(el, pwr)
+                if settle_s > 0:
+                    import time
+                    time.sleep(float(settle_s))
+                tones = sa_helper.measure_tones(lo_hz, if_hz)
+                row = {
+                    "power_dbm": pwr,
+                    "P_target_dBm": float(tones.get("P_des_dBm", float("nan"))),
+                    "P_lo_dBm": float(tones.get("P_LO_dBm", float("nan"))),
+                    "P_image_dBm": float(tones.get("P_img_dBm", float("nan"))),
+                    "LO_leak_dBc": float(tones.get("LO_leak_dBc", float("nan"))),
+                    "IRR_dBc": float(tones.get("IRR_dBc", float("nan"))),
+                }
+                row["score"] = float(row["LO_leak_dBc"] + row["IRR_dBc"])
+                rows.append(row)
+        finally:
+            job.halt()
+
+        if not rows:
+            raise RuntimeError("No external LO scan samples were collected.")
+
+        best_row = max(rows, key=lambda r: float(r.get("score", float("-inf"))))
+        applied_power = best_row["power_dbm"]
+
+        if keep_best:
+            self.set_external_lo_power(el, float(applied_power))
+        elif initial_power is not None:
+            self.set_external_lo_power(el, float(initial_power))
+            applied_power = float(initial_power)
+
+        return {
+            "element": el,
+            "f_lo": lo_hz,
+            "f_if": if_hz,
+            "initial_power_dbm": initial_power,
+            "applied_power_dbm": float(applied_power),
+            "best": dict(best_row),
+            "results": rows,
+            "kept_best": bool(keep_best),
+        }
 
     def set_element_fq(self, el: str, freq: float) -> None:
         self._require_qm()
@@ -312,7 +497,8 @@ class HardwareController:
         auto_sa_validate: bool = False,
         auto_sa_restart_qm: bool = False,
         auto_sa_device_name: str = "sa124b",
-    ) -> None:
+        auto_calibration_params: Any = None,
+    ) -> Any:
         """Calibrate Octave IQ mixer for one or more elements.
 
         Parameters
@@ -340,8 +526,9 @@ class HardwareController:
                 auto_sa_restart_qm=auto_sa_restart_qm,
                 auto_sa_device_name=auto_sa_device_name,
                 mixer_cal_config=mixer_cal_config,
+                auto_calibration_params=auto_calibration_params,
             )
-            return
+            return None
 
         # ── Manual calibration ────────────────────────────────
         from ..calibration.mixer_calibration import (
@@ -369,7 +556,7 @@ class HardwareController:
         sa_helper = SAMeasurementHelper(sa_dev, cfg)
         calibrator = ManualMixerCalibrator(self, sa_helper, db_path, cfg)
 
-        self._manual_calibrate_elements(
+        return self._manual_calibrate_elements(
             calibrator, el, target_LO, target_IF, save_to_db, output_mode, method,
         )
 
@@ -386,10 +573,68 @@ class HardwareController:
         auto_sa_restart_qm: bool = False,
         auto_sa_device_name: str = "sa124b",
         mixer_cal_config: Any = None,
+        auto_calibration_params: Any = None,
     ) -> None:
         sa_helper = None
         sa_results: list[dict[str, Any]] = []
+        auto_runs: list[dict[str, Any]] = []
         cfg = None
+
+        def _format_suppression_report(rows: list[dict[str, Any]]) -> str:
+            lines = [
+                "",
+                "Auto mixer SA validation report (CW post-check):",
+                f"{'Element':18s} {'LO(dBc)':>10s} {'IRR(dBc)':>10s} {'Ptarget(dBm)':>14s}",
+            ]
+            for row in rows:
+                lines.append(
+                    f"{row['element']:18s} "
+                    f"{row['lo_suppression_dBc']:10.2f} "
+                    f"{row['irr_dBc']:10.2f} "
+                    f"{row['P_target_dBm']:14.2f}"
+                )
+            return "\n".join(lines)
+
+        def _measure_with_cw(e: str, lo_hz: float, if_hz: float) -> dict[str, float]:
+            from ..programs import cQED_programs
+
+            if cfg is None:
+                return sa_helper.measure_tones(float(lo_hz), float(if_hz))
+
+            qm_cfg = self.qm.get_config()
+            ops = sorted((qm_cfg.get("elements", {}).get(e, {}).get("operations", {}) or {}).keys())
+            if cfg.cw_pulse not in ops:
+                raise ValueError(
+                    f"Auto SA validation CW op '{cfg.cw_pulse}' not found for element '{e}'. "
+                    f"Available operations: {ops}"
+                )
+
+            self.set_octave_output(e, RFOutputMode.on)
+            prog = cQED_programs.continuous_wave(
+                target_el=e,
+                pulse=cfg.cw_pulse,
+                gain=float(cfg.cw_gain),
+                truncate_clks=int(cfg.cw_truncate_clks),
+            )
+            job = self.qm.execute(prog)
+            try:
+                settle = float(getattr(cfg, "iq_settle", 0.0) or 0.0)
+                if settle > 0:
+                    import time
+                    time.sleep(settle)
+                return sa_helper.measure_tones(float(lo_hz), float(if_hz))
+            finally:
+                job.halt()
+
+        def _resolve_auto_params(params: Any):
+            if params is None:
+                return None
+            if isinstance(params, dict):
+                from qm.octave.octave_mixer_calibration import AutoCalibrationParams
+                return AutoCalibrationParams(**params)
+            return params
+
+        qm_auto_params = _resolve_auto_params(auto_calibration_params)
 
         if auto_sa_validate:
             from ..calibration.mixer_calibration import MixerCalibrationConfig, SAMeasurementHelper
@@ -412,11 +657,26 @@ class HardwareController:
             if if_val is None:
                 if_val = float(self.get_element_if(e))
             _logger.info("Calibrating '%s' with LO=%.3f MHz, IF=%.3f MHz", e, lo_val * 1e-6, if_val * 1e-6)
-            self.qm.calibrate_element(e, {lo_val: (if_val,)}, save_to_db=save_to_db)
+            auto_result = self.qm.calibrate_element(
+                e,
+                {lo_val: (if_val,)},
+                save_to_db=save_to_db,
+                params=qm_auto_params,
+            )
+            auto_runs.append(
+                {
+                    "element": e,
+                    "lo_hz": float(lo_val),
+                    "if_hz": float(if_val),
+                    "lo_if_map": {float(lo_val): [float(if_val)]},
+                    "auto_result_type": type(auto_result).__name__,
+                    "auto_result_keys": [str(k) for k in auto_result.keys()] if isinstance(auto_result, dict) else None,
+                }
+            )
             self.set_octave_output(e, output_mode)
 
             if sa_helper is not None:
-                tones = sa_helper.measure_tones(float(lo_val), float(if_val))
+                tones = _measure_with_cw(e, float(lo_val), float(if_val))
                 sa_results.append(
                     {
                         "element": e,
@@ -434,7 +694,7 @@ class HardwareController:
                 )
 
         if el is None:
-            elements = list(self.elements.keys())
+            elements = self.get_active_mixer_elements()
         else:
             elements = [el] if isinstance(el, str) else list(el)
         n = len(elements)
@@ -445,8 +705,17 @@ class HardwareController:
         for e, lo_val, if_val in zip(elements, lo_list, if_list):
             _calibrate_one(e, lo_val, if_val)
 
+        self._last_auto_calibration = {
+            "elements": auto_runs,
+            "save_to_db": bool(save_to_db),
+            "auto_calibration_params": auto_calibration_params,
+        }
+
         if auto_sa_validate:
             self._write_auto_calibration_artifact(sa_results, cfg, auto_sa_device_name)
+            report = _format_suppression_report(sa_results)
+            print(report)
+            _logger.info(report)
 
         if auto_sa_restart_qm:
             _logger.info("Restarting QM after auto mixer calibration.")
@@ -498,7 +767,7 @@ class HardwareController:
         save_to_db: bool,
         output_mode: RFOutputMode,
         method: str,
-    ) -> None:
+    ) -> Any:
         if el is None:
             elements = list(self.elements.keys())
         elif isinstance(el, str):
@@ -510,6 +779,7 @@ class HardwareController:
         lo_list = list(target_LO) if isinstance(target_LO, (list, tuple)) else [target_LO] * n
         if_list = list(target_IF) if isinstance(target_IF, (list, tuple)) else [target_IF] * n
 
+        results = []
         for e, lo_val, if_val in zip(elements, lo_list, if_list):
             if lo_val is None:
                 lo_val = float(self.get_element_lo(e))
@@ -520,10 +790,17 @@ class HardwareController:
                 e, method, lo_val * 1e-6, if_val * 1e-6,
             )
             if method == "manual_scan_2d":
-                calibrator.scan_2d(e, lo_val, if_val, save_to_db=save_to_db)
+                result = calibrator.scan_2d(e, lo_val, if_val, save_to_db=save_to_db)
             elif method == "manual_minimizer":
-                calibrator.minimizer(e, lo_val, if_val, save_to_db=save_to_db)
+                result = calibrator.minimizer(e, lo_val, if_val, save_to_db=save_to_db)
+            else:
+                result = None
+            results.append(result)
             self.set_octave_output(e, output_mode)
+
+        if len(results) == 1:
+            return results[0]
+        return results
 
     # ─── QM info ──────────────────────────────────────────────────
     def list_open_qms(self) -> list[str]:

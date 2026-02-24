@@ -1,0 +1,37 @@
+{
+  "timestamp": "20260222_145757",
+  "experiment": "T2Ramsey",
+  "calibration_tag": "t2_ramsey",
+  "validation_passed": false,
+  "validation_errors": [
+    "Fit r_squared below threshold: 0.5649976106052972 < 0.75"
+  ],
+  "fit": {
+    "model": "T2_ramsey",
+    "params": {
+      "A": -1.3793104156559879e-05,
+      "T2": 15876.544961708354,
+      "n": 1.2225796671664906,
+      "f_det": 0.00022297144929167762,
+      "phi": 0.3114438015986225,
+      "offset": 0.00011806504165886981
+    },
+    "uncertainties": {
+      "A": 1.3373458533284803e-06,
+      "T2": 1893.8312745404064,
+      "n": 0.2335131050436514,
+      "f_det": 1.1050726573152869e-06,
+      "phi": 0.06495438900175889,
+      "offset": 1.9723070999191124e-07
+    },
+    "r_squared": 0.5649976106052972
+  },
+  "metrics": {
+    "T2_star": 15876.544961708354,
+    "f_det": 0.00022297144929167762
+  },
+  "run_metadata": {
+    "n_total": 4000
+  },
+  "extra_metadata": {}
+}

@@ -1,0 +1,28 @@
+{
+  "timestamp": "20260224_031624",
+  "method": "auto",
+  "sa_device": "sa124b",
+  "sa_config": {
+    "sideband": "lsb",
+    "sa_span_hz": 2000000.0,
+    "sa_rbw": 1000.0,
+    "sa_vbw": 1000.0,
+    "sa_avg": 5,
+    "sa_level": 0.0
+  },
+  "results": [
+    {
+      "element": "qubit2",
+      "lo_hz": 7000000000.0,
+      "if_hz": -50000000.0,
+      "sideband": "lsb",
+      "f_target_hz": 6950000000.0,
+      "f_image_hz": 7050000000.0,
+      "P_target_dBm": -28.486507,
+      "P_lo_dBm": -72.7068,
+      "P_image_dBm": -83.559135,
+      "lo_suppression_dBc": 44.220293,
+      "irr_dBc": 55.072627999999995
+    }
+  ]
+}

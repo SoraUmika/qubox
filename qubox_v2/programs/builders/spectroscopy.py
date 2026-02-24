@@ -35,7 +35,14 @@ def readout_trace(ro_therm_clks, n_avg):
             n_st.save("iteration")
     return raw_trace_prog
 
-def resonator_spectroscopy(ro_el, if_frequencies, depletion_len, n_avg: int=1):
+def resonator_spectroscopy(
+    ro_el,
+    if_frequencies,
+    depletion_clks=None,
+    n_avg: int = 1,
+    *,
+    depletion_len=None,
+):
     """
     Sweep readout IF frequencies to perform 1D resonator spectroscopy.
     For each IF, perform a measurement (I/Q) and optionally deplete residual photons.
@@ -45,9 +52,17 @@ def resonator_spectroscopy(ro_el, if_frequencies, depletion_len, n_avg: int=1):
         ro_pulse       : Name of the readout pulse to use
         ro_gain        : Gain (amplitude) for the readout measurement
         if_frequencies : Python array/list of IFs to step through (integers)
-        depletion_len  : Time (in clock cycles) to wait for photon depletion
+        depletion_clks : Time (in clock cycles) to wait for photon depletion
+        depletion_len  : Deprecated alias for depletion_clks
         n_avg          : Number of averaging iterations (default=1)
     """
+    if depletion_clks is None:
+        depletion_clks = depletion_len
+    elif depletion_len is not None and int(depletion_len) != int(depletion_clks):
+        raise ValueError("depletion_clks and deprecated depletion_len disagree")
+    if depletion_clks is None:
+        raise TypeError("depletion_clks is required")
+
     with program() as resonator_spec:
         n = declare(int)
         f = declare(int)
@@ -60,7 +75,7 @@ def resonator_spectroscopy(ro_el, if_frequencies, depletion_len, n_avg: int=1):
             with for_(*from_array(f, if_frequencies)):
                 update_frequency(ro_el, f)
                 measureMacro.measure(targets=[I,Q])
-                wait(int(depletion_len/4), ro_el)
+                wait(int(depletion_clks), ro_el)
                 save(I, I_st)
                 save(Q, Q_st)
             save(n, n_st)
@@ -70,7 +85,14 @@ def resonator_spectroscopy(ro_el, if_frequencies, depletion_len, n_avg: int=1):
             Q_st.buffer(len(if_frequencies)).average().save("Q")
     return resonator_spec
 
-def resonator_power_spectroscopy(if_frequencies, gains, depletion_len, n_avg:int=1):
+def resonator_power_spectroscopy(
+    if_frequencies,
+    gains,
+    depletion_clks=None,
+    n_avg: int = 1,
+    *,
+    depletion_len=None,
+):
     """
     Perform a 2D sweep of readout IF and readout gain to map out resonator response versus power.
 
@@ -79,9 +101,17 @@ def resonator_power_spectroscopy(if_frequencies, gains, depletion_len, n_avg:int
         ro_pulse       : Name of the readout pulse to use
         if_frequencies : Python array/list of IFs to step through
         gains          : Python array/list of gain (amplitude) settings to step through
-        depletion_len  : Time in clock cycles for photon depletion after measurement
+        depletion_clks : Time in clock cycles for photon depletion after measurement
+        depletion_len  : Deprecated alias for depletion_clks
         n_avg          : Number of averaging iterations (default=1)
     """
+    if depletion_clks is None:
+        depletion_clks = depletion_len
+    elif depletion_len is not None and int(depletion_len) != int(depletion_clks):
+        raise ValueError("depletion_clks and deprecated depletion_len disagree")
+    if depletion_clks is None:
+        raise TypeError("depletion_clks is required")
+
     with program() as resonator_spec_2D:
         n = declare(int)
         if_req = declare(int)
@@ -96,7 +126,7 @@ def resonator_power_spectroscopy(if_frequencies, gains, depletion_len, n_avg:int
                 update_frequency(measureMacro.active_element(), if_req)
                 with for_each_(g, gains):
                     measureMacro.measure(targets=[I,Q], gain=g)
-                    wait(int(depletion_len/4), measureMacro.active_element())
+                    wait(int(depletion_clks), measureMacro.active_element())
                     save(I, I_st)
                     save(Q, Q_st)
             save(n, n_st)

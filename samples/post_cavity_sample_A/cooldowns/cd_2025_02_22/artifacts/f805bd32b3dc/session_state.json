@@ -1,0 +1,33 @@
+{
+  "build_hash": "f805bd32b3dc",
+  "build_timestamp": "2026-02-22T19:59:23.906704",
+  "git_commit": "2cb066830ddb",
+  "schemas": [
+    {
+      "file_type": "hardware",
+      "path": "E:\\qubox\\seq_1_device\\config\\hardware.json",
+      "version": 1,
+      "size_bytes": 4307
+    },
+    {
+      "file_type": "calibration",
+      "path": "E:\\qubox\\seq_1_device\\config\\calibration.json",
+      "version": "3.0.0",
+      "size_bytes": 2057
+    },
+    {
+      "file_type": "pulses",
+      "path": "E:\\qubox\\seq_1_device\\config\\pulses.json",
+      "version": 2,
+      "size_bytes": 963208
+    }
+  ],
+  "hardware_elements": [
+    "resonator",
+    "qubit2",
+    "qubit",
+    "storage"
+  ],
+  "calibration_version": "3.0.0",
+  "pulse_spec_count": 1
+}

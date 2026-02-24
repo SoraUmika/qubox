@@ -1851,18 +1851,42 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             try:
                 coherence = self.calibration_store.get_coherence(self.attr.qb_el)
                 if coherence and coherence.T1 is not None and coherence.T1 > 0:
-                    T1 = coherence.T1
-                    # Estimate readout duration from measure macro
+                    # Canonical coherence unit is seconds in CalibrationStore.
+                    # Backward-compat: if older runs wrote T1 in ns, convert here.
+                    T1_s = float(coherence.T1)
+                    if T1_s > 1.0:
+                        _logger.warning(
+                            "Detected legacy T1 stored in ns (value=%g). Converting to seconds.",
+                            T1_s,
+                        )
+                        T1_s *= 1e-9
+
+                    t1_us_field = getattr(coherence, "T1_us", None)
+                    if t1_us_field is not None and t1_us_field > 0:
+                        T1_s = float(t1_us_field) * 1e-6
+
+                    # measureMacro.active_length() returns pulse length in ns.
+                    # Internal canonical time representation is clock cycles.
                     active_len = getattr(measureMacro, "active_length", lambda: None)()
                     if active_len is not None and active_len > 0:
-                        t_readout = active_len * 4e-9  # clock cycles to seconds
-                        decay_factor = float(np.exp(-t_readout / T1))
+                        t_readout_ns = float(active_len)
+                        t_readout_clks = t_readout_ns / 4.0
+                        if not np.isclose(t_readout_clks, round(t_readout_clks), atol=1e-9):
+                            _logger.warning(
+                                "Readout duration %.3f ns is not on 4 ns clock grid.",
+                                t_readout_ns,
+                            )
+                        t_readout_s = t_readout_clks * 4e-9
+
+                        decay_factor = float(np.exp(-t_readout_s / T1_s))
                         metrics["T1_decay_factor"] = decay_factor
+                        metrics["readout_duration_ns"] = t_readout_ns
+                        metrics["readout_duration_clks"] = float(t_readout_clks)
                         if decay_factor > 0:
                             metrics["T1_corrected_F"] = float(metrics["F"] / decay_factor)
                         _logger.info(
                             "T1 decay correction: readout=%.0f ns, T1=%.1f us, factor=%.4f",
-                            t_readout * 1e9, T1 * 1e6, decay_factor,
+                            t_readout_ns, T1_s * 1e6, decay_factor,
                         )
             except Exception:
                 pass  # T1 correction is optional, never fail on it

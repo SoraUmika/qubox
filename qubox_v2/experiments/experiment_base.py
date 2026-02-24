@@ -223,6 +223,37 @@ class ExperimentBase:
     # ------------------------------------------------------------------
     # Common helpers
     # ------------------------------------------------------------------
+    def get_calibrated_frequency(
+        self,
+        element: str,
+        *,
+        field: str = "qubit_freq",
+        fallback: float | None = None,
+    ) -> float | None:
+        """Resolve a calibrated frequency (Hz) from CalibrationStore when available.
+
+        Returns ``fallback`` when the calibration entry is unavailable or invalid.
+        """
+        cal = getattr(self._ctx, "calibration", None)
+        if cal is None:
+            return fallback
+        try:
+            freq_entry = cal.get_frequencies(element)
+        except Exception:
+            return fallback
+        if freq_entry is None:
+            return fallback
+        value = getattr(freq_entry, field, None)
+        if isinstance(value, (int, float, np.floating)) and np.isfinite(value):
+            return float(value)
+        return fallback
+
+    def get_qubit_frequency(self) -> float:
+        """Return active qubit frequency in Hz (calibrated first, attributes fallback)."""
+        fallback = float(self.attr.qb_fq)
+        resolved = self.get_calibrated_frequency(self.attr.qb_el, field="qubit_freq", fallback=fallback)
+        return float(resolved if resolved is not None else fallback)
+
     def set_standard_frequencies(self, *, qb_fq: float | None = None) -> None:
         """Set readout and qubit element frequencies to calibrated values."""
         mm = self.measure_macro
@@ -230,7 +261,8 @@ class ExperimentBase:
         if not isinstance(ro_fq, (int, float, np.floating)) or not np.isfinite(ro_fq):
             ro_fq = self.attr.ro_fq
         self.hw.set_element_fq(self.attr.ro_el, float(ro_fq))
-        self.hw.set_element_fq(self.attr.qb_el, qb_fq or self.attr.qb_fq)
+        target_qb_fq = float(qb_fq) if qb_fq is not None else self.get_qubit_frequency()
+        self.hw.set_element_fq(self.attr.qb_el, target_qb_fq)
 
     def get_readout_lo(self) -> float:
         return self.hw.get_element_lo(self.attr.ro_el)

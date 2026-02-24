@@ -1,0 +1,32 @@
+{
+  "timestamp": "20260222_184301",
+  "experiment": "DRAGCalibration",
+  "calibration_tag": "drag_calibration_x180",
+  "validation_passed": true,
+  "validation_errors": [],
+  "fit": {
+    "model": null,
+    "params": null,
+    "uncertainties": null,
+    "r_squared": null
+  },
+  "metrics": {
+    "optimal_alpha": -0.42164679327966453,
+    "alpha_candidates": [
+      -0.42164679327966453,
+      -0.3602938956666859,
+      -0.33016205226854434,
+      -0.19015914169602977,
+      -0.17961305542737596,
+      -0.10636417155257288,
+      0.05801219439272375,
+      0.10048814867872541,
+      0.27927866865237555
+    ],
+    "base_alpha": 1.0
+  },
+  "run_metadata": {
+    "n_total": 5000
+  },
+  "extra_metadata": {}
+}

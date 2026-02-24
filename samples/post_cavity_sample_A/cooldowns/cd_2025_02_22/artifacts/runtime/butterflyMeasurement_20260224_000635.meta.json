@@ -1,0 +1,77 @@
+{
+  "iteration": 49999,
+  "_persistence": {
+    "raw_data_policy": "drop_shot_level_arrays",
+    "dropped_fields": {
+      "states": {
+        "kind": "ndarray",
+        "shape": [
+          50000,
+          2,
+          3
+        ],
+        "size": 300000
+      },
+      "I0": {
+        "kind": "ndarray",
+        "shape": [
+          50000,
+          2
+        ],
+        "size": 100000
+      },
+      "Q0": {
+        "kind": "ndarray",
+        "shape": [
+          50000,
+          2
+        ],
+        "size": 100000
+      },
+      "I1": {
+        "kind": "ndarray",
+        "shape": [
+          50000,
+          2
+        ],
+        "size": 100000
+      },
+      "Q1": {
+        "kind": "ndarray",
+        "shape": [
+          50000,
+          2
+        ],
+        "size": 100000
+      },
+      "I2": {
+        "kind": "ndarray",
+        "shape": [
+          50000,
+          2
+        ],
+        "size": 100000
+      },
+      "Q2": {
+        "kind": "ndarray",
+        "shape": [
+          50000,
+          2
+        ],
+        "size": 100000
+      }
+    }
+  },
+  "artifact_meta": {
+    "timestamp": "2026-02-24T00:06:35.971591",
+    "source": "ReadoutButterflyMeasurement"
+  },
+  "artifact_id": "butterflyMeasurement:2026-02-24T00:06:35.971591",
+  "experiment_context": {
+    "device_id": "post_cavity_sample_A",
+    "cooldown_id": "cd_2025_02_22",
+    "wiring_rev": "a4b4f720",
+    "schema_version": "4.0.0",
+    "config_hash": "8f4236ef3e5b"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "timestamp": "20260222_022312",
+  "experiment": "ReadoutGEDiscrimination",
+  "calibration_tag": "readout_ge_discrimination",
+  "validation_passed": true,
+  "validation_errors": [],
+  "fit": {
+    "model": null,
+    "params": null,
+    "uncertainties": null,
+    "r_squared": null
+  },
+  "metrics": {
+    "gaussianity_g": 0.14503934479598954,
+    "gaussianity_e": 0.23668810716976313,
+    "fidelity": 74.734,
+    "angle": -0.006361569272004412,
+    "rotation_convention": "S_rot = S * exp(+1j*angle)",
+    "threshold": -1.2278389375242891e-05,
+    "gg": 0.7642,
+    "ge": 0.2358,
+    "eg": 0.26952,
+    "ee": 0.73048,
+    "w_plus_cos": 0.9999797652864397,
+    "w_plus_sin": -0.006361526363769192,
+    "w_minus_sin": -0.006361526363769192,
+    "w_minus_cos": -0.9999797652864397,
+    "rot_mu_g": "(-0.00014802644649664892+0.0001502174586165103j)",
+    "rot_mu_e": "(0.00010757590121007476+0.0001503311708866026j)",
+    "unrot_mu_g": "(-0.00014897906354719212+0.00014927274486733994j)",
+    "unrot_mu_e": "(0.00010661738873563639+0.00015101247591007465j)",
+    "sigma_g": 0.00018315336327500692,
+    "sigma_e": 0.000183805442495796
+  },
+  "run_metadata": {
+    "n_total": 50000
+  },
+  "extra_metadata": {}
+}

@@ -1,0 +1,28 @@
+{
+  "timestamp": "20260224_144822",
+  "method": "auto",
+  "sa_device": "sa124b",
+  "sa_config": {
+    "sideband": "lsb",
+    "sa_span_hz": 2000000.0,
+    "sa_rbw": 1000.0,
+    "sa_vbw": 1000.0,
+    "sa_avg": 5,
+    "sa_level": 0.0
+  },
+  "results": [
+    {
+      "element": "storage",
+      "lo_hz": 5400000000.0,
+      "if_hz": -50000000.0,
+      "sideband": "lsb",
+      "f_target_hz": 5350000000.0,
+      "f_image_hz": 5450000000.0,
+      "P_target_dBm": -26.507034,
+      "P_lo_dBm": -75.58492,
+      "P_image_dBm": -69.23349,
+      "lo_suppression_dBc": 49.07788599999999,
+      "irr_dBc": 42.726456
+    }
+  ]
+}

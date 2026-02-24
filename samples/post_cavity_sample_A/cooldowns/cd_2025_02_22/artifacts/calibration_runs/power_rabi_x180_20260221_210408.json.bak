@@ -1,0 +1,33 @@
+{
+  "timestamp": "20260221_210408",
+  "experiment": "PowerRabi",
+  "calibration_tag": "power_rabi_x180",
+  "validation_passed": false,
+  "validation_errors": [
+    "Fit r_squared below threshold: 0.0069231138885442745 < 0.8"
+  ],
+  "fit": {
+    "model": "power_rabi",
+    "params": {
+      "A": -1.0061346475762847e-05,
+      "g_pi": 1.1102229831886641e-15,
+      "offset": -8.675983515511217e-05
+    },
+    "uncertainties": {
+      "A": 2.5106486899007396e-05,
+      "g_pi": 2.9472954852512105e-23,
+      "offset": 1.3550286450242824e-05
+    },
+    "r_squared": 0.0069231138885442745
+  },
+  "metrics": {
+    "g_pi": 1.1102229831886641e-15
+  },
+  "run_metadata": {
+    "n_total": 5000
+  },
+  "extra_metadata": {
+    "sweep_min": -1.2,
+    "sweep_max": 1.2000000000000022
+  }
+}

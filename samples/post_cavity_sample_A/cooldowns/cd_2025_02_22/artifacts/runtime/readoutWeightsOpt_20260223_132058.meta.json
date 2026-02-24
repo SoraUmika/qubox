@@ -1,0 +1,17 @@
+{
+  "iteration": 199999,
+  "div_clks": 100,
+  "num_div": 1,
+  "artifact_meta": {
+    "timestamp": "2026-02-23T13:20:58.419568",
+    "source": "ReadoutWeightsOptimization"
+  },
+  "artifact_id": "readoutWeightsOpt:2026-02-23T13:20:58.419568",
+  "experiment_context": {
+    "device_id": "post_cavity_sample_A",
+    "cooldown_id": "cd_2025_02_22",
+    "wiring_rev": "a4b4f720",
+    "schema_version": "4.0.0",
+    "config_hash": "394aa97391e8"
+  }
+}

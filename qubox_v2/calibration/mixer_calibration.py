@@ -4,8 +4,8 @@ Manual IQ mixer calibration via external spectrum analyzer (SA124B).
 
 Provides two calibration methods, both operating in two separable stages:
   Stage A — Minimise LO feedthrough by scanning DC offsets (I0, Q0).
-  Stage B — Minimise image sideband by scanning gain/phase imbalance correction.
-
+            "minimizer: element=%s  LO=%.4f GHz  IF=%.2f MHz  sideband=%s  objective=%s  save_to_db=%s",
+            element, f_lo / 1e9, f_if / 1e6, self._cfg.sideband, self._cfg.objective_mode, save_to_db,
 Classes
 -------
 MixerCalibrationConfig
@@ -31,6 +31,7 @@ from typing import Any, Literal
 
 import numpy as np
 from tqdm import tqdm
+from octave_sdk import RFOutputMode
 
 from ..programs import cQED_programs
 
@@ -84,10 +85,14 @@ class MixerCalibrationConfig:
     # Minimiser
     minimizer_maxiter: int = 60
     minimizer_xtol: float = 1e-4
+    max_total_evals: int = 40
+    dc_maxiter: int = 12
+    iq_maxiter: int = 28
 
     # CW tone
-    cw_pulse: str = "const_x180"
+    cw_pulse: str = "const"
     cw_gain: float = 1.0
+    cw_gain_dc: float = 0.125
     cw_truncate_clks: int = 250
 
     # Settle time (seconds) after parameter change
@@ -108,11 +113,17 @@ class MixerCalibrationConfig:
     w_carrier: float = 1.0
     w_image: float = 1.0
     w_target: float = 1.0
+    target_power_ref_dbm: float | None = None
+    target_power_tolerance_db: float = 0.0
 
     # Notebook UX controls
     quiet_qm_logs: bool = False
     live_plot: bool = False
     live_plot_every: int = 1
+
+    # Manual-result safety guard
+    manual_revert_if_worse: bool = True
+    manual_revert_tolerance_db: float = 0.0
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -236,6 +247,7 @@ class ManualMixerCalibrator:
         p_carrier_dbm: float,
         p_image_dbm: float,
         cfg: MixerCalibrationConfig,
+        p_target_ref_dbm: float | None = None,
     ) -> float:
         """Compute explicit sideband objective cost."""
         wc, wi, wt = float(cfg.w_carrier), float(cfg.w_image), float(cfg.w_target)
@@ -247,7 +259,29 @@ class ManualMixerCalibrator:
             num = wc * carrier_mw + wi * image_mw
             den = max(eps_mw, wt * target_mw)
             return float(10.0 * np.log10(max(eps_mw, num / den)))
-        return float(wc * p_carrier_dbm + wi * p_image_dbm - wt * p_target_dbm)
+        ref = cfg.target_power_ref_dbm if p_target_ref_dbm is None else p_target_ref_dbm
+        drop_penalty = 0.0
+        if ref is not None:
+            drop_threshold = float(ref) - float(cfg.target_power_tolerance_db)
+            drop_penalty = max(0.0, drop_threshold - float(p_target_dbm))
+        return float(
+            wc * (float(p_carrier_dbm) - float(p_target_dbm))
+            + wi * (float(p_image_dbm) - float(p_target_dbm))
+            + wt * drop_penalty
+        )
+
+    @staticmethod
+    def _is_result_worse(candidate: dict[str, float], baseline: dict[str, float], *, tolerance_db: float = 0.0) -> bool:
+        """Return True if manual candidate degrades LO leak or IRR vs baseline."""
+        tol = abs(float(tolerance_db))
+        cand_lo = float(candidate.get("LO_leak_dBc", float("nan")))
+        base_lo = float(baseline.get("LO_leak_dBc", float("nan")))
+        cand_irr = float(candidate.get("IRR_dBc", float("nan")))
+        base_irr = float(baseline.get("IRR_dBc", float("nan")))
+
+        worse_lo = np.isfinite(cand_lo) and np.isfinite(base_lo) and (cand_lo < (base_lo - tol))
+        worse_irr = np.isfinite(cand_irr) and np.isfinite(base_irr) and (cand_irr < (base_irr - tol))
+        return bool(worse_lo or worse_irr)
 
     @staticmethod
     def _init_live_heatmap(x_vals: np.ndarray, y_vals: np.ndarray, *, title: str):
@@ -347,13 +381,60 @@ class ManualMixerCalibrator:
         state["clear_output"](wait=True)
         state["display"](state["fig"])
 
+    @staticmethod
+    def _plot_parameter_history(
+        *,
+        title: str,
+        x_label: str,
+        series: list[tuple[str, list[float], str]],
+    ) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except Exception:
+            return
+
+        if not series:
+            return
+
+        fig, axes = plt.subplots(len(series), 1, figsize=(8, 2.8 * len(series)), sharex=True)
+        if len(series) == 1:
+            axes = [axes]
+
+        for ax, (label, values, y_label) in zip(axes, series):
+            if not values:
+                continue
+            x = np.arange(1, len(values) + 1)
+            ax.plot(x, np.asarray(values, dtype=float), "b.-", label=label)
+            ax.set_ylabel(y_label)
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc="best")
+
+        axes[-1].set_xlabel(x_label)
+        fig.suptitle(title)
+        fig.tight_layout()
+        plt.show()
+
     # ────────── CW tone management ────────────────────────────
-    def _start_cw(self, element: str):
+    def _start_cw(self, element: str, *, gain: float | None = None):
         """Start an infinite CW tone on *element*. Returns a QM job handle."""
+        # Validate that the requested CW operation is available for this element.
+        # This makes pulse-name migrations explicit (e.g., const_x180 -> const)
+        # and avoids silent misconfiguration.
+        cfg = self._hw.qm.get_config()
+        ops = sorted((cfg.get("elements", {}).get(element, {}).get("operations", {}) or {}).keys())
+        if self._cfg.cw_pulse not in ops:
+            raise ValueError(
+                f"Manual mixer calibration CW op '{self._cfg.cw_pulse}' not found for element '{element}'. "
+                f"Available operations: {ops}"
+            )
+
+        # Ensure RF output is enabled for the active channel before CW execution.
+        self._hw.set_octave_output(element, RFOutputMode.on)
+
         prog = cQED_programs.continuous_wave(
             target_el=element,
             pulse=self._cfg.cw_pulse,
-            gain=self._cfg.cw_gain,
+            gain=self._cfg.cw_gain if gain is None else float(gain),
             truncate_clks=self._cfg.cw_truncate_clks,
         )
         return self._hw.qm.execute(prog)
@@ -367,46 +448,95 @@ class ManualMixerCalibrator:
         self._hw.qm.set_output_dc_offset_by_element(element, "I", float(i0))
         self._hw.qm.set_output_dc_offset_by_element(element, "Q", float(q0))
 
-    # ────────── IQ correction (requires QM reopen) ────────────
+    @staticmethod
+    def _iq_imbalance_matrix(gain: float, phase: float) -> tuple[float, float, float, float]:
+        """Convert gain/phase imbalance parameters to QM correction matrix."""
+        g = float(gain)
+        p = float(phase)
+        c = float(np.cos(p))
+        s = float(np.sin(p))
+        denom = (1.0 - g * g) * (2.0 * c * c - 1.0)
+        if abs(denom) < 1e-12:
+            raise ValueError(
+                f"Invalid IQ imbalance parameters: gain={g:.6g}, phase={p:.6g} produce near-singular correction."
+            )
+        n = 1.0 / denom
+        return (
+            n * (1.0 - g) * c,
+            n * (1.0 + g) * s,
+            n * (1.0 - g) * s,
+            n * (1.0 + g) * c,
+        )
+
+    def _resolve_mixer_name(self, element: str) -> str:
+        """Resolve mixer name from active QM config for an element."""
+        cfg = self._hw.qm.get_config()
+        el_cfg = (cfg.get("elements") or {}).get(element, {})
+        mix_inputs = el_cfg.get("mixInputs") or {}
+        mixer = mix_inputs.get("mixer")
+        if not mixer:
+            raise ValueError(
+                f"Element '{element}' has no mixInputs.mixer entry in active QM config; "
+                "cannot apply IQ correction matrix."
+            )
+        return str(mixer)
+
+    # ────────── IQ correction (live, no QM reopen) ────────────
     def _apply_iq_correction(
         self,
         element: str,
+        f_lo: float,
+        f_if: float,
         gain: float,
         phase: float,
         i0: float,
         q0: float,
         *,
         write_db: bool = True,
+        running_job: Any | None = None,
     ) -> None:
-        """Write trial gain/phase + DC offsets to the calibration DB and reopen QM.
+        """Apply trial gain/phase + DC offsets live and optionally persist trial DB values.
 
         Parameters
         ----------
         write_db : bool
-            If False, update the in-memory cache and write to a temporary
-            scratch file instead of the canonical calibration_db.json.
-            The QM still reopens using the scratch file so corrections take
-            effect, but the canonical DB is not mutated.
+            If True, write trial values to canonical calibration_db.json.
+            If False, keep trial values only in in-memory cache.
+        running_job : Any, optional
+            If provided and supports ``set_element_correction``, apply the
+            matrix directly to the running job (recommended for scan loops).
+            Otherwise apply via ``qm.set_mixer_correction``.
         """
         db = self._get_db()
         lo_mode_id = self._resolve_lo_mode_id(db, element)
         if_mode_id = self._resolve_if_mode_id(db, element)
 
         db["lo_cal"][str(lo_mode_id)].update(
-            {"i0": i0, "q0": q0, "timestamp": time.time(), "method": "manual_trial"}
+            {"i0": i0, "q0": q0, "timestamp": time.time(), "method": "manual"}
         )
         db["if_cal"][str(if_mode_id)].update(
-            {"gain": gain, "phase": phase, "timestamp": time.time(), "method": "manual_trial"}
+            {"gain": gain, "phase": phase, "timestamp": time.time(), "method": "manual"}
         )
 
         if write_db:
             self._write_db(db)
         else:
-            # Write to a scratch file so QM can reopen with the trial values,
-            # but do NOT touch the canonical calibration_db.json.
-            self._write_scratch_db(db)
+            self._db_cache = db
 
-        self._hw.open_qm()
+        correction = self._iq_imbalance_matrix(gain, phase)
+
+        if running_job is not None and hasattr(running_job, "set_element_correction"):
+            running_job.set_element_correction(element, correction)
+        else:
+            mixer = self._resolve_mixer_name(element)
+            self._hw.qm.set_mixer_correction(
+                mixer,
+                float(f_if),
+                float(f_lo),
+                correction,
+            )
+
+        self._set_dc_offsets(element, i0, q0)
 
     # ══════════════════════════════════════════════════════════
     #  METHOD A — Grid search (manual_scan_2d)
@@ -428,8 +558,8 @@ class ManualMixerCalibrator:
         overrides the corresponding value for this run only.
 
         When ``save_to_db=False``, the canonical ``calibration_db.json`` is
-        never written.  Trial IQ corrections use a scratch file so QM can
-        reopen with trial values without mutating the persistent DB.
+        never written. Trial IQ corrections are applied live and kept in-memory
+        during the run without mutating the persistent DB.
         """
         cfg = self._cfg
         if config_overrides:
@@ -437,6 +567,16 @@ class ManualMixerCalibrator:
 
         # Pre-load the DB into cache to avoid per-point reads
         self._db_cache = self._read_db()
+
+        db0 = self._get_db()
+        lo_mode_id = self._resolve_lo_mode_id(db0, element)
+        if_mode_id = self._resolve_if_mode_id(db0, element)
+        lo_cal = db0.get("lo_cal", {}).get(str(lo_mode_id), {})
+        if_cal = db0.get("if_cal", {}).get(str(if_mode_id), {})
+        i0_init = float(lo_cal.get("i0", 0.0))
+        q0_init = float(lo_cal.get("q0", 0.0))
+        gain_init = float(if_cal.get("gain", 0.0))
+        phase_init = float(if_cal.get("phase", 0.0))
 
         # Determine per-point write behaviour
         write_db_mode = cfg.write_db_mode if save_to_db else "final_only"
@@ -449,12 +589,23 @@ class ManualMixerCalibrator:
         )
 
         with self._maybe_quiet_qm_logs(cfg.quiet_qm_logs):
+            baseline = self._measure_final(
+                element,
+                f_lo,
+                f_if,
+                i0_init,
+                q0_init,
+                gain_init,
+                phase_init,
+                write_db=save_to_db,
+            )
+
             # ── Stage A: DC offsets ───────────────────────────────
             _logger.info(
                 "Stage A: DC offset optimisation (coarse %dx%d = %d points)",
                 cfg.dc_coarse_n, cfg.dc_coarse_n, cfg.dc_coarse_n ** 2,
             )
-            job = self._start_cw(element)
+            job = self._start_cw(element, gain=cfg.cw_gain_dc)
             best_i0, best_q0, _ = self._grid_search_dc(
                 element, f_lo,
                 center_i=0.0, center_q=0.0,
@@ -524,6 +675,33 @@ class ManualMixerCalibrator:
             element, f_lo, f_if, best_i0, best_q0, best_g, best_p,
             write_db=save_to_db,
         )
+
+        reverted_to_baseline = False
+        if bool(getattr(cfg, "manual_revert_if_worse", True)) and self._is_result_worse(
+            final,
+            baseline,
+            tolerance_db=float(getattr(cfg, "manual_revert_tolerance_db", 0.0)),
+        ):
+            _logger.warning(
+                "Manual scan result for '%s' is worse than baseline; reverting to baseline calibration.",
+                element,
+            )
+            candidate_final = dict(final)
+            final = self._measure_final(
+                element,
+                f_lo,
+                f_if,
+                i0_init,
+                q0_init,
+                gain_init,
+                phase_init,
+                write_db=save_to_db,
+            )
+            best_i0, best_q0, best_g, best_p = i0_init, q0_init, gain_init, phase_init
+            reverted_to_baseline = True
+        else:
+            candidate_final = None
+
         result = {
             "element": element,
             "f_lo": f_lo,
@@ -532,8 +710,12 @@ class ManualMixerCalibrator:
             "q0": best_q0,
             "gain": best_g,
             "phase": best_p,
+            "reverted_to_baseline": reverted_to_baseline,
             **final,
         }
+        if candidate_final is not None:
+            result["candidate_manual"] = candidate_final
+        result["baseline_before_manual"] = dict(baseline)
         if save_to_db:
             self._persist(result, method="manual_scan_2d")
 
@@ -562,7 +744,7 @@ class ManualMixerCalibrator:
         overrides the corresponding value for this run only.
 
         When ``save_to_db=False``, the canonical ``calibration_db.json`` is
-        never written.  Trial IQ corrections use a scratch file.
+        never written. Trial values stay in-memory during optimisation.
         """
         from scipy.optimize import minimize
 
@@ -574,41 +756,78 @@ class ManualMixerCalibrator:
         if config_overrides:
             cfg = dataclasses.replace(cfg, **config_overrides)
 
-        # Pre-load the DB into cache
         self._db_cache = self._read_db()
         write_per_point = (cfg.write_db_mode == "per_point") and save_to_db
 
+        db0 = self._get_db()
+        lo_mode_id = self._resolve_lo_mode_id(db0, element)
+        if_mode_id = self._resolve_if_mode_id(db0, element)
+        lo_cal = db0.get("lo_cal", {}).get(str(lo_mode_id), {})
+        if_cal = db0.get("if_cal", {}).get(str(if_mode_id), {})
+
+        i0_init = float(lo_cal.get("i0", 0.0))
+        q0_init = float(lo_cal.get("q0", 0.0))
+        gain_init = float(if_cal.get("gain", 0.0))
+        phase_init = float(if_cal.get("phase", 0.0))
+
         with self._maybe_quiet_qm_logs(cfg.quiet_qm_logs):
-            # ── Stage A: DC offsets (fast, CW stays running) ──────
-            _logger.info("Stage A: DC offset minimisation (maxiter=%d)", cfg.minimizer_maxiter)
-            job = self._start_cw(element)
+            baseline = self._measure_final(
+                element,
+                f_lo,
+                f_if,
+                i0_init,
+                q0_init,
+                gain_init,
+                phase_init,
+                write_db=save_to_db,
+            )
+
+            dc_budget = max(6, int(cfg.dc_maxiter))
+            iq_budget = max(6, int(cfg.iq_maxiter))
+            total_budget = max(12, int(cfg.max_total_evals))
+            if dc_budget + iq_budget > total_budget:
+                dc_budget = max(6, min(dc_budget, total_budget // 2))
+                iq_budget = max(6, total_budget - dc_budget)
+
+            _logger.info(
+                "Stage budgets: total<=%d evals (DC<=%d, IQ<=%d)",
+                total_budget,
+                dc_budget,
+                iq_budget,
+            )
+
+            _logger.info("Stage A: DC offset minimisation (maxiter=%d)", dc_budget)
+            dc_job = self._start_cw(element, gain=cfg.cw_gain_dc)
 
             dc_hist = self._init_live_history(
                 title=f"{element}: DC minimizer history",
                 ylabel="P_LO (dBm)",
             ) if cfg.live_plot else None
             eval_count_dc = [0]
+            dc_param_history = {
+                "i0": [],
+                "q0": [],
+                "p_lo_dbm": [],
+            }
 
             def _cost_dc(x):
-                self._set_dc_offsets(element, x[0], x[1])
+                self._set_dc_offsets(element, float(x[0]), float(x[1]))
                 time.sleep(cfg.dc_settle)
                 p = self._sa.measure_peak_power(f_lo)
                 eval_count_dc[0] += 1
+                dc_param_history["i0"].append(float(x[0]))
+                dc_param_history["q0"].append(float(x[1]))
+                dc_param_history["p_lo_dbm"].append(float(p))
                 self._update_live_history(dc_hist, p, every=max(1, int(cfg.live_plot_every)))
-                if eval_count_dc[0] % 10 == 0:
-                    _logger.debug("  DC eval %d: I0=%.5f Q0=%.5f  P_LO=%.1f", eval_count_dc[0], x[0], x[1], p)
                 return p
-
-            def _dc_callback(xk):
-                _logger.info("  DC opt step: I0=%.5f Q0=%.5f  (%d evals)", xk[0], xk[1], eval_count_dc[0])
 
             res_dc = minimize(
                 _cost_dc,
-                x0=[0.0, 0.0],
+                x0=[i0_init, q0_init],
                 method="Nelder-Mead",
-                callback=_dc_callback,
                 options={
-                    "maxiter": cfg.minimizer_maxiter,
+                    "maxiter": dc_budget,
+                    "maxfev": dc_budget,
                     "xatol": cfg.minimizer_xtol,
                     "fatol": 0.5,
                     "adaptive": True,
@@ -616,70 +835,148 @@ class ManualMixerCalibrator:
             )
             best_i0, best_q0 = float(res_dc.x[0]), float(res_dc.x[1])
             self._set_dc_offsets(element, best_i0, best_q0)
-            self._stop_cw(job)
-            _logger.info(
-                "Stage A done (%d evals): I0=%.6f  Q0=%.6f  P_LO=%.1f dBm",
-                res_dc.nfev, best_i0, best_q0, float(res_dc.fun),
-            )
+            self._stop_cw(dc_job)
 
-            # ── Stage B: IQ correction (slower, QM reopen per eval) ─
-            _logger.info("Stage B: IQ correction minimisation (maxiter=%d)", cfg.minimizer_maxiter)
+            if cfg.live_plot:
+                self._plot_parameter_history(
+                    title=f"{element}: DC parameter history",
+                    x_label="Iteration",
+                    series=[
+                        ("i0", dc_param_history["i0"], "I0 offset"),
+                        ("q0", dc_param_history["q0"], "Q0 offset"),
+                        ("P_LO", dc_param_history["p_lo_dbm"], "P_LO (dBm)"),
+                    ],
+                )
+
+            _logger.info("Stage B: IQ correction minimisation (maxiter=%d)", iq_budget)
             eval_count_iq = [0]
             iq_hist = self._init_live_history(
-                title=f"{element}: IQ minimizer objective history",
-                ylabel="Objective",
+                title=f"{element}: IQ minimizer image-power history",
+                ylabel="P_image (dBm)",
             ) if cfg.live_plot else None
+            iq_param_history = {
+                "gain": [],
+                "phase": [],
+                "p_image_dbm": [],
+            }
+
+            iq_job = self._start_cw(element)
+            self._set_dc_offsets(element, best_i0, best_q0)
+
+            baseline_tones = self._sa.measure_tones(f_lo, f_if)
+            if not all(
+                np.isfinite(float(baseline_tones[k]))
+                for k in ("P_des_dBm", "P_LO_dBm", "P_img_dBm")
+            ):
+                self._stop_cw(iq_job)
+                raise RuntimeError("Invalid SA baseline tones (NaN/inf).")
+            if abs(float(baseline_tones["f_target"]) - float(baseline_tones["f_image"])) <= cfg.sa_span_hz:
+                self._stop_cw(iq_job)
+                raise RuntimeError(
+                    "Target/image frequencies overlap within SA span. Check IF sign/sideband mapping."
+                )
+            if float(baseline_tones["P_LO_dBm"]) < -120.0:
+                self._stop_cw(iq_job)
+                raise RuntimeError("LO tone not detectable at baseline; aborting manual optimization.")
+            if abs(float(baseline_tones["P_des_dBm"]) - float(baseline_tones["P_img_dBm"])) < 0.5:
+                self._stop_cw(iq_job)
+                raise RuntimeError(
+                    "Target and image are too close in power at baseline; verify sideband/IF mapping."
+                )
+
+            target_ref_dbm = (
+                float(cfg.target_power_ref_dbm)
+                if cfg.target_power_ref_dbm is not None
+                else float(baseline_tones["P_des_dBm"])
+            )
 
             def _cost_iq(x):
                 self._apply_iq_correction(
-                    element, x[0], x[1], best_i0, best_q0,
+                    element,
+                    f_lo,
+                    f_if,
+                    float(x[0]),
+                    float(x[1]),
+                    best_i0,
+                    best_q0,
                     write_db=write_per_point,
+                    running_job=iq_job,
                 )
-                job_inner = self._start_cw(element)
-                self._set_dc_offsets(element, best_i0, best_q0)
                 time.sleep(cfg.iq_settle)
                 tones = self._sa.measure_tones(f_lo, f_if)
-                self._stop_cw(job_inner)
-                cost = self._objective_cost(
-                    p_target_dbm=float(tones["P_des_dBm"]),
-                    p_carrier_dbm=float(tones["P_LO_dBm"]),
-                    p_image_dbm=float(tones["P_img_dBm"]),
-                    cfg=cfg,
-                )
+                p_image = float(tones["P_img_dBm"])
                 eval_count_iq[0] += 1
-                self._update_live_history(iq_hist, cost, every=max(1, int(cfg.live_plot_every)))
-                _logger.debug(
-                    "  IQ eval %d: g=%.5f ph=%.5f  P_target=%.1f P_lo=%.1f P_img=%.1f cost=%.3f",
-                    eval_count_iq[0], x[0], x[1], tones["P_des_dBm"], tones["P_LO_dBm"], tones["P_img_dBm"], cost,
+                iq_param_history["gain"].append(float(x[0]))
+                iq_param_history["phase"].append(float(x[1]))
+                iq_param_history["p_image_dbm"].append(p_image)
+                self._update_live_history(iq_hist, p_image, every=max(1, int(cfg.live_plot_every)))
+                return p_image
+
+            try:
+                res_iq = minimize(
+                    _cost_iq,
+                    x0=[gain_init, phase_init],
+                    method="Nelder-Mead",
+                    options={
+                        "maxiter": iq_budget,
+                        "maxfev": iq_budget,
+                        "xatol": cfg.minimizer_xtol,
+                        "fatol": 0.5,
+                        "adaptive": True,
+                    },
                 )
-                return cost
+            finally:
+                self._stop_cw(iq_job)
 
-            def _iq_callback(xk):
-                _logger.info("  IQ opt step: gain=%.5f phase=%.5f  (%d evals)", xk[0], xk[1], eval_count_iq[0])
+            if cfg.live_plot:
+                self._plot_parameter_history(
+                    title=f"{element}: IQ parameter history",
+                    x_label="Iteration",
+                    series=[
+                        ("gain", iq_param_history["gain"], "Gain imbalance"),
+                        ("phase", iq_param_history["phase"], "Phase (rad)"),
+                        ("P_image", iq_param_history["p_image_dbm"], "P_image (dBm)"),
+                    ],
+                )
 
-            res_iq = minimize(
-                _cost_iq,
-                x0=[0.0, 0.0],
-                method="Nelder-Mead",
-                callback=_iq_callback,
-                options={
-                    "maxiter": cfg.minimizer_maxiter,
-                    "xatol": cfg.minimizer_xtol,
-                    "fatol": 0.5,
-                    "adaptive": True,
-                },
-            )
             best_g, best_p = float(res_iq.x[0]), float(res_iq.x[1])
-            _logger.info(
-                "Stage B done (%d evals): gain=%.6f  phase=%.6f  objective=%.3f",
-                res_iq.nfev, best_g, best_p, float(res_iq.fun),
-            )
-
-            # ── Final measurement ─────────────────────────────────
             final = self._measure_final(
-                element, f_lo, f_if, best_i0, best_q0, best_g, best_p,
+                element,
+                f_lo,
+                f_if,
+                best_i0,
+                best_q0,
+                best_g,
+                best_p,
                 write_db=save_to_db,
             )
+
+        reverted_to_baseline = False
+        if bool(getattr(cfg, "manual_revert_if_worse", True)) and self._is_result_worse(
+            final,
+            baseline,
+            tolerance_db=float(getattr(cfg, "manual_revert_tolerance_db", 0.0)),
+        ):
+            _logger.warning(
+                "Manual minimizer result for '%s' is worse than baseline; reverting to baseline calibration.",
+                element,
+            )
+            candidate_final = dict(final)
+            final = self._measure_final(
+                element,
+                f_lo,
+                f_if,
+                i0_init,
+                q0_init,
+                gain_init,
+                phase_init,
+                write_db=save_to_db,
+            )
+            best_i0, best_q0, best_g, best_p = i0_init, q0_init, gain_init, phase_init
+            reverted_to_baseline = True
+        else:
+            candidate_final = None
+
         result = {
             "element": element,
             "f_lo": f_lo,
@@ -688,15 +985,32 @@ class ManualMixerCalibrator:
             "q0": best_q0,
             "gain": best_g,
             "phase": best_p,
+            "eval_count_dc": int(eval_count_dc[0]),
+            "eval_count_iq": int(eval_count_iq[0]),
+            "eval_count_total": int(eval_count_dc[0] + eval_count_iq[0]),
+            "dc_history": {
+                "i0": [float(v) for v in dc_param_history["i0"]],
+                "q0": [float(v) for v in dc_param_history["q0"]],
+                "p_lo_dbm": [float(v) for v in dc_param_history["p_lo_dbm"]],
+            },
+            "iq_history": {
+                "gain": [float(v) for v in iq_param_history["gain"]],
+                "phase": [float(v) for v in iq_param_history["phase"]],
+                "p_image_dbm": [float(v) for v in iq_param_history["p_image_dbm"]],
+            },
+            "target_power_ref_dbm": float(target_ref_dbm),
+            "objective_mode": cfg.objective_mode,
+            "reverted_to_baseline": reverted_to_baseline,
             **final,
         }
+        if candidate_final is not None:
+            result["candidate_manual"] = candidate_final
+        result["baseline_before_manual"] = dict(baseline)
         if save_to_db:
             self._persist(result, method="manual_minimizer")
 
-        # Cleanup scratch file and cache
         self._cleanup_scratch()
         self._db_cache = None
-
         self._print_summary(result, saved=save_to_db)
         return result
 
@@ -762,7 +1076,7 @@ class ManualMixerCalibrator:
         cfg: MixerCalibrationConfig | None = None,
         write_db: bool = False,
     ) -> tuple[float, float, float]:
-        """2-D grid over (gain, phase); minimise P_img.  Requires QM reopen per point.
+        """2-D grid over (gain, phase); minimise P_img using live correction updates.
 
         Parameters
         ----------
@@ -782,37 +1096,46 @@ class ManualMixerCalibrator:
             p_vals,
             title=f"IQ correction scan ({element}, sideband={cfg.sideband})",
         ) if cfg.live_plot else None
-        for ix, g in enumerate(tqdm(g_vals, desc="IQ correction scan", unit="row", leave=False)):
-            for iy, p in enumerate(p_vals):
-                self._apply_iq_correction(
-                    element, float(g), float(p), i0, q0,
-                    write_db=write_db,
-                )
-                job = self._start_cw(element)
-                self._set_dc_offsets(element, i0, q0)
-                time.sleep(cfg.iq_settle)
-                tones = self._sa.measure_tones(f_lo, f_if)
-                P_img = self._objective_cost(
-                    p_target_dbm=float(tones["P_des_dBm"]),
-                    p_carrier_dbm=float(tones["P_LO_dBm"]),
-                    p_image_dbm=float(tones["P_img_dBm"]),
-                    cfg=cfg,
-                )
-                self._stop_cw(job)
-                if P_img < best_P:
-                    best_P, best_g, best_p = P_img, float(g), float(p)
-                done += 1
-                self._update_live_heatmap(
-                    live,
-                    ix=ix,
-                    iy=iy,
-                    value=float(P_img),
-                    best_x=float(best_g),
-                    best_y=float(best_p),
-                    every=max(1, int(cfg.live_plot_every)),
-                    counter=done,
-                )
-            _logger.debug("  IQ grid: %d/%d  best P_img=%.1f dBm", done, total, best_P)
+        job = self._start_cw(element)
+        self._set_dc_offsets(element, i0, q0)
+        try:
+            for ix, g in enumerate(tqdm(g_vals, desc="IQ correction scan", unit="row", leave=False)):
+                for iy, p in enumerate(p_vals):
+                    self._apply_iq_correction(
+                        element,
+                        f_lo,
+                        f_if,
+                        float(g),
+                        float(p),
+                        i0,
+                        q0,
+                        write_db=write_db,
+                        running_job=job,
+                    )
+                    time.sleep(cfg.iq_settle)
+                    tones = self._sa.measure_tones(f_lo, f_if)
+                    P_img = self._objective_cost(
+                        p_target_dbm=float(tones["P_des_dBm"]),
+                        p_carrier_dbm=float(tones["P_LO_dBm"]),
+                        p_image_dbm=float(tones["P_img_dBm"]),
+                        cfg=cfg,
+                    )
+                    if P_img < best_P:
+                        best_P, best_g, best_p = P_img, float(g), float(p)
+                    done += 1
+                    self._update_live_heatmap(
+                        live,
+                        ix=ix,
+                        iy=iy,
+                        value=float(P_img),
+                        best_x=float(best_g),
+                        best_y=float(best_p),
+                        every=max(1, int(cfg.live_plot_every)),
+                        counter=done,
+                    )
+                _logger.debug("  IQ grid: %d/%d  best P_img=%.1f dBm", done, total, best_P)
+        finally:
+            self._stop_cw(job)
         return best_g, best_p, best_P
 
     # ══════════════════════════════════════════════════════════
@@ -831,9 +1154,17 @@ class ManualMixerCalibrator:
         write_db: bool = True,
     ) -> dict[str, float]:
         """Apply final parameters, start CW, measure all three tones."""
-        self._apply_iq_correction(element, gain, phase, i0, q0, write_db=write_db)
+        self._apply_iq_correction(
+            element,
+            f_lo,
+            f_if,
+            gain,
+            phase,
+            i0,
+            q0,
+            write_db=write_db,
+        )
         job = self._start_cw(element)
-        self._set_dc_offsets(element, i0, q0)
         time.sleep(self._cfg.iq_settle)
         tones = self._sa.measure_tones(f_lo, f_if)
         self._stop_cw(job)
@@ -907,8 +1238,8 @@ class ManualMixerCalibrator:
     def _write_scratch_db(self, db: dict) -> None:
         """Write *db* to a scratch file (not the canonical path).
 
-        Used when ``save_to_db=False`` so QM can reopen with trial
-        correction values without modifying the canonical DB.
+        Kept for compatibility with older workflows that used scratch files
+        for trial correction snapshots.
         The scratch file lives alongside the real DB with a ``.scratch``
         extension.
         """
@@ -975,6 +1306,8 @@ class ManualMixerCalibrator:
         lo_mode_id = self._resolve_lo_mode_id(db, result["element"])
         if_mode_id = self._resolve_if_mode_id(db, result["element"])
 
+        method_norm = "manual" if str(method).startswith("manual") else str(method)
+
         ts = time.time()
         db["lo_cal"][str(lo_mode_id)] = {
             "i0": result["i0"],
@@ -983,17 +1316,17 @@ class ManualMixerCalibrator:
             "dc_phase": result["phase"],
             "temperature": None,
             "timestamp": ts,
-            "method": method,
+            "method": method_norm,
         }
         db["if_cal"][str(if_mode_id)] = {
             "gain": result["gain"],
             "phase": result["phase"],
             "temperature": None,
             "timestamp": ts,
-            "method": method,
+            "method": method_norm,
         }
         self._write_db(db)
-        _logger.info("Calibration saved to %s (method=%s)", self._db_path, method)
+        _logger.info("Calibration saved to %s (method=%s)", self._db_path, method_norm)
 
     # ══════════════════════════════════════════════════════════
     #  Summary output

@@ -1,0 +1,40 @@
+{
+  "timestamp": "20260221_192557",
+  "experiment": "ReadoutGEDiscrimination",
+  "calibration_tag": "readout_ge_discrimination",
+  "validation_passed": false,
+  "validation_errors": [
+    "Metric 'fidelity' below minimum: 65.672 < 70.0"
+  ],
+  "fit": {
+    "model": null,
+    "params": null,
+    "uncertainties": null,
+    "r_squared": null
+  },
+  "metrics": {
+    "gaussianity_g": 0.16285738449522663,
+    "gaussianity_e": 0.7211713834583935,
+    "fidelity": 65.672,
+    "angle": -0.2204871952195548,
+    "threshold": -2.1247173159475082e-05,
+    "gg": 0.79882,
+    "ge": 0.20118000000000003,
+    "eg": 0.48538000000000003,
+    "ee": 0.51462,
+    "w_plus_cos": 0.9757910130865735,
+    "w_plus_sin": -0.21870504973474816,
+    "w_minus_sin": -0.21870504973474816,
+    "w_minus_cos": -0.9757910130865735,
+    "rot_mu_g": "(-0.00014017401560297802+0.00011473113785426213j)",
+    "rot_mu_e": "(2.2778715928169505e-05+0.00011411625098611801j)",
+    "unrot_mu_g": "(-0.0001618728239041837+8.129684818541707e-05j)",
+    "unrot_mu_e": "(-2.730534055102155e-06+0.0001163354323593498j)",
+    "sigma_g": 0.00011036129768098637,
+    "sigma_e": 0.00013081174849504212
+  },
+  "run_metadata": {
+    "n_total": 50000
+  },
+  "extra_metadata": {}
+}

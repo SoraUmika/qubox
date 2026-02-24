@@ -1,0 +1,15 @@
+{
+  "iteration": 19,
+  "artifact_meta": {
+    "timestamp": "2026-02-23T14:37:23.558570",
+    "source": "FockResolvedSpectroscopy"
+  },
+  "artifact_id": "fockResolvedSpectroscopy:2026-02-23T14:37:23.558570",
+  "experiment_context": {
+    "device_id": "post_cavity_sample_A",
+    "cooldown_id": "cd_2025_02_22",
+    "wiring_rev": "a4b4f720",
+    "schema_version": "4.0.0",
+    "config_hash": "4f95fcd872b9"
+  }
+}

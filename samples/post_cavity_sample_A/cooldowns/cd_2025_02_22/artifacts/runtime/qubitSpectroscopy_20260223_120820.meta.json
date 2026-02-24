@@ -1,0 +1,15 @@
+{
+  "iteration": 4999,
+  "artifact_meta": {
+    "n_total": 5000,
+    "timestamp": "2026-02-23T12:08:20.036035"
+  },
+  "artifact_id": "QubitSpectroscopy:2026-02-23T12:08:20.036035",
+  "experiment_context": {
+    "device_id": "post_cavity_sample_A",
+    "cooldown_id": "cd_2025_02_22",
+    "wiring_rev": "a4b4f720",
+    "schema_version": "4.0.0",
+    "config_hash": "7750e4b75715"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "sample_id": "post_cavity_sample_A",
+  "description": "Transmon qubit A — 3D cavity sample",
+  "metadata": {
+    "chip": "Q1-2025A",
+    "fridge": "BlueFors-LD400"
+  },
+  "element_map": {},
+  "created": "2026-02-22T23:30:50.833577"
+}

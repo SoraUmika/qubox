@@ -1,0 +1,28 @@
+{
+  "timestamp": "20260221_212310",
+  "experiment": "ReadoutButterflyMeasurement",
+  "calibration_tag": "readout_butterfly",
+  "validation_passed": false,
+  "validation_errors": [
+    "No fit object available"
+  ],
+  "fit": {
+    "model": null,
+    "params": null,
+    "uncertainties": null,
+    "r_squared": null
+  },
+  "metrics": {
+    "F": 0.66446,
+    "Q": 0.9765292472333699,
+    "V": 0.32892,
+    "t01": 0.0,
+    "t10": 0.04694150553326035,
+    "confusion_matrix": "        |0>_i   |1>_i\nm1=0  0.68172  0.3528\nm1=1  0.31828  0.6472",
+    "Lambda_M_valid": true
+  },
+  "run_metadata": {
+    "n_total": 50000
+  },
+  "extra_metadata": {}
+}

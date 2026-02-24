@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+import warnings
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -45,7 +46,8 @@ class T2Ramsey(ExperimentBase):
 
         delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
 
-        self.hw.set_element_fq(attr.qb_el, attr.qb_fq + qb_detune)
+        qb_base_fq = self.get_qubit_frequency()
+        self.hw.set_element_fq(attr.qb_el, qb_base_fq + qb_detune)
         self.hw.set_element_fq(attr.ro_el, measureMacro._drive_frequency)
 
         prog = cQED_programs.T2_ramsey(
@@ -133,7 +135,7 @@ class T2Ramsey(ExperimentBase):
                 correction_hz = sign * float(fit.params["f_det"]) * 1e9
                 # Include the input detuning: the qubit was driven at qb_fq + qb_detune
                 qb_detune_hz = float(qb_detune or 0)
-                current_qb = float(self.attr.qb_fq) + qb_detune_hz
+                current_qb = self.get_qubit_frequency() + qb_detune_hz
                 corrected_qb = current_qb + correction_hz
                 metrics["qb_detune_Hz"] = qb_detune_hz
                 metrics["qb_freq_correction_Hz"] = correction_hz
@@ -342,23 +344,47 @@ class ResidualPhotonRamsey(ExperimentBase):
         dt: int,
         test_ro_op: str,
         qb_detuning: int = 0,
-        t_relax: int = 40,
-        t_buffer: int = 400,
+        t_relax_ns: int = 40,
+        t_buffer_ns: int = 400,
         r90: str = "x90",
         r180: str = "x180",
         prep_e: bool = False,
         test_ro_amp: float = 1.0,
         measure_ro_op: str = "readout_long",
         n_avg: int = 1000,
+        **kw,
     ) -> RunResult:
         attr = self.attr
+        if "t_relax" in kw:
+            t_relax_ns = int(kw.pop("t_relax"))
+        if "t_buffer" in kw:
+            t_buffer_ns = int(kw.pop("t_buffer"))
+        if kw:
+            unknown = ", ".join(sorted(kw.keys()))
+            raise TypeError(f"Unexpected keyword argument(s): {unknown}")
+
+        if (t_relax_ns % 4) != 0:
+            warnings.warn(
+                f"t_relax_ns={t_relax_ns} is not on 4 ns clock grid; rounding to nearest clock.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        if (t_buffer_ns % 4) != 0:
+            warnings.warn(
+                f"t_buffer_ns={t_buffer_ns} is not on 4 ns clock grid; rounding to nearest clock.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+        t_relax_clks = int(round(t_relax_ns / 4.0))
+        t_buffer_clks = int(round(t_buffer_ns / 4.0))
         delay_clks = create_clks_array(t_R_begin, t_R_end, dt, time_per_clk=4)
 
-        self.set_standard_frequencies(qb_fq=attr.qb_fq + qb_detuning)
+        self.set_standard_frequencies(qb_fq=self.get_qubit_frequency() + qb_detuning)
 
         prog = cQED_programs.residual_photon_ramsey(
             attr.qb_el, test_ro_op, delay_clks,
-            int(t_relax / 4), int(t_buffer / 4),
+            t_relax_clks, t_buffer_clks,
             prep_e, test_ro_amp,
             r90, r180, attr.qb_therm_clks, n_avg,
         )

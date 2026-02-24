@@ -1,8 +1,8 @@
 # qubox_v2/core/experiment_context.py
-"""Immutable experiment context carrying device and cooldown identity.
+"""Immutable experiment context carrying sample and cooldown identity.
 
 An ExperimentContext is a frozen passport that travels through the system,
-binding a session to a specific device, cooldown, and hardware wiring
+binding a session to a specific sample, cooldown, and hardware wiring
 configuration.  It is constructed once during session setup and never mutated.
 """
 from __future__ import annotations
@@ -19,10 +19,10 @@ class ExperimentContext:
 
     Attributes
     ----------
-    device_id : str
+    sample_id : str
         Unique identifier for a physical sample + wiring configuration.
     cooldown_id : str
-        Identifier for a specific cooldown cycle of the device.
+        Identifier for a specific cooldown cycle of the sample.
     wiring_rev : str
         SHA-256 prefix (first 8 hex chars) of hardware.json content.
     schema_version : str
@@ -31,7 +31,7 @@ class ExperimentContext:
         Combined SHA-256 hash from SessionState or config directory.
     """
 
-    device_id: str
+    sample_id: str
     cooldown_id: str
     wiring_rev: str
     schema_version: str = "4.0.0"
@@ -40,7 +40,7 @@ class ExperimentContext:
     def to_dict(self) -> dict[str, str]:
         """Serialize to a JSON-compatible dict."""
         return {
-            "device_id": self.device_id,
+            "sample_id": self.sample_id,
             "cooldown_id": self.cooldown_id,
             "wiring_rev": self.wiring_rev,
             "schema_version": self.schema_version,
@@ -51,16 +51,16 @@ class ExperimentContext:
     def from_dict(cls, d: dict[str, Any]) -> ExperimentContext:
         """Deserialize from a dict."""
         return cls(
-            device_id=str(d.get("device_id", "")),
+            sample_id=str(d.get("sample_id", d.get("device_id", ""))),
             cooldown_id=str(d.get("cooldown_id", "")),
             wiring_rev=str(d.get("wiring_rev", "")),
             schema_version=str(d.get("schema_version", "4.0.0")),
             config_hash=str(d.get("config_hash", "")),
         )
 
-    def matches_device(self, other_device_id: str) -> bool:
-        """Check whether this context belongs to the given device."""
-        return self.device_id == other_device_id
+    def matches_sample(self, other_sample_id: str) -> bool:
+        """Check whether this context belongs to the given sample."""
+        return self.sample_id == other_sample_id
 
     def matches_wiring(self, hardware_hash: str) -> bool:
         """Check whether the hardware wiring revision matches."""

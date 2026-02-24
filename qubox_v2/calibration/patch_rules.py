@@ -60,8 +60,17 @@ class T1Rule:
 
         params = result.params or {}
         patch = Patch(reason="T1Rule", provenance={"kind": result.kind, "element": self.element})
-        if "T1" in params:
-            patch.add("SetCalibration", path=f"coherence.{self.element}.T1", value=params["T1"])
+        t1_s = None
+        if "T1_s" in params:
+            t1_s = float(params["T1_s"])
+        elif "T1" in params:
+            t1_raw = float(params["T1"])
+            t1_s = t1_raw * 1e-9 if t1_raw > 1.0 else t1_raw
+        elif "T1_ns" in params:
+            t1_s = float(params["T1_ns"]) * 1e-9
+
+        if t1_s is not None:
+            patch.add("SetCalibration", path=f"coherence.{self.element}.T1", value=t1_s)
         if "T1_us" in params:
             patch.add("SetCalibration", path=f"coherence.{self.element}.T1_us", value=params["T1_us"])
         if "qb_therm_clks" in params:

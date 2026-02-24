@@ -61,7 +61,7 @@ class AllXY(ExperimentBase):
         n_avg: int = 1000,
     ) -> RunResult:
         attr = self.attr
-        self.set_standard_frequencies(qb_fq=attr.qb_fq + qb_detuning)
+        self.set_standard_frequencies(qb_fq=self.get_qubit_frequency() + qb_detuning)
 
         # Build rotation sequences
         if gate_indices is not None:

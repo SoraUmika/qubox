@@ -235,7 +235,7 @@ def _validate_calibration(data: dict, errors: list[str], warnings: list[str]) ->
         if not isinstance(context, dict):
             errors.append("calibration 'context' must be a dict")
         else:
-            for key in ("device_id", "cooldown_id", "wiring_rev"):
+            for key in ("sample_id", "device_id", "cooldown_id", "wiring_rev"):
                 val = context.get(key)
                 if val is not None and not isinstance(val, str):
                     errors.append(f"context.{key} must be a string, got {type(val).__name__}")

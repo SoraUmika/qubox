@@ -1,0 +1,22 @@
+{
+  "timestamp": "20260222_235157",
+  "experiment": "ResonatorSpectroscopyX180",
+  "calibration_tag": "resonator_spectroscopy_x180",
+  "validation_passed": true,
+  "validation_errors": [],
+  "fit": {
+    "model": null,
+    "params": null,
+    "uncertainties": null,
+    "r_squared": null
+  },
+  "metrics": {
+    "f0_g": 8632881317.077,
+    "f0_e": 8560948842.276284,
+    "chi": -35966237.40035772
+  },
+  "run_metadata": {
+    "n_total": 10000
+  },
+  "extra_metadata": {}
+}

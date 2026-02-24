@@ -1,0 +1,142 @@
+{
+  "timestamp": "20260221_185823",
+  "tag": "session_open",
+  "experiment_path": "E:\\qubox\\seq_1_device",
+  "elements": {
+    "resonator": {
+      "operations": [
+        "const",
+        "readout"
+      ],
+      "intermediate_frequency": -50000000.0
+    },
+    "qubit2": {
+      "operations": [
+        "const"
+      ],
+      "intermediate_frequency": -50000000.0
+    },
+    "qubit": {
+      "operations": [
+        "const",
+        "zero",
+        "saturation_pulse",
+        "x180",
+        "y180",
+        "x360",
+        "y360",
+        "x90",
+        "y90",
+        "sel_x180",
+        "sel_y180",
+        "x90n",
+        "y90n",
+        "sel_x90",
+        "sel_x90n",
+        "sel_y90",
+        "sel_y90n",
+        "const_x180",
+        "const_y180",
+        "const_x90",
+        "const_y90",
+        "const_x90n",
+        "const_y90n",
+        "r0",
+        "xn90",
+        "yn90",
+        "sel_yn90",
+        "const_r0",
+        "const_xn90",
+        "const_yn90",
+        "sel_r0",
+        "sel_xn90",
+        "ref_r180",
+        "sel_ref_r180"
+      ],
+      "intermediate_frequency": -50000000.0
+    },
+    "storage": {
+      "operations": [
+        "const",
+        "const_disp",
+        "const_alpha"
+      ],
+      "intermediate_frequency": -50000000.0
+    }
+  },
+  "pulse_op_mappings": {
+    "permanent": {
+      "resonator": {
+        "const": "const_pulse",
+        "readout": "readout_pulse"
+      },
+      "qubit": {
+        "const": "const_pulse",
+        "zero": "zero_pulse",
+        "saturation_pulse": "saturation",
+        "x180": "x180_pulse",
+        "y180": "y180_pulse",
+        "x360": "x360_pulse",
+        "y360": "y360_pulse",
+        "x90": "x90_pulse",
+        "y90": "y90_pulse",
+        "sel_x180": "sel_x180_pulse",
+        "sel_y180": "sel_y180_pulse",
+        "x90n": "x90n_pulse",
+        "y90n": "y90n_pulse",
+        "sel_x90": "sel_x90_pulse",
+        "sel_x90n": "sel_x90n_pulse",
+        "sel_y90": "sel_y90_pulse",
+        "sel_y90n": "sel_y90n_pulse",
+        "const_x180": "const_x180_pulse",
+        "const_y180": "const_y180_pulse",
+        "const_x90": "const_x90_pulse",
+        "const_y90": "const_y90_pulse",
+        "const_x90n": "const_x90n_pulse",
+        "const_y90n": "const_y90n_pulse",
+        "r0": "r0_pulse",
+        "xn90": "xn90_pulse",
+        "yn90": "yn90_pulse",
+        "sel_yn90": "sel_yn90_pulse",
+        "const_r0": "const_r0_pulse",
+        "const_xn90": "const_xn90_pulse",
+        "const_yn90": "const_yn90_pulse",
+        "sel_r0": "sel_r0_pulse",
+        "sel_xn90": "sel_xn90_pulse",
+        "ref_r180": "ref_r180_pulse",
+        "sel_ref_r180": "sel_ref_r180_pulse"
+      },
+      "qubit2": {
+        "const": "const_pulse"
+      },
+      "storage": {
+        "const": "const_pulse",
+        "const_disp": "const_disp_pulse",
+        "const_alpha": "const_alpha_pulse"
+      }
+    },
+    "volatile": {}
+  },
+  "attributes": {
+    "qb_el": "qubit",
+    "ro_el": "resonator",
+    "st_el": "storage",
+    "qb_fq": 6150383904.6972,
+    "ro_fq": 8596222556.078796,
+    "st_fq": 5240932800.0,
+    "b_coherent_amp": 0.01958,
+    "b_coherent_len": 48,
+    "b_alpha": 1,
+    "fock_fqs": [
+      6150358213.968985,
+      6147518413.893612,
+      6144634384.432323,
+      6141711687.392287,
+      6138726383.678176,
+      6135702959.965247,
+      6132617103.712755,
+      6129490390.517065
+    ]
+  },
+  "calibration_error": "object of type 'CalibrationData' has no len()"
+}

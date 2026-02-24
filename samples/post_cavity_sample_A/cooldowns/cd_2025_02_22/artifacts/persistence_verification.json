@@ -1,0 +1,212 @@
+{
+  "root": "seq_1_device",
+  "status": "PASS",
+  "checks": {
+    "json_policy_clean": true,
+    "butterfly_files_found": true
+  },
+  "json": {
+    "scanned": 147,
+    "issue_count": 0,
+    "issues": []
+  },
+  "butterfly": {
+    "found": 53,
+    "scanned": 10,
+    "avg_original_bytes": 2052505.8,
+    "avg_kept_array_bytes": 32.0,
+    "avg_reduction_fraction": 0.9999844093010603,
+    "rows": [
+      {
+        "path": "seq_1_device\\data\\butterflyMeasurement_20260222_172910.npz",
+        "original_bytes": 2047426,
+        "kept_array_bytes": 32,
+        "dropped_array_bytes": 7200000,
+        "array_keys_total": 9,
+        "array_keys_kept": 2,
+        "dropped_field_count": 7,
+        "sample_dropped_fields": [
+          "I0",
+          "I1",
+          "I2",
+          "Q0",
+          "Q1",
+          "Q2",
+          "states"
+        ],
+        "reduction_fraction_vs_original": 0.9999843706194999
+      },
+      {
+        "path": "seq_1_device\\data\\butterflyMeasurement_20260222_154103.npz",
+        "original_bytes": 2046152,
+        "kept_array_bytes": 32,
+        "dropped_array_bytes": 7200000,
+        "array_keys_total": 9,
+        "array_keys_kept": 2,
+        "dropped_field_count": 7,
+        "sample_dropped_fields": [
+          "I0",
+          "I1",
+          "I2",
+          "Q0",
+          "Q1",
+          "Q2",
+          "states"
+        ],
+        "reduction_fraction_vs_original": 0.9999843608881451
+      },
+      {
+        "path": "seq_1_device\\data\\butterflyMeasurement_20260222_153954.npz",
+        "original_bytes": 2046972,
+        "kept_array_bytes": 32,
+        "dropped_array_bytes": 7200000,
+        "array_keys_total": 9,
+        "array_keys_kept": 2,
+        "dropped_field_count": 7,
+        "sample_dropped_fields": [
+          "I0",
+          "I1",
+          "I2",
+          "Q0",
+          "Q1",
+          "Q2",
+          "states"
+        ],
+        "reduction_fraction_vs_original": 0.9999843671530436
+      },
+      {
+        "path": "seq_1_device\\data\\butterflyMeasurement_20260222_142441.npz",
+        "original_bytes": 2052923,
+        "kept_array_bytes": 32,
+        "dropped_array_bytes": 7200000,
+        "array_keys_total": 9,
+        "array_keys_kept": 2,
+        "dropped_field_count": 7,
+        "sample_dropped_fields": [
+          "I0",
+          "I1",
+          "I2",
+          "Q0",
+          "Q1",
+          "Q2",
+          "states"
+        ],
+        "reduction_fraction_vs_original": 0.9999844124694399
+      },
+      {
+        "path": "seq_1_device\\data\\butterflyMeasurement_20260222_142421.npz",
+        "original_bytes": 2052297,
+        "kept_array_bytes": 32,
+        "dropped_array_bytes": 7200000,
+        "array_keys_total": 9,
+        "array_keys_kept": 2,
+        "dropped_field_count": 7,
+        "sample_dropped_fields": [
+          "I0",
+          "I1",
+          "I2",
+          "Q0",
+          "Q1",
+          "Q2",
+          "states"
+        ],
+        "reduction_fraction_vs_original": 0.9999844077148677
+      },
+      {
+        "path": "seq_1_device\\data\\butterflyMeasurement_20260222_034451.npz",
+        "original_bytes": 2053649,
+        "kept_array_bytes": 32,
+        "dropped_array_bytes": 7200000,
+        "array_keys_total": 9,
+        "array_keys_kept": 2,
+        "dropped_field_count": 7,
+        "sample_dropped_fields": [
+          "I0",
+          "I1",
+          "I2",
+          "Q0",
+          "Q1",
+          "Q2",
+          "states"
+        ],
+        "reduction_fraction_vs_original": 0.9999844179798982
+      },
+      {
+        "path": "seq_1_device\\data\\butterflyMeasurement_20260222_034430.npz",
+        "original_bytes": 2052761,
+        "kept_array_bytes": 32,
+        "dropped_array_bytes": 7200000,
+        "array_keys_total": 9,
+        "array_keys_kept": 2,
+        "dropped_field_count": 7,
+        "sample_dropped_fields": [
+          "I0",
+          "I1",
+          "I2",
+          "Q0",
+          "Q1",
+          "Q2",
+          "states"
+        ],
+        "reduction_fraction_vs_original": 0.9999844112393016
+      },
+      {
+        "path": "seq_1_device\\data\\butterflyMeasurement_20260222_033111.npz",
+        "original_bytes": 2061203,
+        "kept_array_bytes": 32,
+        "dropped_array_bytes": 7200000,
+        "array_keys_total": 9,
+        "array_keys_kept": 2,
+        "dropped_field_count": 7,
+        "sample_dropped_fields": [
+          "I0",
+          "I1",
+          "I2",
+          "Q0",
+          "Q1",
+          "Q2",
+          "states"
+        ],
+        "reduction_fraction_vs_original": 0.999984475085666
+      },
+      {
+        "path": "seq_1_device\\data\\butterflyMeasurement_20260222_033052.npz",
+        "original_bytes": 2059971,
+        "kept_array_bytes": 32,
+        "dropped_array_bytes": 7200000,
+        "array_keys_total": 9,
+        "array_keys_kept": 2,
+        "dropped_field_count": 7,
+        "sample_dropped_fields": [
+          "I0",
+          "I1",
+          "I2",
+          "Q0",
+          "Q1",
+          "Q2",
+          "states"
+        ],
+        "reduction_fraction_vs_original": 0.9999844658007322
+      },
+      {
+        "path": "seq_1_device\\data\\butterflyMeasurement_20260222_032658.npz",
+        "original_bytes": 2051704,
+        "kept_array_bytes": 32,
+        "dropped_array_bytes": 7200000,
+        "array_keys_total": 9,
+        "array_keys_kept": 2,
+        "dropped_field_count": 7,
+        "sample_dropped_fields": [
+          "I0",
+          "I1",
+          "I2",
+          "Q0",
+          "Q1",
+          "Q2",
+          "states"
+        ],
+        "reduction_fraction_vs_original": 0.9999844032082601
+      }
+    ]
+  }
+}

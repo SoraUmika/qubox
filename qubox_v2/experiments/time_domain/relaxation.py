@@ -83,34 +83,38 @@ class T1Relaxation(ExperimentBase):
 
         metrics: dict[str, Any] = {"T1_guess_ns": T1_guess, "fit_converged": bool(fit.params)}
         if fit.params:
-            metrics["T1"] = fit.params["T1"]
-            metrics["T1_us"] = fit.params["T1"] / 1e3
+            t1_ns = float(fit.params["T1"])
+            metrics["T1_ns"] = t1_ns
+            metrics["T1_s"] = t1_ns * 1e-9
+            metrics["T1_us"] = t1_ns / 1e3
 
         metadata: dict[str, Any] = {
             "calibration_kind": "t1",
-            "units": {"T1": "ns", "T1_us": "us"},
+            "units": {"T1_ns": "ns", "T1_s": "s", "T1_us": "us"},
         }
         if update_calibration and fit.params:
+            t1_ns = float(fit.params["T1"])
+            t1_s = t1_ns * 1e-9
             metadata.setdefault("proposed_patch_ops", []).extend([
                 {
                     "op": "SetCalibration",
                     "payload": {
                         "path": f"coherence.{self.attr.qb_el}.T1",
-                        "value": float(fit.params["T1"]),
+                        "value": t1_s,
                     },
                 },
                 {
                     "op": "SetCalibration",
                     "payload": {
                         "path": f"coherence.{self.attr.qb_el}.T1_us",
-                        "value": float(fit.params["T1"] / 1e3),
+                        "value": t1_ns / 1e3,
                     },
                 },
             ])
 
             if derive_qb_therm_clks:
                 clk_ns = clock_period_ns
-                qb_therm_clks = int(np.floor((6.0 * float(fit.params["T1"])) / clk_ns))
+                qb_therm_clks = int(np.floor((6.0 * t1_ns) / clk_ns))
                 metrics["qb_therm_clks"] = qb_therm_clks
                 metadata.setdefault("proposed_patch_ops", []).append(
                     {

@@ -1,0 +1,31 @@
+{
+  "timestamp": "20260222_191341",
+  "experiment": "T2Echo",
+  "calibration_tag": "t2_echo",
+  "validation_passed": true,
+  "validation_errors": [],
+  "fit": {
+    "model": "T2_echo",
+    "params": {
+      "A": -0.00012093300165004786,
+      "T2_echo": 10245.672831807595,
+      "n": 0.7430643612314864,
+      "offset": -2.928453778898688e-05
+    },
+    "uncertainties": {
+      "A": 2.998244464446156e-06,
+      "T2_echo": 296.26505645586695,
+      "n": 0.026886733907833516,
+      "offset": 1.5063067589478356e-06
+    },
+    "r_squared": 0.9817010457936475
+  },
+  "metrics": {
+    "T2_echo": 10245.672831807595,
+    "T2_echo_us": 10.245672831807594
+  },
+  "run_metadata": {
+    "n_total": 4000
+  },
+  "extra_metadata": {}
+}

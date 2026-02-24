@@ -1,0 +1,36 @@
+{
+  "build_hash": "e4f0917dc8b2",
+  "build_timestamp": "2026-02-23T23:02:20.523508",
+  "git_commit": "6eeccb54ee76",
+  "device_id": "post_cavity_sample_A",
+  "cooldown_id": "cd_2025_02_22",
+  "wiring_rev": "a4b4f720",
+  "schemas": [
+    {
+      "file_type": "hardware",
+      "path": "E:\\qubox\\devices\\post_cavity_sample_A\\config\\hardware.json",
+      "version": 1,
+      "size_bytes": 4307
+    },
+    {
+      "file_type": "calibration",
+      "path": "E:\\qubox\\devices\\post_cavity_sample_A\\cooldowns\\cd_2025_02_22\\config\\calibration.json",
+      "version": "4.0.0",
+      "size_bytes": 1596
+    },
+    {
+      "file_type": "pulses",
+      "path": "E:\\qubox\\devices\\post_cavity_sample_A\\cooldowns\\cd_2025_02_22\\config\\pulses.json",
+      "version": 2,
+      "size_bytes": 963208
+    }
+  ],
+  "hardware_elements": [
+    "resonator",
+    "qubit2",
+    "qubit",
+    "storage"
+  ],
+  "calibration_version": "4.0.0",
+  "pulse_spec_count": 1
+}

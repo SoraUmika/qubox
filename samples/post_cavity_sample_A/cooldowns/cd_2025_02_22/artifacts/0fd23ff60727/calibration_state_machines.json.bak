@@ -1,0 +1,90 @@
+{
+  "power_rabi": {
+    "experiment": "power_rabi",
+    "state": "pending_approval",
+    "created": "2026-02-22T14:25:13.881415",
+    "transitions": 6,
+    "has_patch": true,
+    "history": [
+      {
+        "timestamp": "2026-02-22T14:25:13.881415",
+        "from": "idle",
+        "to": "configured"
+      },
+      {
+        "timestamp": "2026-02-22T14:25:13.881415",
+        "from": "configured",
+        "to": "acquiring"
+      },
+      {
+        "timestamp": "2026-02-22T14:25:13.881415",
+        "from": "acquiring",
+        "to": "acquired"
+      },
+      {
+        "timestamp": "2026-02-22T14:25:13.881415",
+        "from": "acquired",
+        "to": "analyzing"
+      },
+      {
+        "timestamp": "2026-02-22T14:25:13.882412",
+        "from": "analyzing",
+        "to": "analyzed"
+      },
+      {
+        "timestamp": "2026-02-22T14:25:13.882412",
+        "from": "analyzed",
+        "to": "pending_approval"
+      }
+    ]
+  },
+  "readout_full": {
+    "experiment": "readout_full",
+    "state": "committed",
+    "created": "2026-02-22T14:24:06.340759",
+    "transitions": 8,
+    "has_patch": true,
+    "history": [
+      {
+        "timestamp": "2026-02-22T14:24:06.340759",
+        "from": "idle",
+        "to": "configured"
+      },
+      {
+        "timestamp": "2026-02-22T14:24:06.340759",
+        "from": "configured",
+        "to": "acquiring"
+      },
+      {
+        "timestamp": "2026-02-22T14:24:42.314680",
+        "from": "acquiring",
+        "to": "acquired"
+      },
+      {
+        "timestamp": "2026-02-22T14:24:42.314680",
+        "from": "acquired",
+        "to": "analyzing"
+      },
+      {
+        "timestamp": "2026-02-22T14:24:44.282323",
+        "from": "analyzing",
+        "to": "analyzed"
+      },
+      {
+        "timestamp": "2026-02-22T14:24:44.282323",
+        "from": "analyzed",
+        "to": "pending_approval"
+      },
+      {
+        "timestamp": "2026-02-22T14:24:44.282323",
+        "from": "pending_approval",
+        "to": "committing"
+      },
+      {
+        "timestamp": "2026-02-22T14:24:44.282323",
+        "from": "committing",
+        "to": "committed"
+      }
+    ]
+  }
+}

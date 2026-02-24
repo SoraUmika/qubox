@@ -1,0 +1,15 @@
+{
+  "iteration": 9999,
+  "artifact_meta": {
+    "n_total": 10000,
+    "timestamp": "2026-02-22T23:50:42.431781"
+  },
+  "artifact_id": "ResonatorSpectroscopy:2026-02-22T23:50:42.431781",
+  "experiment_context": {
+    "device_id": "post_cavity_sample_A",
+    "cooldown_id": "cd_2025_02_22",
+    "wiring_rev": "a4b4f720",
+    "schema_version": "3.0.0",
+    "config_hash": "efff2aca3628"
+  }
+}

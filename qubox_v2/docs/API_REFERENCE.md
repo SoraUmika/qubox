@@ -1,9 +1,12 @@
 # qubox\_v2 — API Reference & Architecture Guide
 
-**Version**: 1.6.0
-**Date**: 2026-02-23
+**Version**: 1.7.0
+**Date**: 2026-02-24
 **Status**: Governing Document
 **Changelog**:
+- v1.7.0 — Renamed DeviceRegistry -> SampleRegistry, device_id -> sample_id
+  throughout.  Backward-compat aliases preserved.  On-disk migration from
+  devices/ to samples/.  See CHANGELOG.md for details.
 - v1.6.0 — Schema refactor: calibration schema version 4.0.0 is now canonical.
   `ElementFrequencies.lo_freq`/`if_freq` made optional; `rf_freq` field added.
   `PulseCalibration.element` made optional.  Readout metadata fields added to
@@ -30,7 +33,7 @@
 - v1.3.0 — Added sections 20-22: Macro System Architecture (measureMacro,
   sequenceMacros, cQED_programs), Experiment ↔ Macro Interaction Rules,
   Macro State Ownership & Persistence Boundaries.
-- v1.2.0 — Added sections 16-19: ExperimentContext & DeviceRegistry,
+- v1.2.0 — Added sections 16-19: ExperimentContext & SampleRegistry,
   CalibrationContext & ContextResolver, context-mode SessionManager,
   migration guide.  Updated section 15 with resolution status.
 - v1.1.0 — Added sections 11-15: SessionManager lifecycle detail,
@@ -55,7 +58,7 @@
 13. [CalibrationOrchestrator](#13-calibrationorchestrator)
 14. [measureConfig / Readout Macro Persistence](#14-measureconfig--readout-macro-persistence)
 15. [Known Gaps and Risks](#15-known-gaps-and-risks)
-16. [ExperimentContext & DeviceRegistry](#16-experimentcontext--deviceregistry)
+16. [ExperimentContext & SampleRegistry](#16-experimentcontext--sampleregistry)
 17. [CalibrationContext & ContextResolver](#17-calibrationcontext--contextresolver)
 18. [Context-Mode SessionManager](#18-context-mode-sessionmanager)
 19. [Migration Guide: Legacy → Context Mode](#19-migration-guide-legacy--context-mode)
@@ -156,21 +159,21 @@ session = SessionManager(experiment_path="seq_1_device/")
 session.open()
 ```
 
-**Context mode** (device + cooldown scoping):
+**Context mode** (sample + cooldown scoping):
 
 ```python
-from qubox_v2.devices import DeviceRegistry
+from qubox_v2.devices import SampleRegistry
 from qubox_v2.experiments.session import SessionManager
 
 REGISTRY_BASE = Path("E:/qubox")
-registry = DeviceRegistry(REGISTRY_BASE)
+registry = SampleRegistry(REGISTRY_BASE)
 
-# One-time: create device and cooldown
-registry.create_device(
+# One-time: create sample and cooldown
+registry.create_sample(
     "post_cavity_sample_A",
     description="Transmon qubit A — 3D cavity sample",
     config_source=Path("E:/qubox/seq_1_device/config"),
-    sample_info={"chip": "Q1-2025A", "fridge": "BlueFors-LD400"},
+    metadata={"chip": "Q1-2025A", "fridge": "BlueFors-LD400"},
 )
 registry.create_cooldown(
     "post_cavity_sample_A", "cd_2025_02_22",
@@ -179,7 +182,7 @@ registry.create_cooldown(
 
 # Open session
 session = SessionManager(
-    device_id="post_cavity_sample_A",
+    sample_id="post_cavity_sample_A",
     cooldown_id="cd_2025_02_22",
     registry_base=REGISTRY_BASE,
     qop_ip="10.157.36.68",
@@ -190,7 +193,7 @@ session.open()
 
 # Inspect context
 ctx = session.context
-print(f"Device: {ctx.device_id}, Cooldown: {ctx.cooldown_id}")
+print(f"Sample: {ctx.sample_id}, Cooldown: {ctx.cooldown_id}")
 print(f"Wiring Rev: {ctx.wiring_rev}, Config Hash: {ctx.config_hash}")
 ```
 
@@ -1420,7 +1423,7 @@ the `"module:Class"` format, supporting QCoDeS and InstrumentServer backends.
 {
   "version": "4.0.0",
   "context": {
-    "device_id": "...",
+    "sample_id": "...",
     "cooldown_id": "...",
     "wiring_rev": "...",
     "schema_version": "4.0.0",
@@ -1835,7 +1838,7 @@ print(f"g_pi = {analysis.metrics['g_pi']:.6f}")
 # Temporal Rabi
 trabi = TemporalRabi(session)
 result = trabi.run(
-    pulse="const_x180",
+    pulse="const",
     pulse_len_begin=16, pulse_len_end=500, dt=4, n_avg=5000,
 )
 analysis = trabi.analyze(result)
@@ -2129,8 +2132,8 @@ from qubox_v2.core.schemas import validate_config_dir
 config_dir = Path(session.experiment_path) / "config"
 ss = SessionState.from_config_dir(
     config_dir,
-    device_config_dir=device_config_dir,
-    device_id="post_cavity_sample_A",
+    sample_config_dir=sample_config_dir,
+    sample_id="post_cavity_sample_A",
     cooldown_id="cd_2025_02_22",
     wiring_rev=ctx.wiring_rev,
 )
@@ -2391,17 +2394,17 @@ parameters.  `measureConfig.json` is a persistence cache only.
 
 ## 15. Known Gaps and Risks
 
-### 15.1 No Device Identity — **RESOLVED in v1.2.0**
+### 15.1 No Sample Identity — **RESOLVED in v1.2.0**
 
-~~There is no `device_id`, `cooldown_id`, or `wiring_revision` in any
+~~There is no `sample_id`, `cooldown_id`, or `wiring_revision` in any
 config file.~~  Now addressed by `ExperimentContext` (Section 16) and
-`CalibrationContext` (Section 17).  Device identity is embedded in
+`CalibrationContext` (Section 17).  Sample identity is embedded in
 calibration files as of schema v4.0.0.
 
 ### 15.2 No Cooldown Scoping — **RESOLVED in v1.2.0**
 
 ~~Calibrations from previous cooldowns are silently reused.~~
-Now addressed by `DeviceRegistry` cooldown directories (Section 16.2)
+Now addressed by `SampleRegistry` cooldown directories (Section 16.2)
 and `ContextMismatchError` enforcement (Section 17.2).  Each cooldown
 gets its own `config/` subtree.
 
@@ -2449,27 +2452,27 @@ See `docs/audit/STALE_CALIBRATION_RISK_REPORT.md` Risk R9.
 
 ### 15.7 Modularity Roadmap — **IMPLEMENTED in v1.2.0**
 
-~~Concrete proposals for device/cooldown scoping are documented in
+~~Concrete proposals for sample/cooldown scoping are documented in
 `docs/audit/MODULARITY_RECOMMENDATIONS.md`.~~
 All modularity recommendations have been implemented.  See Sections 16-19.
 
 ---
 
-## 16. ExperimentContext & DeviceRegistry
+## 16. ExperimentContext & SampleRegistry
 
 ### 16.1 ExperimentContext
 
 **Module**: `qubox_v2/core/experiment_context.py`
 **Type**: `@dataclass(frozen=True)`
 
-An immutable identity token that pins a session to a specific device,
+An immutable identity token that pins a session to a specific sample,
 cooldown, and hardware wiring.  Created once during `SessionManager` init
 and never mutated.
 
 ```python
 @dataclass(frozen=True)
 class ExperimentContext:
-    device_id:      str
+    sample_id:      str
     cooldown_id:    str
     wiring_rev:     str            # SHA-256[:8] of hardware.json
     schema_version: str = "4.0.0"
@@ -2482,15 +2485,15 @@ class ExperimentContext:
 |--------|-----------|--------|-------------|
 | `to_dict` | `() -> dict` | `dict` | Serialise to plain dict |
 | `from_dict` | `(d: dict) -> ExperimentContext` | `ExperimentContext` | Deserialise from dict (classmethod) |
-| `matches_device` | `(other: ExperimentContext) -> bool` | `bool` | Same `device_id` |
-| `matches_cooldown` | `(other: ExperimentContext) -> bool` | `bool` | Same `device_id` *and* `cooldown_id` |
+| `matches_sample` | `(other: ExperimentContext) -> bool` | `bool` | Same `sample_id` |
+| `matches_cooldown` | `(other: ExperimentContext) -> bool` | `bool` | Same `sample_id` *and* `cooldown_id` |
 | `matches_wiring` | `(other: ExperimentContext) -> bool` | `bool` | Same `wiring_rev` |
 | `compute_wiring_rev` | `(hw_path: Path) -> str` | `str` | Static: SHA-256[:8] of file (staticmethod) |
 
 #### Typical Flow
 
 ```text
-DeviceRegistry ─resolve_config_paths()─▶ file system paths
+SampleRegistry ─resolve_config_paths()─▶ file system paths
                                            │
 ContextResolver ─resolve()─────────────────▶ ExperimentContext
                                            │
@@ -2500,25 +2503,25 @@ SessionManager.__init__() ◀────────────────┘
   └─▶ session.context                      ← exposed property
 ```
 
-### 16.2 DeviceRegistry
+### 16.2 SampleRegistry
 
-**Module**: `qubox_v2/devices/device_registry.py`
-**Type**: `class DeviceRegistry`
+**Module**: `qubox_v2/devices/sample_registry.py`
+**Type**: `class SampleRegistry`
 
-Manages the filesystem tree for multi-device, multi-cooldown experiments.
+Manages the filesystem tree for multi-sample, multi-cooldown experiments.
 
 ```python
-class DeviceRegistry:
+class SampleRegistry:
     def __init__(self, base_path: Path) -> None
 ```
 
 **Directory layout created by registry operations:**
 
 ```text
-{base_path}/devices/
-  {device_id}/
-    device.json            ← DeviceInfo metadata
-    config/                ← device-level: hardware.json, cqed_params.json,
+{base_path}/samples/
+  {sample_id}/
+    sample.json            ← SampleInfo metadata
+    config/                ← sample-level: hardware.json, cqed_params.json,
     │                         devices.json, pulse_specs.json
     cooldowns/
       {cooldown_id}/
@@ -2532,29 +2535,29 @@ class DeviceRegistry:
 
 | Method | Signature | Return | Description |
 |--------|-----------|--------|-------------|
-| `create_device` | `(device_id, *, description, config_source, sample_info)` | `Path` | Create device dir + copy config |
-| `create_cooldown` | `(device_id, cooldown_id, *, seed_from)` | `Path` | Create cooldown dir, seed calibration |
-| `list_devices` | `()` | `list[str]` | All device IDs |
-| `list_cooldowns` | `(device_id)` | `list[str]` | All cooldown IDs for a device |
-| `device_exists` | `(device_id) -> bool` | `bool` | Check device dir exists |
-| `cooldown_exists` | `(device_id, cooldown_id) -> bool` | `bool` | Check cooldown dir exists |
-| `device_path` | `(device_id) -> Path` | `Path` | Absolute path to device dir |
-| `cooldown_path` | `(device_id, cooldown_id) -> Path` | `Path` | Absolute path to cooldown dir |
-| `load_device_info` | `(device_id) -> DeviceInfo` | `DeviceInfo` | Read `device.json` |
-| `resolve_config_paths` | `(device_id, cooldown_id) -> dict` | `dict` | Merged device-level + cooldown-level paths |
+| `create_sample` | `(sample_id, *, description, config_source, metadata)` | `Path` | Create sample dir + copy config |
+| `create_cooldown` | `(sample_id, cooldown_id, *, seed_from)` | `Path` | Create cooldown dir, seed calibration |
+| `list_samples` | `()` | `list[str]` | All sample IDs |
+| `list_cooldowns` | `(sample_id)` | `list[str]` | All cooldown IDs for a sample |
+| `sample_exists` | `(sample_id) -> bool` | `bool` | Check sample dir exists |
+| `cooldown_exists` | `(sample_id, cooldown_id) -> bool` | `bool` | Check cooldown dir exists |
+| `sample_path` | `(sample_id) -> Path` | `Path` | Absolute path to sample dir |
+| `cooldown_path` | `(sample_id, cooldown_id) -> Path` | `Path` | Absolute path to cooldown dir |
+| `load_sample_info` | `(sample_id) -> SampleInfo` | `SampleInfo` | Read `sample.json` |
+| `resolve_config_paths` | `(sample_id, cooldown_id) -> dict` | `dict` | Merged sample-level + cooldown-level paths |
 
-### 16.3 DeviceInfo
+### 16.3 SampleInfo
 
-**Module**: `qubox_v2/devices/device_registry.py`
+**Module**: `qubox_v2/devices/sample_registry.py`
 **Type**: `@dataclass`
 
 ```python
 @dataclass
-class DeviceInfo:
-    device_id:   str
+class SampleInfo:
+    sample_id:   str
     description: str   = ""
     created:     str   = ""          # ISO-8601
-    sample_info: dict  = field(default_factory=dict)
+    metadata: dict  = field(default_factory=dict)
 ```
 
 ---
@@ -2567,11 +2570,11 @@ class DeviceInfo:
 **Type**: `class CalibrationContext(BaseModel)` (Pydantic v2)
 
 Embedded context block inside `calibration.json`, stamped on every save
-to record which device, cooldown, and wiring revision produced the data.
+to record which sample, cooldown, and wiring revision produced the data.
 
 ```python
 class CalibrationContext(BaseModel):
-    device_id:      str
+    sample_id:      str
     cooldown_id:    str
     wiring_rev:     str
     schema_version: str  = "4.0.0"
@@ -2625,7 +2628,7 @@ class CalibrationStore:
 
 1. If no context provided → skip (legacy mode).
 2. If calibration file has no `context` block → skip (pre-v4 file).
-3. Compare `context.device_id` with `data.context.device_id`.
+3. Compare `context.sample_id` with `data.context.sample_id`.
 4. Compare `context.wiring_rev` with `data.context.wiring_rev`.
 5. On mismatch:
    - `strict_context=True` → raise `ContextMismatchError`.
@@ -2642,21 +2645,21 @@ writing.  Ensures every save records the authoring context.
 
 ```python
 class ContextResolver:
-    def __init__(self, registry: DeviceRegistry) -> None
+    def __init__(self, registry: SampleRegistry) -> None
 
     def resolve(
         self,
-        device_id: str,
+        sample_id: str,
         cooldown_id: str,
     ) -> ExperimentContext
 ```
 
-Resolves a `(device_id, cooldown_id)` pair into a full
+Resolves a `(sample_id, cooldown_id)` pair into a full
 `ExperimentContext` by:
 
-1. Looking up `hardware.json` in the device config directory.
+1. Looking up `hardware.json` in the sample config directory.
 2. Computing `wiring_rev` via `ExperimentContext.compute_wiring_rev()`.
-3. Computing `config_hash` from the merged set of device-level +
+3. Computing `config_hash` from the merged set of sample-level +
    cooldown-level config files.
 4. Setting `schema_version = "4.0.0"`.
 
@@ -2666,7 +2669,7 @@ Resolves a `(device_id, cooldown_id)` pair into a full
 
 ```python
 class ContextMismatchError(ConfigError):
-    """Calibration data was produced by a different device or wiring revision."""
+    """Calibration data was produced by a different sample or wiring revision."""
 ```
 
 Raised by `CalibrationStore._validate_context()` in strict mode.
@@ -2690,7 +2693,7 @@ class SessionManager:
         cluster_name: str = "",
         auto_save_calibration: bool = True,
         # Context mode (v1.2.0)
-        device_id: str | None = None,
+        sample_id: str | None = None,
         cooldown_id: str | None = None,
         registry_base: Path | None = None,
         strict_context: bool = True,
@@ -2701,33 +2704,33 @@ class SessionManager:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `device_id` | `str \| None` | `None` | Device identifier in the registry |
+| `sample_id` | `str \| None` | `None` | Sample identifier in the registry |
 | `cooldown_id` | `str \| None` | `None` | Cooldown identifier |
-| `registry_base` | `Path \| None` | `None` | Root path containing `devices/` tree |
+| `registry_base` | `Path \| None` | `None` | Root path containing `samples/` tree |
 | `strict_context` | `bool` | `True` | Pass to `CalibrationStore` for mismatch enforcement |
 
 ### 18.2 Mode Selection
 
 | Condition | Mode | `experiment_path` | `context` |
 |-----------|------|--------------------|-----------|
-| `device_id` + `cooldown_id` provided | **Context** | Auto-resolved to cooldown dir | `ExperimentContext(...)` |
+| `sample_id` + `cooldown_id` provided | **Context** | Auto-resolved to cooldown dir | `ExperimentContext(...)` |
 | Only `experiment_path` provided | **Legacy** | As provided | `None` |
 
 In context mode, the session:
 
-1. Creates a `DeviceRegistry(registry_base)`.
-2. Resolves `config_paths = registry.resolve_config_paths(device_id, cooldown_id)`.
+1. Creates a `SampleRegistry(registry_base)`.
+2. Resolves `config_paths = registry.resolve_config_paths(sample_id, cooldown_id)`.
 3. Sets `experiment_path` to the cooldown root directory.
 4. Builds `ExperimentContext` via `ContextResolver(registry).resolve(...)`.
 5. Passes `context` and `strict_context` to `CalibrationStore`.
-6. Populates `SessionState` with `device_id`, `cooldown_id`, `wiring_rev`.
+6. Populates `SessionState` with `sample_id`, `cooldown_id`, `wiring_rev`.
 
 ### 18.3 New Properties and Methods
 
 | Member | Type | Description |
 |--------|------|-------------|
 | `session.context` | `ExperimentContext \| None` | Active context (None in legacy mode) |
-| `SessionManager.from_device(cls, ...)` | classmethod | Convenience for context-mode construction |
+| `SessionManager.from_sample(cls, ...)` | classmethod | Convenience for context-mode construction |
 
 ### 18.4 SessionState Updates
 
@@ -2737,7 +2740,7 @@ New fields added to `SessionState`:
 
 | Field | Type | Default | Source |
 |-------|------|---------|--------|
-| `device_id` | `str \| None` | `None` | `ExperimentContext.device_id` |
+| `sample_id` | `str \| None` | `None` | `ExperimentContext.sample_id` |
 | `cooldown_id` | `str \| None` | `None` | `ExperimentContext.cooldown_id` |
 | `wiring_rev` | `str \| None` | `None` | `ExperimentContext.wiring_rev` |
 
@@ -2761,22 +2764,22 @@ meta["experiment_context"] = session.context.to_dict()
 ### 19.1 Overview
 
 Existing notebooks using `SessionManager("./seq_1_device")` continue to
-work unchanged.  Context mode is opt-in — activate it by passing `device_id`
+work unchanged.  Context mode is opt-in — activate it by passing `sample_id`
 and `cooldown_id`.
 
 ### 19.2 Step-by-Step Migration
 
-1. **Import `DeviceRegistry`**:
+1. **Import `SampleRegistry`**:
 
 ```python
-from qubox_v2.devices import DeviceRegistry
+from qubox_v2.devices import SampleRegistry
 ```
 
-2. **Create a device from existing config** (one-time setup):
+2. **Create a sample from existing config** (one-time setup):
 
 ```python
-registry = DeviceRegistry(Path("E:/qubox"))
-registry.create_device(
+registry = SampleRegistry(Path("E:/qubox"))
+registry.create_sample(
     "my_device",
     config_source=Path("./seq_1_device/config"),
     description="3D cavity transmon A",
@@ -2796,7 +2799,7 @@ registry.create_cooldown(
 
 ```python
 session = SessionManager(
-    device_id="my_device",
+    sample_id="my_device",
     cooldown_id="cd_2025_03_15",
     registry_base=Path("E:/qubox"),
     qop_ip="10.157.36.68",
@@ -2827,11 +2830,11 @@ spec.plot(analysis)
 ### 19.3 Switching Cooldowns
 
 ```python
-# Start a new cooldown for the same device
+# Start a new cooldown for the same sample
 registry.create_cooldown("my_device", "cd_2025_04_01")
 
 session = SessionManager(
-    device_id="my_device",
+    sample_id="my_device",
     cooldown_id="cd_2025_04_01",
     registry_base=Path("E:/qubox"),
     qop_ip="10.157.36.68",
@@ -2855,8 +2858,8 @@ This ensures `qubox_v2` is importable regardless of the working directory.
 
 | Feature | Legacy Mode | Context Mode |
 |---------|-------------|--------------|
-| Session constructor | `SessionManager("./seq_1_device")` | `SessionManager(device_id=..., cooldown_id=...)` |
-| Calibration path | `{experiment_path}/config/calibration.json` | `devices/{id}/cooldowns/{cd}/config/calibration.json` |
+| Session constructor | `SessionManager("./seq_1_device")` | `SessionManager(sample_id=..., cooldown_id=...)` |
+| Calibration path | `{experiment_path}/config/calibration.json` | `samples/{id}/cooldowns/{cd}/config/calibration.json` |
 | Schema version | v3.0.0 (auto-migrated in memory) | v4.0.0 |
 | Stale-cal protection | None | `ContextMismatchError` |
 | `session.context` | `None` | `ExperimentContext(...)` |
@@ -3725,7 +3728,7 @@ experiment execution — in a single notebook flow:
 from pathlib import Path
 import numpy as np
 from qualang_tools.units import unit
-from qubox_v2.devices import DeviceRegistry
+from qubox_v2.devices import SampleRegistry
 from qubox_v2.experiments.session import SessionManager
 from qubox_v2.experiments import *
 from qubox_v2.tools.generators import register_rotations_from_ref_iq
@@ -3733,9 +3736,9 @@ from qubox_v2.tools.waveforms import drag_gaussian_pulse_waveforms
 u = unit()
 
 # ── Cell 2: Session Setup ──
-registry = DeviceRegistry(Path("E:/qubox"))
+registry = SampleRegistry(Path("E:/qubox"))
 session = SessionManager(
-    device_id="my_device",
+    sample_id="my_device",
     cooldown_id="cd_001",
     registry_base=Path("E:/qubox"),
     qop_ip="10.157.36.68",
@@ -3931,7 +3934,7 @@ session.close()
 | `DeviceError` | `QuboxError` | External-device driver error |
 | `PulseError` | `QuboxError` | Invalid pulse definition |
 | `CalibrationError` | `QuboxError` | Octave or element calibration failure |
-| `ContextMismatchError` | `ConfigError` | Device/cooldown/wiring context mismatch |
+| `ContextMismatchError` | `ConfigError` | Sample/cooldown/wiring context mismatch |
 
 ### `qubox_v2.core.schemas`
 
@@ -3971,7 +3974,7 @@ implementation at time of writing.  They are listed here for transparency.*
 # Session and core
 from qubox_v2.experiments.session import SessionManager
 from qubox_v2.experiments import ExperimentBase, ExperimentRunner
-from qubox_v2.devices import DeviceRegistry, ContextResolver
+from qubox_v2.devices import SampleRegistry, ContextResolver
 
 # Built-in experiments (import any you need)
 from qubox_v2.experiments import (
@@ -4038,7 +4041,7 @@ class MyExp(ExperimentBase):
 
 | Accessor | Returns | Description |
 |----------|---------|-------------|
-| `self.attr` | `cQED_attributes` | Device parameters (frequencies, element names, etc.) |
+| `self.attr` | `cQED_attributes` | Sample parameters (frequencies, element names, etc.) |
 | `self.pulse_mgr` | `PulseOperationManager` | Pulse registration and lookup |
 | `self.hw` | `HardwareController` | QM config, element frequency control |
 | `self.measure_macro` | `measureMacro` | QUA readout code emitter |

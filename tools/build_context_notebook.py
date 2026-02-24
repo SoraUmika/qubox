@@ -27,10 +27,10 @@ cells.append(make_cell("markdown", """\
 # Post-Cavity Experiment — Context Mode
 
 Comprehensive characterization using the **qubox_v2 v4** context-mode API
-with explicit device + cooldown scoping.
+with explicit sample + cooldown scoping.
 
 **Sections:**
-1. Device Registry & Cooldown Setup
+1. Sample Registry & Cooldown Setup
 2. Session Initialization (Context Mode)
 3. OPX/Octave Mixer Calibration
 4. Readout Characterization
@@ -44,7 +44,7 @@ with explicit device + cooldown scoping.
 12. Context Mismatch Protection Demo
 13. Utility: Continuous-Wave Output
 
-All calibrations are automatically scoped to the active `device_id + cooldown_id`.
+All calibrations are automatically scoped to the active `sample_id + cooldown_id`.
 Stale-calibration reuse across cooldowns is prevented by compatibility checks."""))
 
 # ── 2 Imports ────────────────────────────────────────────
@@ -101,21 +101,21 @@ from qubox_v2.experiments import (
 )
 from qubox_v2.experiments.calibration import ReadoutConfig
 from qubox_v2.calibration import CalibrationOrchestrator
-from qubox_v2.devices import DeviceRegistry, DeviceInfo
+from qubox_v2.devices import SampleRegistry, SampleInfo
 
 u = unit()"""))
 
 # ── 3 Registry heading ──────────────────────────────────
 cells.append(make_cell("markdown", """\
-## 1. Device Registry & Cooldown Setup
+## 1. Sample Registry & Cooldown Setup
 
-Create a device in the registry from existing `seq_1_device` config files,
+Create a sample in the registry from existing `seq_1_device` config files,
 then create a cooldown for today's session.
 
 **Directory layout created:**
 ```
-devices/<device_id>/
-  device.json
+samples/<sample_id>/
+  sample.json
   config/  (hardware.json, cqed_params.json, devices.json, pulse_specs.json)
   cooldowns/<cooldown_id>/
     config/  (calibration.json, pulses.json, measureConfig.json)
@@ -125,62 +125,62 @@ devices/<device_id>/
 
 # ── 4 Registry init ─────────────────────────────────────
 cells.append(make_cell("code", """\
-# Registry root — where the devices/ directory tree lives
+# Registry root — where the samples/ directory tree lives
 REGISTRY_BASE = Path(r"E:\\qubox")
 
-registry = DeviceRegistry(REGISTRY_BASE)
+registry = SampleRegistry(REGISTRY_BASE)
 print(f"Registry base: {registry.base_path}")
-print(f"Existing devices: {registry.list_devices()}")"""))
+print(f"Existing samples: {registry.list_samples()}")"""))
 
-# ── 5 Create device ─────────────────────────────────────
+# ── 5 Create sample ─────────────────────────────────────
 cells.append(make_cell("code", """\
-DEVICE_ID = "post_cavity_sample_A"
+SAMPLE_ID = "post_cavity_sample_A"
 
-if not registry.device_exists(DEVICE_ID):
-    dev_path = registry.create_device(
-        DEVICE_ID,
+if not registry.sample_exists(SAMPLE_ID):
+    dev_path = registry.create_sample(
+        SAMPLE_ID,
         description="Transmon qubit A — 3D cavity sample",
         config_source=Path(r"E:\\qubox\\seq_1_device\\config"),
-        sample_info={"chip": "Q1-2025A", "fridge": "BlueFors-LD400"},
+        metadata={"chip": "Q1-2025A", "fridge": "BlueFors-LD400"},
     )
-    print(f"Created device at: {dev_path}")
+    print(f"Created sample at: {dev_path}")
 else:
-    print(f"Device '{DEVICE_ID}' already exists")
+    print(f"Sample '{SAMPLE_ID}' already exists")
 
-info = registry.load_device_info(DEVICE_ID)
-print(f"Device: {info.device_id} — {info.description}")"""))
+info = registry.load_sample_info(SAMPLE_ID)
+print(f"Sample: {info.sample_id} — {info.description}")"""))
 
 # ── 6 Create cooldown ───────────────────────────────────
 cells.append(make_cell("code", """\
 COOLDOWN_ID = "cd_2025_02_22"
 
-if not registry.cooldown_exists(DEVICE_ID, COOLDOWN_ID):
+if not registry.cooldown_exists(SAMPLE_ID, COOLDOWN_ID):
     cd_path = registry.create_cooldown(
-        DEVICE_ID, COOLDOWN_ID,
+        SAMPLE_ID, COOLDOWN_ID,
         seed_from=Path(r"E:\\qubox\\seq_1_device\\config"),
     )
     print(f"Created cooldown at: {cd_path}")
 else:
     print(f"Cooldown '{COOLDOWN_ID}' already exists")
 
-print(f"Cooldowns for {DEVICE_ID}: {registry.list_cooldowns(DEVICE_ID)}")"""))
+print(f"Cooldowns for {SAMPLE_ID}: {registry.list_cooldowns(SAMPLE_ID)}")"""))
 
 # ── 7 Session heading ───────────────────────────────────
 cells.append(make_cell("markdown", """\
 ## 2. Session Initialization (Context Mode)
 
-Open a `SessionManager` using `device_id` + `cooldown_id` instead of
+Open a `SessionManager` using `sample_id` + `cooldown_id` instead of
 a raw `experiment_path`. The session automatically resolves:
-- **Device-level** files: `hardware.json`, `cqed_params.json`, `devices.json`, `pulse_specs.json`
+- **Sample-level** files: `hardware.json`, `cqed_params.json`, `devices.json`, `pulse_specs.json`
 - **Cooldown-level** files: `calibration.json`, `pulses.json`, `measureConfig.json`
 
-Compatibility checks verify that the calibration context matches the device
+Compatibility checks verify that the calibration context matches the sample
 and wiring revision. Mismatches raise `ContextMismatchError` (or log warnings)."""))
 
 # ── 8 Open session ──────────────────────────────────────
 cells.append(make_cell("code", """\
 session = SessionManager(
-    device_id=DEVICE_ID,
+    sample_id=SAMPLE_ID,
     cooldown_id=COOLDOWN_ID,
     registry_base=REGISTRY_BASE,
     qop_ip="10.157.36.68",
@@ -190,7 +190,7 @@ session = SessionManager(
 
 # Verify context is populated
 ctx = session.context
-print(f"Device ID:      {ctx.device_id}")
+print(f"Sample ID:      {ctx.sample_id}")
 print(f"Cooldown ID:    {ctx.cooldown_id}")
 print(f"Wiring Rev:     {ctx.wiring_rev}")
 print(f"Config Hash:    {ctx.config_hash}")
@@ -210,7 +210,7 @@ print(f"Storage:   {attr.st_fq / 1e9:.4f} GHz")
 # Verify calibration context is stamped
 cal_ctx = session.calibration.data.context
 if cal_ctx:
-    print(f"\\nCalibration bound to device:   {cal_ctx.device_id}")
+    print(f"\\nCalibration bound to sample:   {cal_ctx.sample_id}")
     print(f"Calibration bound to cooldown: {cal_ctx.cooldown_id}")
     print(f"Calibration wiring rev:        {cal_ctx.wiring_rev}")
 else:
@@ -237,11 +237,11 @@ from qubox_v2.core.schemas import validate_config_dir
 orch = CalibrationOrchestrator(session)
 
 config_dir = Path(session.experiment_path) / "config"
-device_config_dir = getattr(session, "_device_config_dir", None)
+sample_config_dir = getattr(session, "_sample_config_dir", None)
 ss = SessionState.from_config_dir(
     config_dir,
-    device_config_dir=device_config_dir,
-    device_id=DEVICE_ID,
+    sample_config_dir=sample_config_dir,
+    sample_id=SAMPLE_ID,
     cooldown_id=COOLDOWN_ID,
     wiring_rev=ctx.wiring_rev,
 )
@@ -635,7 +635,7 @@ Sweep pulse duration at fixed amplitude to measure Rabi frequency."""))
 cells.append(make_cell("code", """\
 trabi = TemporalRabi(session)
 result = trabi.run(
-    pulse="const_x180",
+    pulse="const",
     pulse_len_begin=16,
     pulse_len_end=500,
     dt=4,
@@ -1220,7 +1220,19 @@ print(f"GE/100 - F  = {ge_minus_F:.4f}")
 print(f"Lambda_M_valid = {ro_pipeline_analysis.metrics.get('bfly_Lambda_M_valid', None)}")
 print(f"acceptance_rate = {ro_pipeline_analysis.metrics.get('bfly_acceptance_rate', float('nan'))}")
 print(f"average_tries   = {ro_pipeline_analysis.metrics.get('bfly_average_tries', float('nan'))}")
+print(f"readout_duration_ns   = {ro_pipeline_analysis.metrics.get('bfly_readout_duration_ns', float('nan'))}")
+print(f"readout_duration_clks = {ro_pipeline_analysis.metrics.get('bfly_readout_duration_clks', float('nan'))}")
+print(f"T1_decay_factor       = {ro_pipeline_analysis.metrics.get('bfly_T1_decay_factor', float('nan'))}")
 print(f"measureMacro confusion loaded: {measureMacro._ro_quality_params.get('confusion_matrix') is not None}")
+
+fq_entry = session.calibration.get_frequencies(attr.qb_el)
+cal_qb_fq = None if fq_entry is None else getattr(fq_entry, "qubit_freq", None)
+attr_qb_fq = getattr(attr, "qb_fq", None)
+print("\nQubit frequency binding check:")
+print(f"  calibration frequencies.{attr.qb_el}.qubit_freq = {cal_qb_fq}")
+print(f"  runtime attr.qb_fq                               = {attr_qb_fq}")
+if cal_qb_fq is not None and attr_qb_fq is not None:
+    print(f"  delta (attr - calibrated)                        = {float(attr_qb_fq) - float(cal_qb_fq)} Hz")
 
 if bfly_stage is not None:
     cm = bfly_stage.metrics.get("confusion_matrix", None)
@@ -1783,7 +1795,7 @@ import datetime
 print("=" * 60)
 print("  SESSION SUMMARY (Context Mode)")
 print("=" * 60)
-print(f"  Device ID:      {ctx.device_id}")
+print(f"  Sample ID:      {ctx.sample_id}")
 print(f"  Cooldown ID:    {ctx.cooldown_id}")
 print(f"  Wiring Rev:     {ctx.wiring_rev}")
 print(f"  Config Hash:    {ctx.config_hash}")
@@ -1798,7 +1810,7 @@ print(f"  Calibration file: {session.calibration.path}")
 print(f"  Calibration version: {session.calibration.data.version}")
 cal_ctx = session.calibration.data.context
 if cal_ctx:
-    print(f"  Calibration device_id:   {cal_ctx.device_id}")
+    print(f"  Calibration sample_id:   {cal_ctx.sample_id}")
     print(f"  Calibration cooldown_id: {cal_ctx.cooldown_id}")
     print(f"  Calibration wiring_rev:  {cal_ctx.wiring_rev}")
 print()
@@ -1830,7 +1842,7 @@ print()
 report_lines = [
     f"# Session Report (Context Mode)",
     f"",
-    f"- Device ID: {ctx.device_id}",
+    f"- Sample ID: {ctx.sample_id}",
     f"- Cooldown ID: {ctx.cooldown_id}",
     f"- Wiring Rev: {ctx.wiring_rev}",
     f"- Config Hash: {ctx.config_hash}",
@@ -1874,7 +1886,7 @@ print("  Done.")"""))
 cells.append(make_cell("markdown", """\
 ## 12. Context Mismatch Protection Demo
 
-If you try to load calibration from a different device or with a mismatched
+If you try to load calibration from a different sample or with a mismatched
 wiring revision, the system raises `ContextMismatchError` (in strict mode)
 or logs a warning (in non-strict mode)."""))
 
@@ -1886,7 +1898,7 @@ from qubox_v2.calibration.store import CalibrationStore
 
 # Simulate a mismatched context
 wrong_ctx = ExperimentContext(
-    device_id="different_device",
+    sample_id="different_sample",
     cooldown_id=COOLDOWN_ID,
     wiring_rev="00000000",
 )
@@ -1902,8 +1914,8 @@ except ContextMismatchError as e:
 else:
     print("No mismatch (calibration file may not have a context block yet)")
 
-print(f"\\nActive context:  device={ctx.device_id}, cooldown={ctx.cooldown_id}")
-print(f"Wrong context:   device={wrong_ctx.device_id}, cooldown={wrong_ctx.cooldown_id}")"""))
+print(f"\\nActive context:  sample={ctx.sample_id}, cooldown={ctx.cooldown_id}")
+print(f"Wrong context:   sample={wrong_ctx.sample_id}, cooldown={wrong_ctx.cooldown_id}")"""))
 
 # ── 103 CW heading ──────────────────────────────────────
 cells.append(make_cell("markdown", """\
@@ -1917,7 +1929,7 @@ cells.append(make_cell("code", """\
 from qubox_v2.programs.builders.utility import continuous_wave
 
 target_element = attr.qb_el
-cw_pulse = "const_x180"
+cw_pulse = "const"
 cw_gain = 0.5
 truncate_clks = 250
 
@@ -1974,21 +1986,21 @@ print(analysis.metrics)
 
 | Feature | Context Mode (this notebook) | Legacy Mode |
 |---------|-----|------|
-| Session init | `SessionManager(device_id=..., cooldown_id=...)` | `SessionManager("./seq_1_device")` |
+| Session init | `SessionManager(sample_id=..., cooldown_id=...)` | `SessionManager("./seq_1_device")` |
 | Calibration scoping | Per-cooldown directory | Single flat directory |
-| Stale-cal protection | `ContextMismatchError` on device/wiring mismatch | None |
-| Config paths | Device-level + cooldown-level separation | All in one `config/` |
+| Stale-cal protection | `ContextMismatchError` on sample/wiring mismatch | None |
+| Config paths | Sample-level + cooldown-level separation | All in one `config/` |
 | Artifact paths | `cooldowns/<id>/artifacts/` | `artifacts/` |
-| `session.context` | `ExperimentContext(device_id, cooldown_id, ...)` | `None` |
+| `session.context` | `ExperimentContext(sample_id, cooldown_id, ...)` | `None` |
 
 ### Switching Cooldowns
 
-To start a new cooldown with the same device:
+To start a new cooldown with the same sample:
 
 ```python
 registry.create_cooldown("post_cavity_sample_A", "cd_2025_03_15")
 session = SessionManager(
-    device_id="post_cavity_sample_A",
+    sample_id="post_cavity_sample_A",
     cooldown_id="cd_2025_03_15",
     registry_base=Path("E:/qubox"),
     qop_ip="10.157.36.68",
@@ -2001,8 +2013,8 @@ session.open()
 
 | Component | Where | Purpose |
 |---|---|---|
-| `DeviceRegistry` | Section 1 | Device + cooldown directory management |
-| `ExperimentContext` | Section 2 | Immutable context identity (device + cooldown + wiring) |
+| `SampleRegistry` | Section 1 | Sample + cooldown directory management |
+| `ExperimentContext` | Section 2 | Immutable context identity (sample + cooldown + wiring) |
 | `CalibrationContext` | Section 2 | Context block stamped in calibration.json |
 | `ContextMismatchError` | Section 12 | Prevents stale-calibration reuse |
 | `SessionState` | Section 2.1 | Immutable config snapshot with SHA-256 build hash |

@@ -1,0 +1,67 @@
+{
+  "timestamp": "20260224_020401",
+  "method": "auto",
+  "sa_device": "sa124b",
+  "sa_config": {
+    "sideband": "lsb",
+    "sa_span_hz": 2000000.0,
+    "sa_rbw": 1000.0,
+    "sa_vbw": 1000.0,
+    "sa_avg": 5,
+    "sa_level": 0.0
+  },
+  "results": [
+    {
+      "element": "resonator",
+      "lo_hz": 8800000000.0,
+      "if_hz": -50000000.0,
+      "sideband": "lsb",
+      "f_target_hz": 8750000000.0,
+      "f_image_hz": 8850000000.0,
+      "P_target_dBm": -84.77302,
+      "P_lo_dBm": -83.65101,
+      "P_image_dBm": -85.24587,
+      "lo_suppression_dBc": -1.122010000000003,
+      "irr_dBc": 0.472849999999994
+    },
+    {
+      "element": "qubit",
+      "lo_hz": 6200000000.0,
+      "if_hz": -50000000.0,
+      "sideband": "lsb",
+      "f_target_hz": 6150000000.0,
+      "f_image_hz": 6250000000.0,
+      "P_target_dBm": -88.23823,
+      "P_lo_dBm": -87.32892,
+      "P_image_dBm": -88.917435,
+      "lo_suppression_dBc": -0.909310000000005,
+      "irr_dBc": 0.6792049999999961
+    },
+    {
+      "element": "storage",
+      "lo_hz": 5400000000.0,
+      "if_hz": -50000000.0,
+      "sideband": "lsb",
+      "f_target_hz": 5350000000.0,
+      "f_image_hz": 5450000000.0,
+      "P_target_dBm": -81.43445,
+      "P_lo_dBm": -87.42902,
+      "P_image_dBm": -87.49026,
+      "lo_suppression_dBc": 5.994569999999996,
+      "irr_dBc": 6.055810000000008
+    },
+    {
+      "element": "qubit2",
+      "lo_hz": 7000000000.0,
+      "if_hz": -50000000.0,
+      "sideband": "lsb",
+      "f_target_hz": 6950000000.0,
+      "f_image_hz": 7050000000.0,
+      "P_target_dBm": -88.212395,
+      "P_lo_dBm": -63.95823,
+      "P_image_dBm": -87.45094,
+      "lo_suppression_dBc": -24.254165,
+      "irr_dBc": -0.761454999999998
+    }
+  ]
+}

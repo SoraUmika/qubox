@@ -225,6 +225,11 @@ class CalibrationOrchestrator:
             self.session.calibration.save()
             self.session.save_pulses()
 
+            try:
+                self.session.refresh_attribute_frequencies_from_calibration(persist=True)
+            except Exception:
+                pass
+
             # Sync measureMacro from CalibrationStore after every commit
             # so discrimination/quality params stay in sync.
             try:

@@ -27,6 +27,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from ..core.logging import get_logger
 from ..core.persistence_policy import sanitize_mapping_for_json
 from .models import (
@@ -57,9 +59,9 @@ class CalibrationStore:
         If True, every mutating method automatically saves to disk.
     context : ExperimentContext, optional
         If provided, the store validates that the on-disk calibration
-        matches this device/cooldown/wiring context.
+        matches this sample/cooldown/wiring context.
     strict_context : bool
-        If True (default), a device or wiring mismatch raises
+        If True (default), a sample or wiring mismatch raises
         ``ContextMismatchError``.  If False, mismatches are logged as
         warnings only.
     """
@@ -76,6 +78,12 @@ class CalibrationStore:
         self._auto_save = auto_save
         self._context = context
         self._data = self._load_or_create()
+        if self._normalize_coherence_units():
+            _logger.warning(
+                "Normalized legacy coherence units to seconds in %s",
+                self._path,
+            )
+            self.save()
         if context is not None:
             self._validate_context(strict=strict_context)
 
@@ -97,13 +105,18 @@ class CalibrationStore:
                 raw["version"] = "4.0.0"
                 raw.setdefault("context", None)
                 _logger.info("Auto-migrated calibration in-memory from v3.0.0 to v4.0.0")
+            # Backward compat: remap legacy "device_id" → "sample_id" in context
+            if "context" in raw and isinstance(raw["context"], dict):
+                ctx = raw["context"]
+                if "device_id" in ctx and "sample_id" not in ctx:
+                    ctx["sample_id"] = ctx.pop("device_id")
             return CalibrationData.model_validate(raw)
         # Write defaults to disk immediately so the file actually exists.
         # Cannot call self.save() here because self._data is not yet assigned.
         ctx_block = None
         if self._context is not None:
             ctx_block = CalibrationContext(
-                device_id=self._context.device_id,
+                sample_id=self._context.sample_id,
                 cooldown_id=self._context.cooldown_id,
                 wiring_rev=self._context.wiring_rev,
                 schema_version=self._context.schema_version,
@@ -119,6 +132,59 @@ class CalibrationStore:
         self._atomic_write(data)
         _logger.info("Default calibration created at %s", self._path)
         return data
+
+    def _normalize_coherence_units(self) -> bool:
+        """Convert legacy coherence fields stored in ns into canonical seconds.
+
+        Canonical model units:
+          - ``T1``, ``T2_ramsey``, ``T2_echo`` are seconds.
+          - ``*_us`` companion fields are microseconds.
+        """
+        changed = False
+        coherence_map = self._data.coherence or {}
+        field_pairs = (
+            ("T1", "T1_us"),
+            ("T2_ramsey", "T2_star_us"),
+            ("T2_echo", "T2_echo_us"),
+        )
+
+        for element, params in coherence_map.items():
+            for sec_field, us_field in field_pairs:
+                sec_val = getattr(params, sec_field, None)
+                if sec_val is None:
+                    continue
+                sec_val = float(sec_val)
+                if sec_val <= 0:
+                    continue
+
+                us_val = getattr(params, us_field, None)
+                if us_val is not None and float(us_val) > 0:
+                    expected_sec = float(us_val) * 1e-6
+                    if not np.isclose(sec_val, expected_sec, rtol=0.2, atol=1e-12):
+                        setattr(params, sec_field, expected_sec)
+                        changed = True
+                        _logger.warning(
+                            "Coherence unit mismatch for %s.%s; using %s from %s.",
+                            element,
+                            sec_field,
+                            sec_field,
+                            us_field,
+                        )
+                    continue
+
+                if sec_val > 1.0:
+                    setattr(params, sec_field, sec_val * 1e-9)
+                    changed = True
+                    _logger.warning(
+                        "Detected legacy ns value for %s.%s=%g; converted to seconds.",
+                        element,
+                        sec_field,
+                        sec_val,
+                    )
+
+        if changed:
+            self._data.last_modified = datetime.now().isoformat()
+        return changed
 
     # ------------------------------------------------------------------
     # Discrimination
@@ -364,7 +430,7 @@ class CalibrationStore:
         Parameters
         ----------
         strict : bool
-            If True, device or wiring mismatches raise
+            If True, sample or wiring mismatches raise
             ``ContextMismatchError``.  Cooldown mismatches always warn.
         """
         from ..core.errors import ContextMismatchError
@@ -382,11 +448,11 @@ class CalibrationStore:
             )
             return
 
-        # Device mismatch
-        if stored.device_id and ctx.device_id and stored.device_id != ctx.device_id:
+        # Sample mismatch
+        if stored.sample_id and ctx.sample_id and stored.sample_id != ctx.sample_id:
             msg = (
-                f"Device mismatch: calibration was made for device "
-                f"'{stored.device_id}' but session uses '{ctx.device_id}'"
+                f"Sample mismatch: calibration was made for sample "
+                f"'{stored.sample_id}' but session uses '{ctx.sample_id}'"
             )
             if strict:
                 raise ContextMismatchError(msg)
@@ -413,7 +479,7 @@ class CalibrationStore:
     def stamp_context(self, context: Any) -> None:
         """Write or overwrite the context block from an ExperimentContext."""
         self._data.context = CalibrationContext(
-            device_id=context.device_id,
+            sample_id=context.sample_id,
             cooldown_id=context.cooldown_id,
             wiring_rev=context.wiring_rev,
             schema_version=context.schema_version,

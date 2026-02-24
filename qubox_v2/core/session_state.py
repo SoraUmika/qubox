@@ -64,7 +64,7 @@ class SessionState:
     build_hash: str = ""
     build_timestamp: str = ""
     git_commit: str | None = None
-    device_id: str | None = None
+    sample_id: str | None = None
     cooldown_id: str | None = None
     wiring_rev: str | None = None
 
@@ -73,8 +73,8 @@ class SessionState:
         cls,
         config_dir: str | Path,
         *,
-        device_config_dir: str | Path | None = None,
-        device_id: str | None = None,
+        sample_config_dir: str | Path | None = None,
+        sample_id: str | None = None,
         cooldown_id: str | None = None,
         wiring_rev: str | None = None,
     ) -> SessionState:
@@ -83,10 +83,10 @@ class SessionState:
         Parameters
         ----------
         config_dir : str | Path
-            Path to the config directory (e.g., ``seq_1_device/config/``).
-        device_config_dir : str | Path | None
-            Optional device-level config directory. In context mode,
-            device-level files (hardware.json, pulse_specs.json,
+            Path to the config directory (e.g., ``cooldown/config/``).
+        sample_config_dir : str | Path | None
+            Optional sample-level config directory. In context mode,
+            sample-level files (hardware.json, pulse_specs.json,
             cqed_params.json) live here rather than in the cooldown
             config dir.
 
@@ -101,14 +101,14 @@ class SessionState:
             If required files (hardware.json, calibration.json) are missing.
         """
         config_dir = Path(config_dir)
-        dev_dir = Path(device_config_dir) if device_config_dir is not None else None
+        sample_dir = Path(sample_config_dir) if sample_config_dir is not None else None
         schemas = []
         hash_inputs = []
 
         # --- Hardware (required) ---
         hw_path = config_dir / "hardware.json"
-        if not hw_path.exists() and dev_dir is not None:
-            hw_path = dev_dir / "hardware.json"
+        if not hw_path.exists() and sample_dir is not None:
+            hw_path = sample_dir / "hardware.json"
         if not hw_path.exists():
             raise FileNotFoundError(f"Required file missing: {hw_path}")
         hw_raw = hw_path.read_bytes()
@@ -138,8 +138,8 @@ class SessionState:
         # --- Pulse specs (optional — may be pulse_specs.json or pulses.json) ---
         pulse_specs = {}
         ps_path = config_dir / "pulse_specs.json"
-        if not ps_path.exists() and dev_dir is not None:
-            ps_path = dev_dir / "pulse_specs.json"
+        if not ps_path.exists() and sample_dir is not None:
+            ps_path = sample_dir / "pulse_specs.json"
         if not ps_path.exists():
             ps_path = config_dir / "pulses.json"
         if ps_path.exists():
@@ -156,8 +156,8 @@ class SessionState:
         # --- cQED params (optional, legacy) ---
         cqed_params = {}
         cqed_path = config_dir / "cqed_params.json"
-        if not cqed_path.exists() and dev_dir is not None:
-            cqed_path = dev_dir / "cqed_params.json"
+        if not cqed_path.exists() and sample_dir is not None:
+            cqed_path = sample_dir / "cqed_params.json"
         if cqed_path.exists():
             cqed_raw = cqed_path.read_bytes()
             cqed_params = json.loads(cqed_raw)
@@ -181,7 +181,7 @@ class SessionState:
             build_hash=build_hash,
             build_timestamp=datetime.now().isoformat(),
             git_commit=git_commit,
-            device_id=device_id,
+            sample_id=sample_id,
             cooldown_id=cooldown_id,
             wiring_rev=wiring_rev,
         )
@@ -192,7 +192,7 @@ class SessionState:
             f"SessionState (build_hash={self.build_hash})",
             f"  timestamp: {self.build_timestamp}",
             f"  git_commit: {self.git_commit or 'unknown'}",
-            f"  device_id: {self.device_id or '(legacy)'}",
+            f"  sample_id: {self.sample_id or '(legacy)'}",
             f"  cooldown_id: {self.cooldown_id or '(legacy)'}",
             f"  wiring_rev: {self.wiring_rev or '(unknown)'}",
             f"  schemas:",
@@ -218,7 +218,7 @@ class SessionState:
             "build_hash": self.build_hash,
             "build_timestamp": self.build_timestamp,
             "git_commit": self.git_commit,
-            "device_id": self.device_id,
+            "sample_id": self.sample_id,
             "cooldown_id": self.cooldown_id,
             "wiring_rev": self.wiring_rev,
             "schemas": [
