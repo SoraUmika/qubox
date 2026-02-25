@@ -1,9 +1,9 @@
 # qubox_v2/devices/context_resolver.py
-"""Resolve an ExperimentContext from device registry paths.
+"""Resolve an ExperimentContext from sample registry paths.
 
-The :class:`ContextResolver` bridges the :class:`DeviceRegistry` and
-:class:`ExperimentContext` frozen dataclass: given a device_id and
-cooldown_id it validates that the device and cooldown exist, computes
+The :class:`ContextResolver` bridges the :class:`SampleRegistry` and
+:class:`ExperimentContext` frozen dataclass: given a sample_id and
+cooldown_id it validates that the sample and cooldown exist, computes
 the wiring revision from hardware.json, and assembles the context.
 """
 from __future__ import annotations
@@ -20,12 +20,12 @@ _logger = get_logger(__name__)
 
 
 class ContextResolver:
-    """Resolve device + cooldown into an :class:`ExperimentContext`.
+    """Resolve sample + cooldown into an :class:`ExperimentContext`.
 
     Parameters
     ----------
-    registry : DeviceRegistry
-        The device registry to query for paths.
+    registry : SampleRegistry
+        The sample registry to query for paths.
     """
 
     def __init__(self, registry: Any) -> None:
@@ -33,17 +33,17 @@ class ContextResolver:
 
     def resolve(
         self,
-        device_id: str,
+        sample_id: str,
         cooldown_id: str,
     ) -> ExperimentContext:
-        """Build an ExperimentContext from a device and cooldown.
+        """Build an ExperimentContext from a sample and cooldown.
 
         Parameters
         ----------
-        device_id : str
+        sample_id : str
             Must exist in the registry.
         cooldown_id : str
-            Must exist under the device.
+            Must exist under the sample.
 
         Returns
         -------
@@ -52,20 +52,20 @@ class ContextResolver:
         Raises
         ------
         FileNotFoundError
-            If the device or cooldown does not exist.
+            If the sample or cooldown does not exist.
         """
-        if not self._registry.device_exists(device_id):
+        if not self._registry.sample_exists(sample_id):
             raise FileNotFoundError(
-                f"Device '{device_id}' not found in registry at "
+                f"Sample '{sample_id}' not found in registry at "
                 f"{self._registry.base_path}"
             )
-        if not self._registry.cooldown_exists(device_id, cooldown_id):
+        if not self._registry.cooldown_exists(sample_id, cooldown_id):
             raise FileNotFoundError(
-                f"Cooldown '{cooldown_id}' not found for device '{device_id}'"
+                f"Cooldown '{cooldown_id}' not found for sample '{sample_id}'"
             )
 
         # Compute wiring revision from hardware.json
-        paths = self._registry.resolve_config_paths(device_id, cooldown_id)
+        paths = self._registry.resolve_config_paths(sample_id, cooldown_id)
         hw_path = paths.get("hardware.json")
         wiring_rev = ""
         if hw_path is not None and hw_path.exists():
@@ -85,15 +85,15 @@ class ContextResolver:
                 pass
 
         ctx = ExperimentContext(
-            device_id=device_id,
+            sample_id=sample_id,
             cooldown_id=cooldown_id,
             wiring_rev=wiring_rev,
             schema_version=schema_version,
             config_hash=config_hash,
         )
         _logger.info(
-            "Resolved context: device=%s cooldown=%s wiring=%s",
-            device_id, cooldown_id, wiring_rev,
+            "Resolved context: sample=%s cooldown=%s wiring=%s",
+            sample_id, cooldown_id, wiring_rev,
         )
         return ctx
 
@@ -112,11 +112,11 @@ class ContextResolver:
 
         wiring_rev = ExperimentContext.compute_wiring_rev(hw_path)
 
-        # Derive a device_id from directory name
-        device_id = experiment_path.name
+        # Derive a sample_id from directory name
+        sample_id = experiment_path.name
 
         return ExperimentContext(
-            device_id=device_id,
+            sample_id=sample_id,
             cooldown_id="legacy",
             wiring_rev=wiring_rev,
             schema_version="4.0.0",
