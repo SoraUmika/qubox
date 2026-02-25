@@ -1,9 +1,14 @@
 # qubox\_v2 — API Reference & Architecture Guide
 
-**Version**: 1.7.0
-**Date**: 2026-02-24
+**Version**: 1.8.0
+**Date**: 2026-02-25
 **Status**: Governing Document
 **Changelog**:
+- v1.8.0 — Audit-driven bug fixes and hardening: Wigner negativity formula,
+  T1Rule heuristic, QubitStateTomography plot, SPA exception logging, patch
+  rule deduplication, missing resonator\_freq FrequencyRule, dead
+  update\_calibration warnings, StorageSpectroscopyCoarse calibration pattern,
+  FockResolvedSpectroscopy peak extraction, SPAFluxOptimization2 dead params.
 - v1.7.0 — Renamed DeviceRegistry -> SampleRegistry, device_id -> sample_id
   throughout.  Backward-compat aliases preserved.  On-disk migration from
   devices/ to samples/.  See CHANGELOG.md for details.
@@ -1768,7 +1773,7 @@ All experiments inherit from `ExperimentBase` and implement the
 | Class | Purpose |
 |-------|---------|
 | `SPAFluxOptimization` | SPA flux bias optimization |
-| `SPAFluxOptimization2` | SPA flux optimization variant |
+| `SPAFluxOptimization2` | SPA flux optimization (scout / refine / lock modes) |
 | `SPAPumpFrequencyOptimization` | SPA pump frequency optimization |
 
 ### 9.2 Experiment Contract Summary
@@ -2300,16 +2305,32 @@ consistent with the canonical `CalibrationStore` after every patch.
 | Rule | Result Kind | What It Patches |
 |------|-------------|-----------------|
 | `PiAmpRule` | `pi_amp` | Reference pulse amplitude + primitive family (x180, y180, x90, etc.) |
-| `T1Rule` | `t1` | `coherence.<element>.T1` |
+| `T1Rule` | `t1` | `coherence.<element>.T1` (unit heuristic: values > 1e-3 treated as ns, converted to s) |
 | `T2RamseyRule` | `t2_ramsey` | `coherence.<element>.T2_ramsey` + optional frequency correction |
 | `T2EchoRule` | `t2_echo` | `coherence.<element>.T2_echo` |
-| `FrequencyRule` | `qubit_freq` / `storage_freq` | `frequencies.<element>.qubit_freq` + optional kappa |
+| `FrequencyRule` | `qubit_freq` / `resonator_freq` / `storage_freq` | `frequencies.<element>.<field>` + optional kappa |
 | `DragAlphaRule` | `drag_alpha` | `pulse_calibrations.<pulse>.drag_coeff` for all primitives |
 | `DiscriminationRule` | `ReadoutGEDiscrimination` | `discrimination.<element>.*` |
 | `ReadoutQualityRule` | `ReadoutButterflyMeasurement` | `readout_quality.<element>.*` |
 | `WeightRegistrationRule` | Any (with metadata) | Promotes proposed ops from analysis metadata |
+| `PulseTrainRule` | `pulse_train` | Reference pulse corrected amplitude + phase via pulse-train tomography |
 
-Default rule mapping: `default_patch_rules(session)` (patch_rules.py:246-274).
+**Default rule mapping** (`default_patch_rules(session)`, patch_rules.py:282-313):
+
+| Kind | Rules |
+|------|-------|
+| `pi_amp` | `PiAmpRule` |
+| `t1` | `T1Rule`, `WeightRegistrationRule` |
+| `t2_ramsey` | `T2RamseyRule`, `WeightRegistrationRule` |
+| `t2_echo` | `T2EchoRule`, `WeightRegistrationRule` |
+| `resonator_freq` | `FrequencyRule(field="resonator_freq")`, `WeightRegistrationRule` |
+| `qubit_freq` | `FrequencyRule`, `WeightRegistrationRule` |
+| `storage_freq` | `FrequencyRule`, `WeightRegistrationRule` |
+| `drag_alpha` | `DragAlphaRule`, `WeightRegistrationRule` |
+| `pulse_train` | `PulseTrainRule` |
+| `ReadoutGEDiscrimination` | `DiscriminationRule`, `WeightRegistrationRule` |
+| `ReadoutWeightsOptimization` | `WeightRegistrationRule` |
+| `ReadoutButterflyMeasurement` | `ReadoutQualityRule`, `WeightRegistrationRule` |
 
 ---
 

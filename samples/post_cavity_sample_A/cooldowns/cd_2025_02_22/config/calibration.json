@@ -69,7 +69,7 @@
     "ref_r180": {
       "pulse_name": "ref_r180",
       "element": "qubit",
-      "amplitude": 0.9963205742173461,
+      "amplitude": 0.09614269205403701,
       "length": 16,
       "sigma": 2.6666666666666665,
       "drag_coeff": 0.0
@@ -85,5 +85,5 @@
   "fock_sqr_calibrations": {},
   "multi_state_calibration": {},
   "created": "2026-02-21T13:27:47.380608",
-  "last_modified": "2026-02-24T00:06:44.640233"
+  "last_modified": "2026-02-24T23:50:58.000814"
 }

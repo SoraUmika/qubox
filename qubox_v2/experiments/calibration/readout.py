@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import warnings
+import json
+import hashlib
 from pathlib import Path
+from datetime import datetime
 from typing import Any, Mapping, Tuple
 
 import numpy as np
@@ -28,6 +31,27 @@ _logger = get_logger(__name__)
 _DEFAULT_GAUSSIANITY_WARN = 2.0
 # Minimum sample count for reliable discrimination
 _MIN_SAMPLES_DISC = 100
+
+
+def _stable_hash(payload: Mapping[str, Any]) -> str:
+    try:
+        encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    except Exception:
+        encoded = repr(payload).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def _canonical_readout_state_payload(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Return canonical readout-state fields used for GE/BF signature hashing."""
+    return {
+        "element": state.get("element"),
+        "operation": state.get("operation"),
+        "pulse": state.get("pulse"),
+        "weights": state.get("weights"),
+        "angle": state.get("angle"),
+        "threshold": state.get("threshold"),
+        "fidelity_definition": state.get("fidelity_definition"),
+    }
 
 
 class IQBlob(ExperimentBase):
@@ -75,6 +99,7 @@ class IQBlob(ExperimentBase):
             try:
                 disc_out = two_state_discriminator(I_g, Q_g, I_e, Q_e)
                 metrics["fidelity"] = float(disc_out["fidelity"])
+                metrics["fidelity_definition"] = "assignment_fidelity_balanced_accuracy_percent"
                 metrics["angle"] = float(disc_out["angle"])
                 metrics["rotation_convention"] = "S_rot = S * exp(+1j*angle)"
                 metrics["threshold"] = float(disc_out["threshold"])
@@ -494,6 +519,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
             try:
                 disc_out = two_state_discriminator(I_g, Q_g, I_e, Q_e)
                 metrics["fidelity"] = float(disc_out["fidelity"])
+                metrics["fidelity_definition"] = "assignment_fidelity_balanced_accuracy_percent"
                 metrics["angle"] = float(disc_out["angle"])
                 metrics["rotation_convention"] = "S_rot = S * exp(+1j*angle)"
                 metrics["threshold"] = float(disc_out["threshold"])
@@ -549,6 +575,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
         if hasattr(self, "_run_params") and "angle" in metrics:
             apply = self._run_params.get("apply_rotated_weights", True)
             allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
+            disc_sig: dict[str, Any] | None = None
             if apply:
                 if allow_inline:
                     try:
@@ -587,6 +614,13 @@ class ReadoutGEDiscrimination(ExperimentBase):
                             "payload": {"include_volatile": True},
                         },
                     ])
+                    if self._run_params.get("update_measure_macro", False):
+                        metadata.setdefault("proposed_patch_ops", []).append(
+                            {
+                                "op": "SetMeasureDiscrimination",
+                                "payload": self._discrimination_payload(metrics),
+                            }
+                        )
                     if self._run_params.get("persist", False):
                         metadata.setdefault("proposed_patch_ops", []).append(
                             {"op": "PersistMeasureConfig", "payload": {}}
@@ -599,27 +633,33 @@ class ReadoutGEDiscrimination(ExperimentBase):
                     metrics["angle"],
                 )
 
+            if self._run_params.get("update_measure_macro", False):
+                disc_sig = self._apply_discrimination_measure_macro(metrics)
+                if disc_sig:
+                    metrics["readout_state_signature"] = disc_sig
+                    metadata["readout_state_signature"] = disc_sig
+
         # Auto-update post-selection config (legacy parity: auto_update_postsel)
         if hasattr(self, "_run_params") and self._run_params.get("auto_update_postsel", False):
             if all(k in metrics for k in ("threshold", "rot_mu_g", "rot_mu_e")):
                 allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
-                if allow_inline:
-                    try:
-                        blob_k_g = self._run_params.get("blob_k_g", 2.0)
-                        blob_k_e = self._run_params.get("blob_k_e", blob_k_g)
-                        ps_cfg = PostSelectionConfig.from_discrimination_results(
-                            metrics, blob_k_g=blob_k_g, blob_k_e=blob_k_e,
-                        )
-                        measureMacro.set_post_select_config(ps_cfg)
+                try:
+                    blob_k_g = self._run_params.get("blob_k_g", 2.0)
+                    blob_k_e = self._run_params.get("blob_k_e", blob_k_g)
+                    ps_cfg = PostSelectionConfig.from_discrimination_results(
+                        metrics, blob_k_g=blob_k_g, blob_k_e=blob_k_e,
+                    )
+                    measureMacro.set_post_select_config(ps_cfg)
+                    if allow_inline:
                         _logger.info("Post-selection config updated from GE discrimination")
-                    except Exception as exc:
-                        _logger.warning("Failed to build PostSelectionConfig: %s", exc)
-                else:
-                    metadata.setdefault("diagnostics", "")
-                    metadata["diagnostics"] = (
-                        (metadata["diagnostics"] + " | ") if metadata["diagnostics"] else ""
-                    ) + "Strict mode: skipped inline post-selection config update"
-                    _logger.info("Strict mode: skipped inline post-selection config update")
+                    else:
+                        metadata.setdefault("diagnostics", "")
+                        metadata["diagnostics"] = (
+                            (metadata["diagnostics"] + " | ") if metadata["diagnostics"] else ""
+                        ) + "Strict mode: updated runtime post-selection config (not persisted)"
+                        _logger.info("Strict mode: runtime post-selection config refreshed from GE discrimination")
+                except Exception as exc:
+                    _logger.warning("Failed to build PostSelectionConfig: %s", exc)
 
         if update_calibration and self.calibration_store and "fidelity" in metrics:
             min_fidelity = float(kw.get("min_fidelity", 70.0))
@@ -810,6 +850,78 @@ class ReadoutGEDiscrimination(ExperimentBase):
             _logger.info("measureMacro updated with rotated readout weights")
         except Exception as exc:
             _logger.warning("Failed to update measureMacro with rotated weights: %s", exc)
+
+    def _discrimination_payload(self, metrics: Mapping[str, Any]) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "threshold": float(metrics.get("threshold", 0.0)),
+            "angle": float(metrics.get("angle", 0.0)),
+            "fidelity": float(metrics.get("fidelity", 0.0)),
+            "fidelity_definition": str(metrics.get("fidelity_definition", "assignment_fidelity_balanced_accuracy_percent")),
+        }
+        for key in ("rot_mu_g", "rot_mu_e", "unrot_mu_g", "unrot_mu_e", "sigma_g", "sigma_e"):
+            if key in metrics:
+                payload[key] = metrics.get(key)
+        return payload
+
+    def _apply_discrimination_measure_macro(self, metrics: Mapping[str, Any]) -> dict[str, Any]:
+        payload = self._discrimination_payload(metrics)
+        params = getattr(self, "_run_params", {})
+        pulse_info = params.get("pulse_info")
+        op_prefix = params.get("op_prefix", "")
+        weight_mapping = getattr(pulse_info, "int_weights_mapping", {}) or {}
+
+        def _lbl(prefix: str, suffix: str) -> str:
+            return suffix if not prefix else f"{prefix}{suffix}"
+
+        candidate_triplets = [
+            (_lbl(op_prefix, "rot_cos"), _lbl(op_prefix, "rot_sin"), _lbl(op_prefix, "rot_m_sin")),
+            ("rot_cos", "rot_sin", "rot_m_sin"),
+            (_lbl(op_prefix, "cos"), _lbl(op_prefix, "sin"), _lbl(op_prefix, "minus_sin")),
+            ("cos", "sin", "minus_sin"),
+        ]
+        selected = None
+        for triplet in candidate_triplets:
+            if all(k in weight_mapping for k in triplet):
+                selected = triplet
+                break
+
+        selected_weights = {
+            "cos": weight_mapping.get(selected[0]) if selected else params.get("base_cos_name"),
+            "sin": weight_mapping.get(selected[1]) if selected else params.get("base_sin_name"),
+            "minus_sin": weight_mapping.get(selected[2]) if selected else params.get("base_m_sin_name"),
+        }
+
+        readout_state = {
+            "element": params.get("readout_element", getattr(self.attr, "ro_el", None)),
+            "operation": params.get("measure_op", "readout"),
+            "pulse": getattr(pulse_info, "pulse", None),
+            "weights": selected_weights,
+            "angle": float(payload.get("angle", 0.0)),
+            "threshold": float(payload.get("threshold", 0.0)),
+            "fidelity_definition": payload.get("fidelity_definition"),
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        readout_state["hash"] = _stable_hash(_canonical_readout_state_payload(readout_state))
+
+        try:
+            macro_refs = [measureMacro]
+            prog_measure_macro = getattr(cQED_programs, "measureMacro", None)
+            if prog_measure_macro is not None and all(prog_measure_macro is not ref for ref in macro_refs):
+                macro_refs.append(prog_measure_macro)
+
+            for mm in macro_refs:
+                mm._update_readout_discrimination(payload)
+                mm._ro_disc_params["qbx_readout_state"] = dict(readout_state)
+
+            _logger.info(
+                "GE discrimination state pushed to measureMacro: hash=%s thr=%.6g angle=%.6g",
+                readout_state["hash"],
+                readout_state["threshold"],
+                readout_state["angle"],
+            )
+        except Exception as exc:
+            _logger.warning("Failed to push discrimination state to measureMacro: %s", exc)
+        return readout_state
 
     def _persist_measure_macro_state(self) -> None:
         """Persist measureMacro via CalibrationOrchestrator patch application.
@@ -1508,6 +1620,15 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             "applied": False,
             "reason": "not_requested",
         }
+
+        try:
+            ro_el = getattr(self.attr, "ro_el", None)
+            thr = (getattr(measureMacro, "_ro_disc_params", {}) or {}).get("threshold", None)
+            if ro_el is not None and (thr is None):
+                measureMacro.sync_from_calibration(self.calibration_store, ro_el)
+        except Exception:
+            pass
+
         if update_measure_macro:
             sync_info = self._sync_measure_macro_from_current_mapping(prefer_rotated=True)
             if sync_info.get("applied"):
@@ -1523,18 +1644,82 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                     sync_info.get("reason", "unknown"),
                 )
 
-        # Resolve post-selection config
-        if use_stored_config and prep_policy is None:
-            ps_cfg = measureMacro.get_post_select_config()
-            if ps_cfg is not None:
-                post_sel_policy = ps_cfg.policy
-                post_sel_kwargs = dict(ps_cfg.kwargs) if ps_cfg.kwargs else {}
-            else:
-                post_sel_policy = prep_policy or "NONE"
-                post_sel_kwargs = dict(prep_kwargs or {})
+        ge_state = (getattr(measureMacro, "_ro_disc_params", {}) or {}).get("qbx_readout_state", None)
+        if ge_state is None:
+            sync_info["state_match"] = None
+            sync_info["state_reason"] = "no_ge_state_signature"
         else:
-            post_sel_policy = prep_policy or "NONE"
+            current_state = self._current_readout_state_signature()
+            same_hash = bool(current_state and ge_state.get("hash") == current_state.get("hash"))
+            sync_info["state_match"] = same_hash
+            sync_info["state_reason"] = "matched" if same_hash else "hash_mismatch"
+            sync_info["ge_state_hash"] = ge_state.get("hash")
+            sync_info["bfly_state_hash"] = current_state.get("hash") if current_state else None
+            if not same_hash:
+                _logger.warning(
+                    "Butterfly readout state mismatch: GE hash=%s, butterfly hash=%s",
+                    ge_state.get("hash"),
+                    current_state.get("hash") if current_state else None,
+                )
+
+        # Resolve post-selection config (legacy-aligned fallback chain)
+        post_sel_source = "explicit"
+        can_use_stored_postsel = bool(ge_state is not None and sync_info.get("state_match") is not False)
+        if prep_policy is not None:
+            post_sel_policy = prep_policy
             post_sel_kwargs = dict(prep_kwargs or {})
+        else:
+            post_sel_policy = None
+            post_sel_kwargs = {}
+            if use_stored_config and can_use_stored_postsel:
+                ps_cfg = measureMacro.get_post_select_config()
+                if ps_cfg is not None:
+                    post_sel_policy = ps_cfg.policy
+                    post_sel_kwargs = dict(ps_cfg.kwargs) if ps_cfg.kwargs else {}
+                    post_sel_source = "stored_post_select_config"
+            elif use_stored_config and not can_use_stored_postsel:
+                _logger.warning(
+                    "Skipping stored post-select config: GE state signature unavailable or mismatched "
+                    "(state_reason=%s)",
+                    sync_info.get("state_reason"),
+                )
+
+            if post_sel_policy is None:
+                ro_disc = getattr(measureMacro, "_ro_disc_params", {}) or {}
+                rot_mu_g = ro_disc.get("rot_mu_g", None)
+                rot_mu_e = ro_disc.get("rot_mu_e", None)
+                sigma_g = ro_disc.get("sigma_g", None)
+                sigma_e = ro_disc.get("sigma_e", None)
+                thr = ro_disc.get("threshold", 0.0)
+
+                has_blob = (
+                    rot_mu_g is not None
+                    and rot_mu_e is not None
+                    and sigma_g is not None
+                    and sigma_e is not None
+                    and np.isfinite(float(sigma_g))
+                    and np.isfinite(float(sigma_e))
+                    and float(sigma_g) > 0
+                    and float(sigma_e) > 0
+                )
+
+                if has_blob:
+                    k_blob = float(k) if k is not None else 2.0
+                    post_sel_policy = "BLOBS"
+                    post_sel_kwargs = {
+                        "Ig": float(np.real(rot_mu_g)),
+                        "Qg": float(np.imag(rot_mu_g)),
+                        "Ie": float(np.real(rot_mu_e)),
+                        "Qe": float(np.imag(rot_mu_e)),
+                        "rg2": float((k_blob * float(sigma_g)) ** 2),
+                        "re2": float((k_blob * float(sigma_e)) ** 2),
+                        "require_exclusive": True,
+                    }
+                    post_sel_source = "fallback_blob_from_ge"
+                else:
+                    post_sel_policy = "THRESHOLD"
+                    post_sel_kwargs = {"threshold": float(thr)}
+                    post_sel_source = "fallback_threshold_from_ge"
 
         if k is not None:
             k_val = float(k)
@@ -1557,11 +1742,17 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         self._run_params = {
             "post_sel_policy": post_sel_policy,
             "post_sel_kwargs": dict(post_sel_kwargs),
+            "post_sel_source": post_sel_source,
             "measure_macro_sync": dict(sync_info),
             "update_measure_macro": bool(update_measure_macro),
         }
 
-        _logger.info("Butterfly measurement: n_samples=%d, policy=%r", n_samples, post_sel_policy)
+        _logger.info(
+            "Butterfly measurement: n_samples=%d, policy=%r, source=%s",
+            n_samples,
+            post_sel_policy,
+            post_sel_source,
+        )
 
         prog = cQED_programs.readout_butterfly_measurement(
             attr.qb_el,
@@ -1577,6 +1768,33 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         )
         self.save_output(result.output, "butterflyMeasurement")
         return result
+
+    def _current_readout_state_signature(self) -> dict[str, Any] | None:
+        try:
+            element = measureMacro.active_element()
+            operation = measureMacro.active_op()
+            pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
+            if pulse_info is None:
+                return None
+            weight_mapping = pulse_info.int_weights_mapping or {}
+            triplet = self._pick_weight_triplet(weight_mapping, "" if pulse_info.op == "readout" else f"{pulse_info.op}_")
+            state = {
+                "element": element,
+                "operation": operation,
+                "pulse": pulse_info.pulse,
+                "weights": {
+                    "cos": weight_mapping.get(triplet[0]) if triplet else None,
+                    "sin": weight_mapping.get(triplet[1]) if triplet else None,
+                    "minus_sin": weight_mapping.get(triplet[2]) if triplet else None,
+                },
+                "angle": (getattr(measureMacro, "_ro_disc_params", {}) or {}).get("angle", None),
+                "threshold": (getattr(measureMacro, "_ro_disc_params", {}) or {}).get("threshold", None),
+                "fidelity_definition": (getattr(measureMacro, "_ro_disc_params", {}) or {}).get("fidelity_definition", None),
+            }
+            state["hash"] = _stable_hash(_canonical_readout_state_payload(state))
+            return state
+        except Exception:
+            return None
 
     @staticmethod
     def _pick_weight_triplet(weight_mapping: dict[str, str], op_prefix: str) -> tuple[str, str, str] | None:
@@ -1748,8 +1966,10 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             try:
                 bfly_out = butterfly_metrics(m1_g, m1_e, m2_g, m2_e)
                 metrics["F"] = float(bfly_out["F"])
+                metrics["F_definition"] = "assignment_fidelity_M1_balanced_accuracy_fraction"
                 metrics["Q"] = float(bfly_out["Q"])
                 metrics["V"] = float(bfly_out["V"])
+                metrics["F_m1_balanced_accuracy"] = float((P1_g + P1_e) / 2.0)
                 if "t01" in bfly_out:
                     metrics["t01"] = float(bfly_out["t01"])
                 if "t10" in bfly_out:
@@ -1790,7 +2010,33 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             if average_tries is not None:
                 metrics["average_tries"] = float(np.mean(average_tries))
 
+            ro_disc = (getattr(measureMacro, "_ro_disc_params", {}) or {})
+            ge_fid_pct = ro_disc.get("fidelity", None)
+            if ge_fid_pct is not None and "F" in metrics:
+                ge_fid_frac = float(ge_fid_pct) / 100.0
+                metrics["ge_fidelity_reference"] = ge_fid_frac
+                metrics["ge_fidelity_definition"] = ro_disc.get(
+                    "fidelity_definition", "assignment_fidelity_balanced_accuracy_percent"
+                )
+                metrics["fidelity_delta_GE_minus_F"] = float(ge_fid_frac - float(metrics["F"]))
+                warn_pct = float(kw.get("fidelity_consistency_warn_pct", 5.0))
+                if abs(metrics["fidelity_delta_GE_minus_F"]) * 100.0 > warn_pct:
+                    _logger.warning(
+                        "GE-vs-Butterfly fidelity mismatch: GE=%.4f, F=%.4f, delta=%.2f%%",
+                        ge_fid_frac,
+                        float(metrics["F"]),
+                        metrics["fidelity_delta_GE_minus_F"] * 100.0,
+                    )
+
         analysis = AnalysisResult.from_run(result, metrics=metrics, metadata=metadata)
+
+        if hasattr(self, "_run_params"):
+            sync = self._run_params.get("measure_macro_sync", {})
+            if isinstance(sync, dict):
+                metadata["measure_macro_sync"] = sync
+                metrics["readout_state_match"] = sync.get("state_match")
+                metrics["readout_state_hash_ge"] = sync.get("ge_state_hash")
+                metrics["readout_state_hash_butterfly"] = sync.get("bfly_state_hash")
 
         if update_calibration and self.calibration_store and "F" in metrics:
             min_F = float(kw.get("min_F", 0.50))

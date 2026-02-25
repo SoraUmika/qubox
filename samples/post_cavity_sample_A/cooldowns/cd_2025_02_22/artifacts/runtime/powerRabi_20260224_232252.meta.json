@@ -1,0 +1,15 @@
+{
+  "iteration": 4999,
+  "artifact_meta": {
+    "n_total": 5000,
+    "timestamp": "2026-02-24T23:22:52.742805"
+  },
+  "artifact_id": "PowerRabi:2026-02-24T23:22:52.742805",
+  "experiment_context": {
+    "sample_id": "post_cavity_sample_A",
+    "cooldown_id": "cd_2025_02_22",
+    "wiring_rev": "1c0d2fb1",
+    "schema_version": "4.0.0",
+    "config_hash": "78743f33fd17"
+  }
+}

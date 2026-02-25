@@ -65,7 +65,9 @@ class T1Rule:
             t1_s = float(params["T1_s"])
         elif "T1" in params:
             t1_raw = float(params["T1"])
-            t1_s = t1_raw * 1e-9 if t1_raw > 1.0 else t1_raw
+            # Heuristic: physical T1 values in seconds are < 1e-3 (< 1 ms).
+            # Anything above 1e-3 is assumed to be in nanoseconds.
+            t1_s = t1_raw * 1e-9 if t1_raw > 1e-3 else t1_raw
         elif "T1_ns" in params:
             t1_s = float(params["T1_ns"]) * 1e-9
 
@@ -287,6 +289,7 @@ def default_patch_rules(session) -> dict[str, list[Any]]:
     t2r_rule = T2RamseyRule(element=qb_el)
     t2e_rule = T2EchoRule(element=qb_el)
     qb_freq_rule = FrequencyRule(element=qb_el, kind="qubit_freq", metric_key="f0")
+    ro_freq_rule = FrequencyRule(element=ro_el, kind="resonator_freq", metric_key="f0", field="resonator_freq")
     st_freq_rule = FrequencyRule(element=st_el, kind="storage_freq", metric_key="f_storage")
     drag_rule = DragAlphaRule()
     disc_rule = DiscriminationRule(element=ro_el)
@@ -295,15 +298,15 @@ def default_patch_rules(session) -> dict[str, list[Any]]:
     pulse_train_rule = PulseTrainRule(session=session)
 
     return {
-        "pi_amp": [pi_rule, weight_rule],
+        "pi_amp": [pi_rule],
         "t1": [t1_rule, weight_rule],
         "t2_ramsey": [t2r_rule, weight_rule],
         "t2_echo": [t2e_rule, weight_rule],
-        "resonator_freq": [weight_rule],
+        "resonator_freq": [ro_freq_rule, weight_rule],
         "qubit_freq": [qb_freq_rule, weight_rule],
         "storage_freq": [st_freq_rule, weight_rule],
         "drag_alpha": [drag_rule, weight_rule],
-        "pulse_train": [pulse_train_rule, weight_rule],
+        "pulse_train": [pulse_train_rule],
         "ReadoutGEDiscrimination": [disc_rule, weight_rule],
         "ReadoutWeightsOptimization": [weight_rule],
         "ReadoutButterflyMeasurement": [quality_rule, weight_rule],

@@ -210,12 +210,26 @@ class PowerRabi(ExperimentBase):
 
         if update_calibration and fit.params:
             target_op = metadata["target_op"]
+            g_pi = float(fit.params["g_pi"])
+            current_amp = None
+            if self.calibration_store is not None:
+                current_cal = self.calibration_store.get_pulse_calibration(target_op)
+                if current_cal is not None and getattr(current_cal, "amplitude", None) is not None:
+                    current_amp = float(current_cal.amplitude)
+
+            patched_amp = g_pi if current_amp is None else (current_amp * g_pi)
+            metadata["amplitude_patch_mode"] = (
+                "absolute_g_pi_fallback" if current_amp is None else "scale_current_by_g_pi"
+            )
+            metadata["amplitude_patch_current"] = current_amp
+            metadata["amplitude_patch_g_pi"] = g_pi
+            metadata["amplitude_patch_value"] = patched_amp
             metadata.setdefault("proposed_patch_ops", []).append(
                 {
                     "op": "SetCalibration",
                     "payload": {
                         "path": f"pulse_calibrations.{target_op}.amplitude",
-                        "value": float(fit.params["g_pi"]),
+                        "value": patched_amp,
                     },
                 }
             )

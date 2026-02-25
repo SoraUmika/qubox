@@ -87,13 +87,19 @@ class QubitStateTomography(ExperimentBase):
         return AnalysisResult.from_run(result, metrics=metrics)
 
     def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
-        sx = analysis.metrics.get("sx")
-        sy = analysis.metrics.get("sy")
-        sz = analysis.metrics.get("sz")
+        # Prefer full arrays from analysis.data; fall back to scalar means
+        sx = analysis.data.get("sx") if analysis.data.get("sx") is not None else analysis.metrics.get("sx")
+        sy = analysis.data.get("sy") if analysis.data.get("sy") is not None else analysis.metrics.get("sy")
+        sz = analysis.data.get("sz") if analysis.data.get("sz") is not None else analysis.metrics.get("sz")
         if sx is None or sy is None or sz is None:
             return None
 
-        states = [np.array([sx, sy, sz])]
+        # Convert arrays to scalar means for single-point Bloch vector
+        sx_val = float(np.mean(sx))
+        sy_val = float(np.mean(sy))
+        sz_val = float(np.mean(sz))
+
+        states = [np.array([sx_val, sy_val, sz_val])]
         labels = kwargs.get("labels", None)
         fig, _ = plot_bloch_states(states, labels=labels)
         purity = analysis.metrics.get("purity", 0)

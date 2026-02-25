@@ -1,0 +1,69 @@
+{
+  "timestamp": "20260225_004149",
+  "experiment": "ReadoutGEDiscrimination",
+  "calibration_tag": "readout_ge_discrimination",
+  "validation_passed": false,
+  "validation_errors": [
+    "Metric 'fidelity' below minimum: 69.74000000000001 < 70.0"
+  ],
+  "fit": {
+    "model": null,
+    "params": null,
+    "uncertainties": null,
+    "r_squared": null
+  },
+  "metrics": {
+    "gaussianity_g": 0.0588933919147783,
+    "gaussianity_e": 0.1041689851209449,
+    "fidelity": 69.74000000000001,
+    "fidelity_definition": "assignment_fidelity_balanced_accuracy_percent",
+    "angle": 0.27181010121091026,
+    "rotation_convention": "S_rot = S * exp(+1j*angle)",
+    "threshold": -8.951108152608474e-06,
+    "gg": 0.7126,
+    "ge": 0.2874,
+    "eg": 0.31779999999999997,
+    "ee": 0.6822,
+    "w_plus_cos": 0.9632865068519589,
+    "w_plus_sin": 0.26847552163456323,
+    "w_minus_sin": 0.26847552163456323,
+    "w_minus_cos": -0.9632865068519589,
+    "rot_mu_g": {
+      "re": -0.0001233672744193739,
+      "im": 0.00012355142006123903
+    },
+    "rot_mu_e": {
+      "re": 8.547856929913413e-05,
+      "im": 0.0001224525514078454
+    },
+    "unrot_mu_g": {
+      "re": -8.566749888565356e-05,
+      "im": 0.00015213650919976572
+    },
+    "unrot_mu_e": {
+      "re": 0.00011521586504557052,
+      "im": 9.500798701961213e-05
+    },
+    "sigma_g": 0.00018303637898169002,
+    "sigma_e": 0.00018478809835209518,
+    "readout_state_signature": {
+      "element": "resonator",
+      "operation": "readout",
+      "pulse": "readout_pulse",
+      "weights": {
+        "cos": "rot_cos",
+        "sin": "rot_sin",
+        "minus_sin": "rot_m_sin"
+      },
+      "angle": 0.27181010121091026,
+      "threshold": -8.951108152608474e-06,
+      "fidelity_definition": "assignment_fidelity_balanced_accuracy_percent",
+      "generated_at": "2026-02-25T00:41:49",
+      "hash": "b27cf0e275181756"
+    }
+  },
+  "run_metadata": {
+    "n_total": 50000
+  },
+  "extra_metadata": {}
+}

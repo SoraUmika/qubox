@@ -64,7 +64,7 @@ class StorageWignerTomography(ExperimentBase):
                 W = (2 / np.pi) * parity.reshape(nx, np_)
                 metrics["W_min"] = float(W.min())
                 metrics["W_max"] = float(W.max())
-                negativity = float(np.sum(np.abs(W[W < 0])))
+                negativity = float(-np.sum(W[W < 0]))
                 metrics["negativity"] = negativity
             else:
                 metrics["n_points"] = int(parity.size)
@@ -104,6 +104,12 @@ class SNAPOptimization(ExperimentBase):
 
     Combines SNAP + displacement gates with Fock-resolved state
     tomography to optimize SNAP gate angles.
+
+    Note: analyze/plot logic overlaps with
+    :class:`~qubox_v2.experiments.tomography.fock_tomo.FockResolvedStateTomography`.
+    SNAPOptimization uses ``cQED_programs.SQR_state_tomography`` (gate-level
+    control) whereas FockResolvedStateTomography uses
+    ``cQED_programs.fock_resolved_state_tomography`` (callable state-prep).
     """
 
     def run(

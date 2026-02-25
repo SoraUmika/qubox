@@ -12,6 +12,7 @@ import datetime
 import json
 import logging
 import threading
+import warnings
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Union
@@ -578,7 +579,21 @@ class HardwareController:
         sa_helper = None
         sa_results: list[dict[str, Any]] = []
         auto_runs: list[dict[str, Any]] = []
+        failed_runs: list[dict[str, Any]] = []
         cfg = None
+
+        def _contains_non_finite_numbers(obj: Any) -> bool:
+            if isinstance(obj, dict):
+                return any(_contains_non_finite_numbers(v) for v in obj.values())
+            if isinstance(obj, (list, tuple)):
+                return any(_contains_non_finite_numbers(v) for v in obj)
+            if isinstance(obj, np.ndarray):
+                return bool(np.any(~np.isfinite(obj)))
+            if isinstance(obj, np.generic):
+                obj = obj.item()
+            if isinstance(obj, (float, int)):
+                return not np.isfinite(float(obj))
+            return False
 
         def _format_suppression_report(rows: list[dict[str, Any]]) -> str:
             lines = [
@@ -657,12 +672,62 @@ class HardwareController:
             if if_val is None:
                 if_val = float(self.get_element_if(e))
             _logger.info("Calibrating '%s' with LO=%.3f MHz, IF=%.3f MHz", e, lo_val * 1e-6, if_val * 1e-6)
-            auto_result = self.qm.calibrate_element(
-                e,
-                {lo_val: (if_val,)},
-                save_to_db=save_to_db,
-                params=qm_auto_params,
+            warning_msgs: list[str] = []
+            auto_result: Any = None
+            warning_indicates_failure = False
+
+            with warnings.catch_warnings(record=True) as caught_warnings:
+                warnings.simplefilter("error", RuntimeWarning)
+                try:
+                    auto_result = self.qm.calibrate_element(
+                        e,
+                        {lo_val: (if_val,)},
+                        save_to_db=save_to_db,
+                        params=qm_auto_params,
+                    )
+                except RuntimeWarning as exc:
+                    warning_msgs = [str(exc)]
+                    warning_indicates_failure = True
+                    with contextlib.suppress(Exception):
+                        running_job = self.qm.get_running_job()
+                        if running_job is not None:
+                            running_job.halt()
+
+            if not warning_msgs:
+                warning_msgs = [str(w.message) for w in caught_warnings if issubclass(w.category, RuntimeWarning)]
+
+            warning_text = " | ".join(warning_msgs).lower()
+            warning_indicates_failure = warning_indicates_failure or (
+                "invalid value encountered" in warning_text
+                or "nan" in warning_text
+                or "out of range" in warning_text
             )
+            non_finite_result = _contains_non_finite_numbers(auto_result)
+            failed = bool(warning_indicates_failure or non_finite_result)
+
+            if warning_msgs:
+                for msg in warning_msgs:
+                    _logger.warning("Auto calibration warning for '%s': %s", e, msg)
+
+            if failed:
+                reasons = []
+                if warning_indicates_failure:
+                    reasons.append("runtime_warning")
+                if non_finite_result:
+                    reasons.append("non_finite_result")
+                failed_runs.append(
+                    {
+                        "element": e,
+                        "reasons": reasons,
+                        "warnings": warning_msgs,
+                    }
+                )
+                _logger.error(
+                    "Auto calibration considered FAILED for '%s' (reasons=%s).",
+                    e,
+                    ",".join(reasons),
+                )
+
             auto_runs.append(
                 {
                     "element": e,
@@ -671,27 +736,33 @@ class HardwareController:
                     "lo_if_map": {float(lo_val): [float(if_val)]},
                     "auto_result_type": type(auto_result).__name__,
                     "auto_result_keys": [str(k) for k in auto_result.keys()] if isinstance(auto_result, dict) else None,
+                    "warnings": warning_msgs,
+                    "status": "failed" if failed else "ok",
                 }
             )
             self.set_octave_output(e, output_mode)
 
+            if save_to_db:
+                self._sanitize_calibration_db_file()
+
             if sa_helper is not None:
-                tones = _measure_with_cw(e, float(lo_val), float(if_val))
-                sa_results.append(
-                    {
-                        "element": e,
-                        "lo_hz": float(lo_val),
-                        "if_hz": float(if_val),
-                        "sideband": tones.get("sideband"),
-                        "f_target_hz": float(tones.get("f_target", float("nan"))),
-                        "f_image_hz": float(tones.get("f_image", float("nan"))),
-                        "P_target_dBm": float(tones.get("P_des_dBm", float("nan"))),
-                        "P_lo_dBm": float(tones.get("P_LO_dBm", float("nan"))),
-                        "P_image_dBm": float(tones.get("P_img_dBm", float("nan"))),
-                        "lo_suppression_dBc": float(tones.get("LO_leak_dBc", float("nan"))),
-                        "irr_dBc": float(tones.get("IRR_dBc", float("nan"))),
-                    }
-                )
+                if not failed:
+                    tones = _measure_with_cw(e, float(lo_val), float(if_val))
+                    sa_results.append(
+                        {
+                            "element": e,
+                            "lo_hz": float(lo_val),
+                            "if_hz": float(if_val),
+                            "sideband": tones.get("sideband"),
+                            "f_target_hz": float(tones.get("f_target", float("nan"))),
+                            "f_image_hz": float(tones.get("f_image", float("nan"))),
+                            "P_target_dBm": float(tones.get("P_des_dBm", float("nan"))),
+                            "P_lo_dBm": float(tones.get("P_LO_dBm", float("nan"))),
+                            "P_image_dBm": float(tones.get("P_img_dBm", float("nan"))),
+                            "lo_suppression_dBc": float(tones.get("LO_leak_dBc", float("nan"))),
+                            "irr_dBc": float(tones.get("IRR_dBc", float("nan"))),
+                        }
+                    )
 
         if el is None:
             elements = self.get_active_mixer_elements()
@@ -707,6 +778,7 @@ class HardwareController:
 
         self._last_auto_calibration = {
             "elements": auto_runs,
+            "failed_elements": failed_runs,
             "save_to_db": bool(save_to_db),
             "auto_calibration_params": auto_calibration_params,
         }
@@ -720,6 +792,52 @@ class HardwareController:
         if auto_sa_restart_qm:
             _logger.info("Restarting QM after auto mixer calibration.")
             self.apply_changes()
+
+        if failed_runs:
+            failed_names = ", ".join(str(item.get("element", "?")) for item in failed_runs)
+            summary = (
+                "Auto mixer calibration finished with failures for element(s): "
+                f"{failed_names}."
+            )
+            _logger.warning(summary)
+            print(summary)
+            for item in failed_runs:
+                elem = str(item.get("element", "?"))
+                reasons = ",".join(str(r) for r in (item.get("reasons") or [])) or "unknown"
+                print(f"  - element calibration failed: {elem} (reasons={reasons})")
+
+    def _sanitize_calibration_db_file(self) -> None:
+        """Replace non-finite numbers in calibration_db.json with 0.0."""
+        if self._cal_db_dir is None:
+            return
+        db_path = self._cal_db_dir / "calibration_db.json"
+        if not db_path.exists():
+            return
+
+        def _sanitize(obj: Any) -> Any:
+            if isinstance(obj, dict):
+                return {k: _sanitize(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_sanitize(v) for v in obj]
+            if isinstance(obj, tuple):
+                return [_sanitize(v) for v in obj]
+            if isinstance(obj, np.generic):
+                obj = obj.item()
+            if isinstance(obj, (float, int)):
+                return float(obj) if np.isfinite(float(obj)) else 0.0
+            return obj
+
+        try:
+            raw = json.loads(db_path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            _logger.exception("Failed reading calibration DB for sanitization: %s", db_path)
+            return
+
+        sanitized = _sanitize(raw)
+        if sanitized != raw:
+            with open(db_path, "w", encoding="utf-8") as f:
+                json.dump(sanitized, f, indent=2, allow_nan=False)
+            _logger.warning("Sanitized non-finite values in calibration DB: %s", db_path)
 
     def _write_auto_calibration_artifact(
         self,
@@ -785,18 +903,52 @@ class HardwareController:
                 lo_val = float(self.get_element_lo(e))
             if if_val is None:
                 if_val = float(self.get_element_if(e))
+
+            _logger.info(
+                "Auto reference bootstrap for manual calibration '%s': LO=%.3f MHz, IF=%.3f MHz",
+                e,
+                lo_val * 1e-6,
+                if_val * 1e-6,
+            )
+            try:
+                self._calibrate_auto(
+                    el=e,
+                    target_LO=lo_val,
+                    target_IF=if_val,
+                    save_to_db=True,
+                    output_mode=output_mode,
+                    auto_sa_validate=False,
+                )
+            except Exception:
+                _logger.exception(
+                    "Auto reference bootstrap failed for '%s'; continuing manual calibration with existing DB values.",
+                    e,
+                )
+
             _logger.info(
                 "Manual calibration '%s' (%s): LO=%.3f MHz, IF=%.3f MHz",
                 e, method, lo_val * 1e-6, if_val * 1e-6,
             )
-            if method == "manual_scan_2d":
-                result = calibrator.scan_2d(e, lo_val, if_val, save_to_db=save_to_db)
-            elif method == "manual_minimizer":
-                result = calibrator.minimizer(e, lo_val, if_val, save_to_db=save_to_db)
-            else:
-                result = None
+            try:
+                if method == "manual_scan_2d":
+                    result = calibrator.scan_2d(e, lo_val, if_val, save_to_db=save_to_db)
+                elif method == "manual_minimizer":
+                    result = calibrator.minimizer(e, lo_val, if_val, save_to_db=save_to_db)
+                else:
+                    result = None
+            except Exception as exc:
+                _logger.exception("Manual calibration failed for '%s' (%s)", e, method)
+                result = {
+                    "element": e,
+                    "f_lo": float(lo_val),
+                    "f_if": float(if_val),
+                    "status": "failed",
+                    "error": str(exc),
+                    "method": method,
+                }
+            finally:
+                self.set_octave_output(e, output_mode)
             results.append(result)
-            self.set_octave_output(e, output_mode)
 
         if len(results) == 1:
             return results[0]

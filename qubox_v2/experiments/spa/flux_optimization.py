@@ -1,10 +1,13 @@
 """SPA flux and pump optimization experiments."""
 from __future__ import annotations
 
+import logging
 from typing import Any, Mapping
 
 import numpy as np
 import matplotlib.pyplot as plt
+
+logger = logging.getLogger(__name__)
 
 from ..experiment_base import ExperimentBase
 from ..result import AnalysisResult
@@ -160,14 +163,9 @@ class SPAFluxOptimization2(ExperimentBase):
         scout_step: float = 0.01,
         refine_half_width: float = 0.03,
         refine_step: float = 0.002,
-        peak_score_thresh: float = 8.0,
         lock_delta: float = 0.001,
         lock_gain: float = 0.75,
         lock_max_iters: int = 25,
-        lock_min_delta: float = 1e-4,
-        lock_loss_frac: float = 0.6,
-        approach_direction: str = "up",
-        approach_reset: float | None = None,
     ) -> RunResult:
         # For 'sweep' mode, delegate to the basic optimizer
         if mode == "sweep":
@@ -340,7 +338,12 @@ class SPAPumpFrequencyOptimization(ExperimentBase):
                         )
                         results[i, j] = result.output.get("F", 0.0)
                 except Exception:
-                    pass
+                    logger.exception(
+                        "SPAPumpFrequencyOptimization: sweep point "
+                        "power=%.2f dBm, detune=%.1f Hz failed; "
+                        "leaving NaN entry.",
+                        power, detune,
+                    )
 
         output = Output({
             "metric_matrix": results,

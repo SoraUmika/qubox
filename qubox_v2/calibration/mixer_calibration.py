@@ -1184,6 +1184,20 @@ class ManualMixerCalibrator:
             return self._db_cache
         return self._read_db()
 
+    def _sanitize_db_numbers(self, obj: Any) -> Any:
+        """Recursively coerce non-finite numeric values to 0.0 for JSON safety."""
+        if isinstance(obj, dict):
+            return {k: self._sanitize_db_numbers(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._sanitize_db_numbers(v) for v in obj]
+        if isinstance(obj, tuple):
+            return [self._sanitize_db_numbers(v) for v in obj]
+        if isinstance(obj, np.generic):
+            obj = obj.item()
+        if isinstance(obj, float):
+            return obj if np.isfinite(obj) else 0.0
+        return obj
+
     def _write_db(self, db: dict) -> None:
         """Atomically write *db* to ``calibration_db.json``.
 
@@ -1194,12 +1208,13 @@ class ManualMixerCalibrator:
         """
         parent = self._db_path.parent
         parent.mkdir(parents=True, exist_ok=True)
+        db_sanitized = self._sanitize_db_numbers(db)
         fd, tmp_path = tempfile.mkstemp(
             dir=parent, prefix=".mixcal_tmp_", suffix=".json",
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(db, f, indent=4)
+                json.dump(db_sanitized, f, indent=4, allow_nan=False)
             # fd is now closed — safe to rename
             self._replace_with_retry(tmp_path, str(self._db_path))
         except BaseException:
@@ -1211,7 +1226,7 @@ class ManualMixerCalibrator:
             raise
 
         # Update cache
-        self._db_cache = db
+        self._db_cache = db_sanitized
 
     @staticmethod
     def _replace_with_retry(src: str, dst: str) -> None:
@@ -1244,12 +1259,13 @@ class ManualMixerCalibrator:
         extension.
         """
         scratch = self._db_path.with_suffix(".scratch.json")
+        db_sanitized = self._sanitize_db_numbers(db)
         fd, tmp_path = tempfile.mkstemp(
             dir=self._db_path.parent, prefix=".mixcal_scratch_", suffix=".json",
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(db, f, indent=4)
+                json.dump(db_sanitized, f, indent=4, allow_nan=False)
             self._replace_with_retry(tmp_path, str(scratch))
         except BaseException:
             try:
@@ -1259,7 +1275,7 @@ class ManualMixerCalibrator:
             raise
 
         # Update cache so subsequent reads use the latest trial values
-        self._db_cache = db
+        self._db_cache = db_sanitized
 
     def _cleanup_scratch(self) -> None:
         """Remove the scratch DB file if it exists."""

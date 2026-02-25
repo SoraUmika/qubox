@@ -440,3 +440,111 @@ decision to standardize on `CalibrationOrchestrator`.
 - `qubox_v2/docs/API_REFERENCE.md`
 - `qubox_v2/docs/CHANGELOG.md`
 - `notebooks/post_cavity_experiment_context.ipynb`
+
+---
+
+### 2026-02-25 — Audit-Driven Bug Fixes & Hardening (v1.8.0)
+
+**Classification: Moderate**
+
+Systematic fixes for all issues identified in `AUDIT_REPORT.md`: 4 bugs,
+duplicate/missing patch rules, dead parameters, incomplete calibration
+patterns, and documentation updates.
+
+**Summary:**
+
+1. **BUG-1 — Wigner negativity formula (`wigner_tomo.py:67`)**
+   - `negativity = np.abs(np.sum(W[W < 0]))` was applying `np.abs` to
+     already-negative values, which is correct mathematically but masked
+     intent.  Changed to `negativity = float(-np.sum(W[W < 0]))` for
+     clarity and to match the standard Wigner negativity definition
+     (sum of negative volume).
+
+2. **BUG-2 — Silent exception swallowing in SPAPumpFrequencyOptimization
+   (`flux_optimization.py`)**
+   - Bare `except Exception: pass` silently swallowed errors during SPA
+     frequency optimization.  Added `logging` import and replaced with
+     `logger.exception("SPA pump frequency optimization step failed")`
+     so failures are recorded.
+
+3. **BUG-3 — T1Rule heuristic unit guess (`patch_rules.py:~120`)**
+   - T1 unit-detection heuristic used `T1_val > 1.0` to distinguish
+     seconds vs nanoseconds.  A 10 us T1 (1e-5 s) would be incorrectly
+     treated as nanoseconds and divided by 1e9 again.  Changed threshold
+     to `T1_val > 1e-3`, which correctly classifies all realistic T1
+     values (sub-ms coherence times in seconds vs nanosecond-scale raw
+     values).
+
+4. **BUG-4 — QubitStateTomography plot reading reduced metrics
+   (`qubit_tomo.py:89-100`)**
+   - `plot()` read scalar `sx/sy/sz` from `analysis.metrics`, discarding
+     multi-prep array data in `analysis.data`.  Changed to prefer
+     `analysis.data.get("sx")` (full array) with fallback to
+     `analysis.metrics.get("sx")` (scalar mean).
+
+5. **Patch rule deduplication (`patch_rules.py:282-313`)**
+   - `WeightRegistrationRule` was redundantly included in `pi_amp` and
+     `pulse_train` kinds where it has no effect (those experiments don't
+     produce `proposed_patch_ops` metadata).  Removed from both to avoid
+     confusing no-op rule invocations.
+
+6. **Missing `resonator_freq` FrequencyRule (`patch_rules.py:292,305`)**
+   - `default_patch_rules()` had no rule for `resonator_freq` kind,
+     meaning `ResonatorSpectroscopy.analyze()` calibration results were
+     silently dropped by the orchestrator.  Added
+     `FrequencyRule(element=ro_el, kind="resonator_freq",
+     metric_key="f0", field="resonator_freq")` mapped to kind
+     `"resonator_freq"`.
+
+7. **Dead `update_calibration` warnings (5 experiments)**
+   - `FockResolvedSpectroscopy`, `FockResolvedT1`, `FockResolvedRamsey`,
+     `FockResolvedPowerRabi` (all in `cavity/fock.py`) and
+     `NumSplittingSpectroscopy` (`cavity/storage.py`) accepted
+     `update_calibration=True` but silently ignored it.  Added explicit
+     `logger.warning(...)` directing users to the CalibrationOrchestrator.
+
+8. **StorageSpectroscopyCoarse calibration pattern (`cavity/storage.py`)**
+   - `StorageSpectroscopyCoarse.analyze()` had no calibration path.
+     Added `proposed_patch_ops` metadata (matching `StorageSpectroscopy`
+     pattern) so the orchestrator can apply storage frequency patches.
+
+9. **FockResolvedSpectroscopy peak extraction (`cavity/fock.py`)**
+   - `analyze()` stored `float(mag.min())` as each Fock frequency, which
+     is the minimum signal magnitude rather than the frequency at the
+     minimum.  Changed to `float(frequencies[np.argmin(fock_mag)])` to
+     extract the actual frequency of the spectroscopic dip.
+
+10. **Dead parameters removed from SPAFluxOptimization2
+    (`spa/flux_optimization.py`)**
+    - Removed 5 `run()` parameters that were accepted but never used:
+      `flux_step`, `spa_gain`, `readout_gain`, `readout_len`,
+      `saturation_amp`.  The underlying program builder does not consume
+      them.
+
+11. **SNAPOptimization / FockResolvedStateTomography documentation
+    (`tomography/wigner_tomo.py`)**
+    - Added cross-reference docstring noting that SNAPOptimization uses
+      `cQED_programs.SQR_state_tomography` (gate-level control) whereas
+      `FockResolvedStateTomography` uses
+      `cQED_programs.fock_resolved_state_tomography` (callable
+      state-prep).  No code merge: different QUA programs justify
+      separate classes.
+
+12. **API_REFERENCE.md v1.8.0 update**
+    - Version bumped to 1.8.0, date updated to 2026-02-25.
+    - Section 13.4 (Patch Rules): expanded table with `PulseTrainRule`,
+      added detailed default rule mapping table showing all 12 kinds.
+      Updated `FrequencyRule` to list `resonator_freq` kind.  Updated
+      `T1Rule` description with unit heuristic detail.
+    - Section 9.1 (SPA): updated `SPAFluxOptimization2` description.
+
+**Files affected:**
+
+- `qubox_v2/experiments/tomography/wigner_tomo.py`
+- `qubox_v2/experiments/tomography/qubit_tomo.py`
+- `qubox_v2/experiments/cavity/fock.py`
+- `qubox_v2/experiments/cavity/storage.py`
+- `qubox_v2/experiments/spa/flux_optimization.py`
+- `qubox_v2/calibration/patch_rules.py`
+- `qubox_v2/docs/API_REFERENCE.md`
+- `qubox_v2/docs/CHANGELOG.md`

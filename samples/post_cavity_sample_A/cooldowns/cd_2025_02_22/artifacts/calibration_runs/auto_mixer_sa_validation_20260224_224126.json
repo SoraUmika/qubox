@@ -1,0 +1,80 @@
+{
+  "timestamp": "20260224_224126",
+  "method": "auto",
+  "sa_device": "sa124b",
+  "sa_config": {
+    "sideband": "lsb",
+    "sa_span_hz": 2000000.0,
+    "sa_rbw": 1000.0,
+    "sa_vbw": 1000.0,
+    "sa_avg": 5,
+    "sa_level": 0.0
+  },
+  "results": [
+    {
+      "element": "qubit",
+      "lo_hz": 6200000000.0,
+      "if_hz": -50000000.0,
+      "sideband": "lsb",
+      "f_target_hz": 6150000000.0,
+      "f_image_hz": 6250000000.0,
+      "P_target_dBm": -23.954792,
+      "P_lo_dBm": -82.9199,
+      "P_image_dBm": -58.49379,
+      "lo_suppression_dBc": 58.965108,
+      "irr_dBc": 34.53899799999999
+    },
+    {
+      "element": "storage",
+      "lo_hz": 5400000000.0,
+      "if_hz": -50000000.0,
+      "sideband": "lsb",
+      "f_target_hz": 5350000000.0,
+      "f_image_hz": 5450000000.0,
+      "P_target_dBm": -26.53223,
+      "P_lo_dBm": -75.77465,
+      "P_image_dBm": -69.73404,
+      "lo_suppression_dBc": 49.242419999999996,
+      "irr_dBc": 43.201809999999995
+    },
+    {
+      "element": "resonator2",
+      "lo_hz": 3500000000.0,
+      "if_hz": -50000000.0,
+      "sideband": "lsb",
+      "f_target_hz": 3450000000.0,
+      "f_image_hz": 3550000000.0,
+      "P_target_dBm": -30.978579,
+      "P_lo_dBm": -80.26342,
+      "P_image_dBm": -65.637856,
+      "lo_suppression_dBc": 49.284841,
+      "irr_dBc": 34.659277
+    },
+    {
+      "element": "qubit2",
+      "lo_hz": 7000000000.0,
+      "if_hz": -50000000.0,
+      "sideband": "lsb",
+      "f_target_hz": 6950000000.0,
+      "f_image_hz": 7050000000.0,
+      "P_target_dBm": -88.6521,
+      "P_lo_dBm": -88.9093,
+      "P_image_dBm": -88.885895,
+      "lo_suppression_dBc": 0.25719999999999743,
+      "irr_dBc": 0.23379500000000064
+    },
+    {
+      "element": "resonator",
+      "lo_hz": 8800000000.0,
+      "if_hz": -50000000.0,
+      "sideband": "lsb",
+      "f_target_hz": 8750000000.0,
+      "f_image_hz": 8850000000.0,
+      "P_target_dBm": -40.299477,
+      "P_lo_dBm": -83.7501,
+      "P_image_dBm": -85.88232,
+      "lo_suppression_dBc": 43.450623,
+      "irr_dBc": 45.582843000000004
+    }
+  ]
+}

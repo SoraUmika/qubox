@@ -1,6 +1,7 @@
 """Storage resonator spectroscopy and dynamics experiments."""
 from __future__ import annotations
 
+import logging
 from typing import Any, Union
 
 import numpy as np
@@ -21,6 +22,8 @@ from ...analysis.cQED_models import (
 from ...analysis.output import Output
 from ...hardware.program_runner import ExecMode, RunResult
 from ...programs import cQED_programs
+
+logger = logging.getLogger(__name__)
 
 
 class StorageSpectroscopy(ExperimentBase):
@@ -204,7 +207,30 @@ class StorageSpectroscopyCoarse(ExperimentBase):
             metrics["f_storage"] = fit.params["f0"]
             metrics["kappa"] = fit.params["kappa"]
 
-        return AnalysisResult.from_run(result, fit=fit, metrics=metrics)
+        metadata: dict[str, Any] = {
+            "calibration_kind": "storage_freq",
+            "units": {"f_storage": "Hz", "kappa": "Hz"},
+        }
+
+        if update_calibration and fit.params:
+            metadata.setdefault("proposed_patch_ops", []).extend([
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": f"frequencies.{self.attr.st_el}.qubit_freq",
+                        "value": float(fit.params["f0"]),
+                    },
+                },
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": f"frequencies.{self.attr.st_el}.kappa",
+                        "value": float(fit.params["kappa"]),
+                    },
+                },
+            ])
+
+        return AnalysisResult.from_run(result, fit=fit, metrics=metrics, metadata=metadata)
 
     def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
         freqs = analysis.data.get("frequencies")
@@ -300,6 +326,11 @@ class NumSplittingSpectroscopy(ExperimentBase):
         return result
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        if update_calibration:
+            logger.warning(
+                "NumSplittingSpectroscopy.analyze(): update_calibration=True is not yet "
+                "implemented. Use the CalibrationOrchestrator for calibration patching."
+            )
         S = result.output.extract("S")
         metrics: dict[str, Any] = {}
 

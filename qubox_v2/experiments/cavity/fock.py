@@ -78,6 +78,11 @@ class FockResolvedSpectroscopy(ExperimentBase):
         return result
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
+        if update_calibration:
+            logger.warning(
+                "FockResolvedSpectroscopy.analyze(): update_calibration=True is not yet "
+                "implemented. Use the CalibrationOrchestrator for calibration patching."
+            )
         if "S" not in result.output:
             logger.warning(
                 "FockResolvedSpectroscopy: 'S' not found in output. "
@@ -87,6 +92,7 @@ class FockResolvedSpectroscopy(ExperimentBase):
             )
             return AnalysisResult.from_run(result, metrics={})
         S = result.output.extract("S")
+        frequencies = result.output.extract("frequencies")
         metrics: dict[str, Any] = {}
 
         if S is not None:
@@ -96,8 +102,13 @@ class FockResolvedSpectroscopy(ExperimentBase):
                 fock_freqs: list[float] = []
                 for n in range(n_fock):
                     mag = np.abs(S[n])
-                    fock_freqs.append(float(mag.min()))  # placeholder
+                    # Extract peak frequency via argmin (dip = resonance)
+                    if frequencies is not None and len(frequencies) == mag.shape[-1]:
+                        fock_freqs.append(float(frequencies[np.argmin(mag)]))
+                    else:
+                        fock_freqs.append(float(np.argmin(mag)))
                 metrics["n_fock"] = n_fock
+                metrics["fock_freqs"] = fock_freqs
             else:
                 mag = np.abs(S)
                 metrics["n_points"] = int(len(mag))
@@ -207,6 +218,11 @@ class FockResolvedT1(ExperimentBase):
         return result
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
+        if update_calibration:
+            logger.warning(
+                "FockResolvedT1.analyze(): update_calibration=True is not yet "
+                "implemented. Use the CalibrationOrchestrator for calibration patching."
+            )
         delays = result.output.extract("delays")
         S = result.output.extract("S")
         metrics: dict[str, Any] = {}
@@ -374,6 +390,11 @@ class FockResolvedRamsey(ExperimentBase):
         return result
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
+        if update_calibration:
+            logger.warning(
+                "FockResolvedRamsey.analyze(): update_calibration=True is not yet "
+                "implemented. Use the CalibrationOrchestrator for calibration patching."
+            )
         delays = result.output.extract("delays")
         S = result.output.extract("S")
         metrics: dict[str, Any] = {}
@@ -537,6 +558,11 @@ class FockResolvedPowerRabi(ExperimentBase):
         return result
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
+        if update_calibration:
+            logger.warning(
+                "FockResolvedPowerRabi.analyze(): update_calibration=True is not yet "
+                "implemented. Use the CalibrationOrchestrator for calibration patching."
+            )
         gains = result.output.extract("gains")
         S = result.output.extract("S")
         metrics: dict[str, Any] = {}

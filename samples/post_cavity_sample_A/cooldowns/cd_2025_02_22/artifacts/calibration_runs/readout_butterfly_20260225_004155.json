@@ -1,0 +1,127 @@
+{
+  "timestamp": "20260225_004155",
+  "experiment": "ReadoutButterflyMeasurement",
+  "calibration_tag": "readout_butterfly",
+  "validation_passed": true,
+  "validation_errors": [],
+  "fit": {
+    "model": null,
+    "params": null,
+    "uncertainties": null,
+    "r_squared": null
+  },
+  "metrics": {
+    "butterfly_df": "    Ground (g)  Excited (e)\nm0     0.99148      0.72564\nm1     0.78176      0.32056\nm2     0.78318      0.30724",
+    "F": 0.55116,
+    "F_definition": "assignment_fidelity_M1_balanced_accuracy_fraction",
+    "Q": 0.9349100860046915,
+    "V": 0.10231999999999997,
+    "F_m1_balanced_accuracy": 0.55116,
+    "t01": 0.0,
+    "t10": 0.13017982799061711,
+    "confusion_matrix": "        |0>_i    |1>_i\nm1=0  0.78176  0.67944\nm1=1  0.21824  0.32056",
+    "transition_matrix": "       |0>_i    |1>_i\n|0>_o    1.0  0.13018\n|1>_o    0.0  0.86982",
+    "Lambda_M_valid": true,
+    "acceptance_rate": 0.79913,
+    "average_tries": 7.5710500000000005,
+    "ge_fidelity_reference": 0.6974000000000001,
+    "ge_fidelity_definition": "assignment_fidelity_balanced_accuracy_percent",
+    "fidelity_delta_GE_minus_F": 0.14624000000000015,
+    "readout_state_match": false,
+    "readout_state_hash_ge": "b27cf0e275181756",
+    "readout_state_hash_butterfly": "b1a2a5187b4f4dc6"
+  },
+  "run_metadata": {
+    "n_total": 50000
+  },
+  "extra_metadata": {},
+  "_persistence": {
+    "raw_data_policy": "drop_shot_level_arrays",
+    "dropped_fields": {
+      "metrics.S0_g": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.S0_e": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.S1_g": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.S1_e": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.S2_g": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.S2_e": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.m0_g": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.m0_e": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.m1_g": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.m1_e": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.m2_g": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      },
+      "metrics.m2_e": {
+        "kind": "ndarray",
+        "shape": [
+          50000
+        ],
+        "size": 50000
+      }
+    }
+  }
+}
