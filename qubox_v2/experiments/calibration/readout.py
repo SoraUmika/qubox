@@ -1402,7 +1402,7 @@ class ReadoutWeightsOptimization(ExperimentBase):
         sin_w_key: str,
         m_sin_w_key: str,
         *,
-        num_div: int = 1,
+        num_div: int | None = None,
         r180: str = "x180",
         ro_depl_clks: int | None = None,
         n_avg: int = 100,
@@ -1669,17 +1669,28 @@ class ReadoutWeightsOptimization(ExperimentBase):
             fig = ax.figure
             ax1, ax2, ax3 = ax, fig.add_subplot(132), fig.add_subplot(133)
 
+        # Single-point traces appear blank with plain line style; use markers instead.
+        single_point = len(t) <= 1
+        line_style = {"marker": "o"} if single_point else {}
+
+        if single_point:
+            _logger.warning(
+                "ReadoutWeightsOptimization plot has only one sample (trace_length=%d). "
+                "Use num_div>1 to visualize a full trace.",
+                len(t),
+            )
+
         # Panel 1: ground trace (legacy parity)
-        ax1.plot(t, g_trace.real, label="real")
-        ax1.plot(t, g_trace.imag, label="imag")
+        ax1.plot(t, g_trace.real, label="real", **line_style)
+        ax1.plot(t, g_trace.imag, label="imag", **line_style)
         ax1.set_title("ground trace")
         ax1.set_xlabel("time [ns]")
         ax1.set_ylabel("demod [a.u.]")
         ax1.legend()
 
         # Panel 2: excited trace (legacy parity)
-        ax2.plot(t, e_trace.real, label="real")
-        ax2.plot(t, e_trace.imag, label="imag")
+        ax2.plot(t, e_trace.real, label="real", **line_style)
+        ax2.plot(t, e_trace.imag, label="imag", **line_style)
         ax2.set_title("excited trace")
         ax2.set_xlabel("time [ns]")
         ax2.set_ylabel("demod [a.u.]")
@@ -1688,8 +1699,8 @@ class ReadoutWeightsOptimization(ExperimentBase):
         # Panel 3: normalized vs unnormalized ge_diff (legacy parity)
         if ge_diff_norm is not None:
             ge_diff_norm = np.asarray(ge_diff_norm)
-            l1 = ax3.plot(t, ge_diff_norm.real, label="Re (norm)")
-            l2 = ax3.plot(t, ge_diff_norm.imag, label="Im (norm)")
+            l1 = ax3.plot(t, ge_diff_norm.real, label="Re (norm)", **line_style)
+            l2 = ax3.plot(t, ge_diff_norm.imag, label="Im (norm)", **line_style)
             ax3.set_title(r"|e$\rangle$ $-$ |g$\rangle$ (normalized)")
             ax3.set_xlabel("time [ns]")
             ax3.set_ylabel("norm diff [a.u.]")
@@ -1697,8 +1708,8 @@ class ReadoutWeightsOptimization(ExperimentBase):
             if ge_diff is not None:
                 ge_diff = np.asarray(ge_diff)
                 ax3b = ax3.twinx()
-                l3 = ax3b.plot(t, ge_diff.real, "--", label="Re (unnorm)")
-                l4 = ax3b.plot(t, ge_diff.imag, "--", label="Im (unnorm)")
+                l3 = ax3b.plot(t, ge_diff.real, "--", label="Re (unnorm)", **line_style)
+                l4 = ax3b.plot(t, ge_diff.imag, "--", label="Im (unnorm)", **line_style)
                 ax3b.set_ylabel("unnorm diff [a.u.]")
                 lines = l1 + l2 + l3 + l4
                 labels = [ln.get_label() for ln in lines]
@@ -1707,6 +1718,9 @@ class ReadoutWeightsOptimization(ExperimentBase):
                 ax3.legend()
         else:
             ax3.set_title("ge diff (not available)")
+
+        fig.tight_layout()
+        return fig
 
         plt.tight_layout()
         plt.show()
@@ -1885,6 +1899,52 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                     sigma_e = float(post_sel_kwargs["sigma_e"])
                     post_sel_kwargs["rg2"] = float((k_val * sigma_g) ** 2)
                     post_sel_kwargs["re2"] = float((k_val * sigma_e) ** 2)
+
+        policy_norm = str(post_sel_policy).upper() if post_sel_policy is not None else "THRESHOLD"
+        if policy_norm == "POSTERIOR":
+            ro_disc = getattr(measureMacro, "_ro_disc_params", {}) or {}
+
+            rot_mu_g = ro_disc.get("rot_mu_g", None)
+            rot_mu_e = ro_disc.get("rot_mu_e", None)
+            sigma_g = ro_disc.get("sigma_g", None)
+            sigma_e = ro_disc.get("sigma_e", None)
+
+            if "Ig" not in post_sel_kwargs and rot_mu_g is not None:
+                post_sel_kwargs["Ig"] = float(np.real(rot_mu_g))
+            if "Qg" not in post_sel_kwargs and rot_mu_g is not None:
+                post_sel_kwargs["Qg"] = float(np.imag(rot_mu_g))
+            if "Ie" not in post_sel_kwargs and rot_mu_e is not None:
+                post_sel_kwargs["Ie"] = float(np.real(rot_mu_e))
+            if "Qe" not in post_sel_kwargs and rot_mu_e is not None:
+                post_sel_kwargs["Qe"] = float(np.imag(rot_mu_e))
+            if "sigma_g" not in post_sel_kwargs and sigma_g is not None:
+                post_sel_kwargs["sigma_g"] = float(sigma_g)
+            if "sigma_e" not in post_sel_kwargs and sigma_e is not None:
+                post_sel_kwargs["sigma_e"] = float(sigma_e)
+
+            missing = [
+                key for key in ("Ig", "Qg", "Ie", "Qe", "sigma_g", "sigma_e")
+                if key not in post_sel_kwargs
+            ]
+            if missing:
+                raise ValueError(
+                    "Butterfly POSTERIOR policy requires kwargs "
+                    f"{missing}; set prep_kwargs explicitly or run GE discrimination first."
+                )
+
+            sg = float(post_sel_kwargs["sigma_g"])
+            se = float(post_sel_kwargs["sigma_e"])
+            if not (np.isfinite(sg) and sg > 0):
+                raise ValueError(f"Invalid POSTERIOR sigma_g: {sg}")
+            if not (np.isfinite(se) and se > 0):
+                raise ValueError(f"Invalid POSTERIOR sigma_e: {se}")
+
+            post_thr = float(post_sel_kwargs.get("posterior_classification_threshold", 0.5))
+            if not np.isfinite(post_thr) or post_thr < 0.0 or post_thr > 1.0:
+                raise ValueError(
+                    "posterior_classification_threshold must be finite in [0, 1]"
+                )
+            post_sel_kwargs["posterior_classification_threshold"] = post_thr
 
         self._show_analysis = show_analysis
         self._run_params = {

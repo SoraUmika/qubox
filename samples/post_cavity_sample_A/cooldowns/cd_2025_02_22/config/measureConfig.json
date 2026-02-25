@@ -45,27 +45,27 @@
     "gain": null,
     "demod_weight_len": 400,
     "ro_disc_params": {
-      "threshold": -1.0497972115563483e-05,
-      "angle": 0.36037997477352524,
-      "fidelity": 73.874,
+      "threshold": -1.4611983629053042e-05,
+      "angle": 0.3734019480407541,
+      "fidelity": 74.256,
       "rot_mu_g": {
-        "re": -0.00015713039344266818,
-        "im": 0.0001592602514387027
+        "re": -0.00015568550164802122,
+        "im": 0.00015796595011834965
       },
       "unrot_mu_g": {
-        "re": -9.087687817382184e-05,
-        "im": 0.00020443869801274627
+        "re": -8.733386813294305e-05,
+        "im": 0.00020387253934045816
       },
-      "sigma_g": 0.00018401987025625988,
+      "sigma_g": 0.0001849142245014856,
       "rot_mu_e": {
-        "re": 0.00010781685693152983,
-        "im": 0.00015805125893355999
+        "re": 0.00010805526303737478,
+        "im": 0.0001571361687626297
       },
       "unrot_mu_e": {
-        "re": 0.00015662460257882165,
-        "im": 0.00010987906514028672
+        "re": 0.00015793029175489875,
+        "im": 0.00010689124543051435
       },
-      "sigma_e": 0.00018838565389254903,
+      "sigma_e": 0.00018679515387331482,
       "norm_params": {},
       "fidelity_definition": "assignment_fidelity_balanced_accuracy_percent",
       "qbx_readout_state": {
@@ -77,14 +77,14 @@
           "sin": "rot_sin",
           "minus_sin": "rot_m_sin"
         },
-        "angle": 0.36037997477352524,
-        "threshold": -1.0497972115563483e-05,
+        "angle": 0.3734019480407541,
+        "threshold": -1.4611983629053042e-05,
         "fidelity_definition": "assignment_fidelity_balanced_accuracy_percent",
         "rotated_weights_apply_requested": true,
         "rotated_weights_inline_applied": false,
         "strict_mode_rotated_weights_patch_pending": true,
-        "generated_at": "2026-02-25T15:57:27",
-        "hash": "2893b52122326732"
+        "generated_at": "2026-02-25T17:00:55",
+        "hash": "3d36c4bf61a5fcd6"
       }
     },
     "ro_quality_params": {
@@ -123,19 +123,19 @@
     "post_select_config": {
       "policy": "BLOBS",
       "kwargs": {
-        "Ig": -0.00015713039344266818,
-        "Qg": 0.0001592602514387027,
-        "Ie": 0.00010781685693152983,
-        "Qe": 0.00015805125893355999,
-        "rg2": 3.047698138421765e-07,
-        "re2": 3.194023913327094e-07,
-        "threshold": -1.0497972115563483e-05,
+        "Ig": -0.00015568550164802122,
+        "Qg": 0.00015796595011834965,
+        "Ie": 0.00010805526303737478,
+        "Qe": 0.0001571361687626297,
+        "rg2": 4.1886756268157627e-07,
+        "re2": 4.2743226150430325e-07,
+        "threshold": -1.4611983629053042e-05,
         "require_exclusive": true,
         "extend_halfplane": true,
         "extend_mode": "circle_edge",
         "extend_margin": 0.0,
-        "sigma_g": 0.00018401987025625988,
-        "sigma_e": 0.00018838565389254903,
+        "sigma_g": 0.0001849142245014856,
+        "sigma_e": 0.00018679515387331482,
         "posterior_dim": "1d",
         "pi_e_default": 0.5
       }

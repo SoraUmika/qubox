@@ -146,7 +146,7 @@ class sequenceMacros:
         cls,
         *,
         target_state: str = "g",           # "g" or "e"
-        policy: str | None = None,         # "ZSCORE", "AFFINE", "HYSTERESIS", "BLOBS", or None
+        policy: str | None = None,         # "ZSCORE", "AFFINE", "HYSTERESIS", "BLOBS", "POSTERIOR", or None
         r180: str = "x180",
         qb_el: str = "qubit",
         max_trials: int = 4,
@@ -190,6 +190,10 @@ class sequenceMacros:
 
             - policy == "BLOBS":
                 Ig, Qg, rg, Ie, Qe, re, require_exclusive=True
+
+            - policy == "POSTERIOR":
+                Ig, Qg, Ie, Qe, sigma_g, sigma_e,
+                posterior_classification_threshold=0.5
         """
 
         # -------------------------------
@@ -267,6 +271,55 @@ class sequenceMacros:
             dQe  = declare(fixed)
             inside_g = declare(bool)
             inside_e = declare(bool)
+
+        elif policy_norm == "POSTERIOR":
+            try:
+                Ig0 = float(p["Ig"])
+                Qg0 = float(p["Qg"])
+                Ie0 = float(p["Ie"])
+                Qe0 = float(p["Qe"])
+                sigma_g = float(p["sigma_g"])
+                sigma_e = float(p["sigma_e"])
+            except KeyError as e:
+                raise ValueError(
+                    "prepare_state[POSTERIOR]: missing one of Ig, Qg, Ie, Qe, sigma_g, sigma_e"
+                ) from e
+
+            if not (np.isfinite(sigma_g) and sigma_g > 0):
+                raise ValueError(f"prepare_state[POSTERIOR]: sigma_g must be finite and > 0, got {sigma_g}")
+            if not (np.isfinite(sigma_e) and sigma_e > 0):
+                raise ValueError(f"prepare_state[POSTERIOR]: sigma_e must be finite and > 0, got {sigma_e}")
+
+            post_thr = float(p.get("posterior_classification_threshold", 0.5))
+            if not np.isfinite(post_thr) or post_thr < 0.0 or post_thr > 1.0:
+                raise ValueError(
+                    "prepare_state[POSTERIOR]: posterior_classification_threshold must be finite in [0, 1]"
+                )
+
+            pi_e = float(p.get("posterior_prior_e", 0.5))
+            if not np.isfinite(pi_e) or not (0.0 < pi_e < 1.0):
+                raise ValueError("prepare_state[POSTERIOR]: posterior_prior_e must be finite in (0,1)")
+            pi_g = 1.0 - pi_e
+            log_prior_odds = float(np.log(pi_e / pi_g))
+
+            if 0.0 < post_thr < 1.0:
+                post_logit_thr = float(np.log(post_thr / (1.0 - post_thr)))
+            else:
+                post_logit_thr = 0.0
+
+            inv_2sg2 = float(1.0 / (2.0 * sigma_g * sigma_g))
+            inv_2se2 = float(1.0 / (2.0 * sigma_e * sigma_e))
+            sg2 = float(sigma_g * sigma_g)
+            se2 = float(sigma_e * sigma_e)
+            llr_clip = float(p.get("posterior_llr_clip", p.get("posterior_exp_clip", 60.0)))
+            if not np.isfinite(llr_clip) or llr_clip <= 0:
+                raise ValueError("prepare_state[POSTERIOR]: posterior_llr_clip must be finite and > 0")
+
+            # QUA-side constants for Math domain-safe operations
+            sg2_q = declare(fixed)
+            se2_q = declare(fixed)
+            assign(sg2_q, sg2)
+            assign(se2_q, se2)
 
         # -------------------------------
         # I/Q + state variables
@@ -348,6 +401,43 @@ class sequenceMacros:
                         assign(accept, inside_g & (~inside_e))
                     else:
                         assign(accept, inside_g)
+
+            elif policy_norm == "POSTERIOR":
+                if Q is None:
+                    raise ValueError("prepare_state[POSTERIOR]: requires Q")
+
+                if post_thr <= 0.0:
+                    assign(accept, True)
+                elif post_thr >= 1.0:
+                    assign(accept, False)
+                else:
+                    d_g2_q = declare(fixed)
+                    d_e2_q = declare(fixed)
+                    l_g_q = declare(fixed)
+                    l_e_q = declare(fixed)
+                    llr_q = declare(fixed)
+                    llr_clip_q = declare(fixed)
+
+                    assign(d_g2_q, ((I - Ig0) * (I - Ig0)) + ((Q - Qg0) * (Q - Qg0)))
+                    assign(d_e2_q, ((I - Ie0) * (I - Ie0)) + ((Q - Qe0) * (Q - Qe0)))
+
+                    assign(l_g_q, (-d_g2_q * inv_2sg2) - Math.ln(sg2_q))
+                    assign(l_e_q, (-d_e2_q * inv_2se2) - Math.ln(se2_q))
+
+                    # LLR = log p(e|S) - log p(g|S) + log(pi_e/pi_g)
+                    assign(llr_q, (l_e_q - l_g_q) + log_prior_odds)
+
+                    with if_(llr_q > llr_clip):
+                        assign(llr_clip_q, llr_clip)
+                    with elif_(llr_q < -llr_clip):
+                        assign(llr_clip_q, -llr_clip)
+                    with else_():
+                        assign(llr_clip_q, llr_q)
+
+                    if ts == "e":
+                        assign(accept, llr_clip_q >= post_logit_thr)
+                    else:
+                        assign(accept, llr_clip_q <= -post_logit_thr)
 
             else:
                 # Default SCALAR policy: compare to (possibly overridden) threshold
@@ -469,6 +559,92 @@ class sequenceMacros:
                 expr = expr | extra
 
             assign(accept, expr)
+
+        # ---- POSTERIOR ----
+        elif policy_norm == "POSTERIOR":
+            if Q is None:
+                raise ValueError("post_select[POSTERIOR]: requires Q")
+
+            try:
+                Ig0 = float(kwargs["Ig"])
+                Qg0 = float(kwargs["Qg"])
+                Ie0 = float(kwargs["Ie"])
+                Qe0 = float(kwargs["Qe"])
+                sigma_g = float(kwargs["sigma_g"])
+                sigma_e = float(kwargs["sigma_e"])
+            except KeyError as e:
+                raise ValueError(
+                    "post_select[POSTERIOR]: missing one of Ig, Qg, Ie, Qe, sigma_g, sigma_e"
+                ) from e
+
+            if not (np.isfinite(sigma_g) and sigma_g > 0):
+                raise ValueError(f"post_select[POSTERIOR]: sigma_g must be finite and > 0, got {sigma_g}")
+            if not (np.isfinite(sigma_e) and sigma_e > 0):
+                raise ValueError(f"post_select[POSTERIOR]: sigma_e must be finite and > 0, got {sigma_e}")
+
+            post_thr = float(kwargs.get("posterior_classification_threshold", 0.5))
+            if not np.isfinite(post_thr) or post_thr < 0.0 or post_thr > 1.0:
+                raise ValueError(
+                    "post_select[POSTERIOR]: posterior_classification_threshold must be finite in [0, 1]"
+                )
+
+            pi_e = float(kwargs.get("posterior_prior_e", 0.5))
+            if not np.isfinite(pi_e) or not (0.0 < pi_e < 1.0):
+                raise ValueError("post_select[POSTERIOR]: posterior_prior_e must be finite in (0,1)")
+            pi_g = 1.0 - pi_e
+            log_prior_odds = float(np.log(pi_e / pi_g))
+
+            if 0.0 < post_thr < 1.0:
+                post_logit_thr = float(np.log(post_thr / (1.0 - post_thr)))
+            else:
+                post_logit_thr = 0.0
+
+            llr_clip = float(kwargs.get("posterior_llr_clip", kwargs.get("posterior_exp_clip", 60.0)))
+            if not np.isfinite(llr_clip) or llr_clip <= 0:
+                raise ValueError("post_select[POSTERIOR]: posterior_llr_clip must be finite and > 0")
+
+            if post_thr <= 0.0:
+                assign(accept, True)
+            elif post_thr >= 1.0:
+                assign(accept, False)
+            else:
+                inv_2sg2 = float(1.0 / (2.0 * sigma_g * sigma_g))
+                inv_2se2 = float(1.0 / (2.0 * sigma_e * sigma_e))
+                sg2 = float(sigma_g * sigma_g)
+                se2 = float(sigma_e * sigma_e)
+
+                sg2_q = declare(fixed)
+                se2_q = declare(fixed)
+                d_g2_q = declare(fixed)
+                d_e2_q = declare(fixed)
+                l_g_q = declare(fixed)
+                l_e_q = declare(fixed)
+                llr_q = declare(fixed)
+                llr_clip_q = declare(fixed)
+
+                assign(sg2_q, sg2)
+                assign(se2_q, se2)
+
+                assign(d_g2_q, ((I - Ig0) * (I - Ig0)) + ((Q - Qg0) * (Q - Qg0)))
+                assign(d_e2_q, ((I - Ie0) * (I - Ie0)) + ((Q - Qe0) * (Q - Qe0)))
+
+                assign(l_g_q, (-d_g2_q * inv_2sg2) - Math.ln(sg2_q))
+                assign(l_e_q, (-d_e2_q * inv_2se2) - Math.ln(se2_q))
+
+                # LLR = log p(e|S) - log p(g|S) + log(pi_e/pi_g)
+                assign(llr_q, (l_e_q - l_g_q) + log_prior_odds)
+
+                with if_(llr_q > llr_clip):
+                    assign(llr_clip_q, llr_clip)
+                with elif_(llr_q < -llr_clip):
+                    assign(llr_clip_q, -llr_clip)
+                with else_():
+                    assign(llr_clip_q, llr_q)
+
+                if ts == "e":
+                    assign(accept, llr_clip_q >= post_logit_thr)
+                else:
+                    assign(accept, llr_clip_q <= -post_logit_thr)
 
         # ---- DEFAULT scalar threshold on I ----
         else:
