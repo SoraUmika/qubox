@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,8 @@ from .contracts import Artifact, CalibrationResult, Patch
 from .patch_rules import default_patch_rules
 from ..analysis.output import Output
 from ..core.persistence_policy import split_output_for_persistence, sanitize_mapping_for_json
+
+_logger = logging.getLogger(__name__)
 
 
 class CalibrationOrchestrator:
@@ -237,8 +240,8 @@ class CalibrationOrchestrator:
                 ro_el = getattr(self.session.attributes, "ro_el", None)
                 if ro_el is not None:
                     measureMacro.sync_from_calibration(self.session.calibration, ro_el)
-            except Exception:
-                pass  # non-fatal; sync is best-effort
+            except Exception as exc:
+                _logger.warning("measureMacro sync_from_calibration failed: %s", exc)
 
             tag = getattr(patch, "reason", None) or f"patch_{len(self._applied_patches)}"
             self._applied_patches.append(tag)

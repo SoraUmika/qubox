@@ -65,10 +65,10 @@
           "gain": 0
         },
         "4": {
-          "LO_frequency": 16000000000.0,
+          "LO_frequency": 7000000000.0,
           "LO_source": "external",
           "output_mode": "always_on",
-          "gain": -15
+          "gain": 1.5
         },
         "3": {
           "LO_frequency": 6200000000.0,

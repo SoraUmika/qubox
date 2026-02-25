@@ -548,3 +548,50 @@ patterns, and documentation updates.
 - `qubox_v2/calibration/patch_rules.py`
 - `qubox_v2/docs/API_REFERENCE.md`
 - `qubox_v2/docs/CHANGELOG.md`
+
+---
+
+### 2026-02-25 — Readout Pipeline Consistency Audit & Fixes
+
+**Classification: Moderate**
+
+Audited the full readout pipeline (GE Discrimination → Butterfly → CalibrateReadoutFull)
+for consistency between legacy `cQED_Experiment` and qubox_v2.  Produced a mapping
+document and fixed 4 bugs in the state-handoff path.
+
+**Summary:**
+
+1. **Audit document (`READOUT_PIPELINE_AUDIT.md`)**
+   - Full Legacy ↔ qubox_v2 pipeline ordering comparison.
+   - Policy-object tables: readout discrimination, quality, and state-prep.
+   - State-handoff invariant analysis (GE → Butterfly).
+   - 4 bugs and 2 mismatches identified and documented.
+
+2. **BUG-R1 — `qbx_readout_state` missing from default dict (`measure.py:148`)**
+   - `_ro_disc_params` did not include `qbx_readout_state` in its default keys,
+     causing `_apply_defaults()` to silently drop it.  Added
+     `"qbx_readout_state": None` to the default dict.
+
+3. **BUG-R2 — `_update_readout_quality` dead code (`measure.py:441–452`)**
+   - The `t01`/`t10` transition-probability and `eta_g`/`eta_e` update code
+     inside `_update_readout_quality()` was wrapped in a triple-quoted string
+     literal (dead code).  Restored the code so butterfly metrics propagate
+     to `_ro_quality_params` immediately on `SetMeasureQuality` patch ops.
+
+4. **BUG-R3 — `sync_from_calibration` loses `qbx_readout_state` (`measure.py:455`)**
+   - `sync_from_calibration()` overwrites `_ro_disc_params` from CalibrationStore
+     but `qbx_readout_state` is a runtime-only hash not stored in CalibStore.
+     Added save/restore of `qbx_readout_state` around the sync so Butterfly's
+     hash comparison survives calibration commits.
+
+5. **BUG-R4 — Orchestrator swallows sync errors silently (`orchestrator.py:243`)**
+   - Bare `except Exception: pass` after `sync_from_calibration()` in
+     `apply_patch()` silently discarded errors.  Replaced with
+     `_logger.warning(...)` so failures are logged.
+
+**Files affected:**
+
+- `qubox_v2/programs/macros/measure.py`
+- `qubox_v2/calibration/orchestrator.py`
+- `qubox_v2/docs/READOUT_PIPELINE_AUDIT.md` (new)
+- `qubox_v2/docs/CHANGELOG.md`

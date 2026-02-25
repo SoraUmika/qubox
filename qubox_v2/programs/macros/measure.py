@@ -149,6 +149,7 @@ class measureMacro:
         "threshold": None,
         "angle": None,
         "fidelity": None,
+        "fidelity_definition": None,
         "rot_mu_g": None,
         "unrot_mu_g": None,
         "sigma_g": None,
@@ -156,6 +157,7 @@ class measureMacro:
         "unrot_mu_e": None,
         "sigma_e": None,
         "norm_params": {},
+        "qbx_readout_state": None,
     }
 
     _ro_quality_params = {
@@ -370,6 +372,8 @@ class measureMacro:
         dp["threshold"] = float(out.get("threshold", dp.get("threshold", 0.0)))
         dp["angle"]     = float(out.get("angle",     dp.get("angle", 0.0)))
         dp["fidelity"]  = float(out.get("fidelity",  dp.get("fidelity", 0.0)))
+        if "fidelity_definition" in out:
+            dp["fidelity_definition"] = str(out.get("fidelity_definition"))
 
         # complex centers
         dp["rot_mu_g"]   = out.get("rot_mu_g",   dp.get("rot_mu_g",   0.0 + 0.0j))
@@ -438,42 +442,17 @@ class measureMacro:
                     }
                 cls._ro_quality_params["affine_n"] = affine_dict
 
-    """ 
+        # Update t01/t10 transition probabilities from butterfly measurement
+        if "t01" in out:
+            cls._ro_quality_params["t01"] = float(out["t01"])
+        if "t10" in out:
+            cls._ro_quality_params["t10"] = float(out["t10"])
+
         # Update eta parameters from butterfly measurement
         if "eta_g" in out:
             cls._ro_quality_params["eta_g"] = float(out["eta_g"])
         if "eta_e" in out:
             cls._ro_quality_params["eta_e"] = float(out["eta_e"])
-        if "eta_fp_e_given_g" in out:
-            cls._ro_quality_params["eta_fp_e_given_g"] = float(out["eta_fp_e_given_g"])
-        if "eta_fp_g_given_e" in out:
-            cls._ro_quality_params["eta_fp_g_given_e"] = float(out["eta_fp_g_given_e"])
-        if "eta_unknown_g" in out:
-            cls._ro_quality_params["eta_unknown_g"] = float(out["eta_unknown_g"])
-        if "eta_unknown_e" in out:
-            cls._ro_quality_params["eta_unknown_e"] = float(out["eta_unknown_e"])
-        if "eta_acc_gcore_rate" in out:
-            # Convert to list for JSON serialization
-            val = out["eta_acc_gcore_rate"]
-            cls._ro_quality_params["eta_acc_gcore_rate"] = val.tolist() if hasattr(val, 'tolist') else list(val)
-        if "eta_acc_ecore_rate" in out:
-            # Convert to list for JSON serialization
-            val = out["eta_acc_ecore_rate"]
-            cls._ro_quality_params["eta_acc_ecore_rate"] = val.tolist() if hasattr(val, 'tolist') else list(val)
-        
-        # Update p_S_measured from butterfly measurement
-        if "p_S_measured_given_g" in out:
-            cls._ro_quality_params["p_S_measured_given_g"] = float(out["p_S_measured_given_g"])
-        if "p_S_measured_given_e" in out:
-            cls._ro_quality_params["p_S_measured_given_e"] = float(out["p_S_measured_given_e"])
-        
-        # Update posterior models from butterfly measurement
-        if "posterior_model_1d" in out:
-            cls._ro_quality_params["posterior_model_1d"] = out["posterior_model_1d"]
-        if "posterior_model_2d" in out:
-            cls._ro_quality_params["posterior_model_2d"] = out["posterior_model_2d"]
-
-    """
 
     @classmethod
     def sync_from_calibration(cls, cal_store, element: str) -> None:
@@ -481,6 +460,10 @@ class measureMacro:
 
         Direction: CalibrationStore → measureMacro (never reverse).
         Called by ``SessionManager.open()`` and after calibration commits.
+
+        The ``qbx_readout_state`` hash (a runtime-only field set by
+        GE Discrimination) is preserved across sync because it is not
+        stored in the CalibrationStore.
 
         Parameters
         ----------
@@ -490,6 +473,9 @@ class measureMacro:
             Readout element name (e.g. ``"resonator"``).
         """
         import warnings as _warnings
+
+        # Preserve runtime-only fields that are not in CalibrationStore
+        saved_readout_state = cls._ro_disc_params.get("qbx_readout_state")
 
         disc = cal_store.get_discrimination(element)
         if disc is not None:
@@ -508,6 +494,10 @@ class measureMacro:
                 dp["sigma_g"] = float(disc.sigma_g)
             if hasattr(disc, "sigma_e") and disc.sigma_e is not None:
                 dp["sigma_e"] = float(disc.sigma_e)
+
+        # Restore runtime-only fields
+        if saved_readout_state is not None:
+            cls._ro_disc_params["qbx_readout_state"] = saved_readout_state
 
         quality = cal_store.get_readout_quality(element)
         if quality is not None:

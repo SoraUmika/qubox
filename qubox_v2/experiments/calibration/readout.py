@@ -54,6 +54,55 @@ def _canonical_readout_state_payload(state: Mapping[str, Any]) -> dict[str, Any]
     }
 
 
+def _signature_field_diff(lhs: Mapping[str, Any] | None, rhs: Mapping[str, Any] | None) -> dict[str, dict[str, Any]]:
+    left = dict(lhs or {})
+    right = dict(rhs or {})
+    keys = sorted(set(left.keys()) | set(right.keys()))
+    diff: dict[str, dict[str, Any]] = {}
+    for key in keys:
+        if left.get(key) != right.get(key):
+            diff[key] = {"ge": left.get(key), "butterfly": right.get(key)}
+    return diff
+
+
+def _weight_checksum_from_qm_config(qm_config: Mapping[str, Any], weight_name: str) -> dict[str, Any]:
+    weights = (qm_config.get("integration_weights", {}) or {}).get(weight_name)
+    if not isinstance(weights, Mapping):
+        return {"exists": False, "first3": [], "sum": None, "len": 0}
+
+    def _expand_first3_and_sum(segments: Any) -> tuple[list[float], float, int]:
+        first3: list[float] = []
+        total = 0.0
+        total_len = 0
+        if not isinstance(segments, (list, tuple)):
+            return first3, total, total_len
+        for seg in segments:
+            if not isinstance(seg, (list, tuple)) or len(seg) != 2:
+                continue
+            amp = float(seg[0])
+            n = int(seg[1])
+            if n <= 0:
+                continue
+            total += amp * n
+            total_len += n
+            if len(first3) < 3:
+                needed = 3 - len(first3)
+                first3.extend([amp] * min(needed, n))
+        return first3, total, total_len
+
+    c_first3, c_sum, c_len = _expand_first3_and_sum(weights.get("cosine", []))
+    s_first3, s_sum, s_len = _expand_first3_and_sum(weights.get("sine", []))
+    return {
+        "exists": True,
+        "cos_first3": c_first3,
+        "cos_sum": c_sum,
+        "cos_len": c_len,
+        "sin_first3": s_first3,
+        "sin_sum": s_sum,
+        "sin_len": s_len,
+    }
+
+
 class IQBlob(ExperimentBase):
     """Simple g/e IQ blob acquisition (no discrimination fitting)."""
 
@@ -367,6 +416,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
         auto_update_postsel: bool = True,
         blob_k_g: float = 2.0,
         blob_k_e: float | None = None,
+        debug: bool = False,
         **kwargs: Any,
     ) -> RunResult:
         attr = self.attr
@@ -455,6 +505,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
             "auto_update_postsel": auto_update_postsel,
             "blob_k_g": blob_k_g,
             "blob_k_e": blob_k_e,
+            "debug": bool(debug),
         }
 
         _logger.info("GE discrimination: n_samples=%d, measure_op=%r", n_samples, measure_op)
@@ -575,6 +626,9 @@ class ReadoutGEDiscrimination(ExperimentBase):
         if hasattr(self, "_run_params") and "angle" in metrics:
             apply = self._run_params.get("apply_rotated_weights", True)
             allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
+            self._run_params["rotated_weights_apply_requested"] = bool(apply)
+            self._run_params["rotated_weights_inline_applied"] = bool(apply and allow_inline)
+            self._run_params["strict_mode_rotated_weights_patch_pending"] = bool(apply and not allow_inline)
             disc_sig: dict[str, Any] | None = None
             if apply:
                 if allow_inline:
@@ -625,6 +679,40 @@ class ReadoutGEDiscrimination(ExperimentBase):
                         metadata.setdefault("proposed_patch_ops", []).append(
                             {"op": "PersistMeasureConfig", "payload": {}}
                         )
+                    strict_defs_refreshed = False
+                    strict_defs_refresh_error = None
+                    try:
+                        original_burn = self._run_params.get("burn_rot_weights", True)
+                        self._run_params["burn_rot_weights"] = False
+                        self._build_rotated_weights(metrics)
+                        strict_defs_refreshed = True
+                        _logger.info(
+                            "Strict mode: refreshed rot_* integration-weight definitions in pulse manager "
+                            "(hardware burn/apply deferred to orchestrator patch)"
+                        )
+                    except Exception as exc:
+                        strict_defs_refresh_error = str(exc)
+                        _logger.warning(
+                            "Strict mode: failed to refresh rot_* definitions prior to runtime mapping switch: %s",
+                            exc,
+                        )
+                    finally:
+                        self._run_params["burn_rot_weights"] = original_burn
+                    metadata["strict_mode_rotated_defs_refreshed"] = strict_defs_refreshed
+                    if strict_defs_refresh_error:
+                        metadata["strict_mode_rotated_defs_refresh_error"] = strict_defs_refresh_error
+                    if self._run_params.get("update_measure_macro", False):
+                        try:
+                            self._apply_rotated_measure_macro(metrics)
+                            _logger.info(
+                                "Strict mode: runtime measureMacro switched to rotated labels "
+                                "(hardware weight build/burn deferred to orchestrator patch)"
+                            )
+                        except Exception as exc:
+                            _logger.warning(
+                                "Strict mode: failed to switch runtime measureMacro to rotated labels: %s",
+                                exc,
+                            )
                     _logger.info("Strict mode: rotated weight/macro updates emitted as patch intent")
             else:
                 _logger.info(
@@ -776,28 +864,42 @@ class ReadoutGEDiscrimination(ExperimentBase):
         pm = self.pulse_mgr
         base_is_segmented = pm.is_segmented_integration_weight(base_cos_name)
 
+        def _write_rot_weight_const(name: str, cos_amp: float, sin_amp: float, length: int) -> None:
+            pm.add_int_weight(name, cos_amp, sin_amp, length, persist=False)
+            if persist:
+                pm.add_int_weight(name, cos_amp, sin_amp, length, persist=True)
+
+        def _write_rot_weight_segments(
+            name: str,
+            cosine_segments: list[tuple[float, int]],
+            sine_segments: list[tuple[float, int]],
+        ) -> None:
+            pm.add_int_weight_segments(name, cosine_segments, sine_segments, persist=False)
+            if persist:
+                pm.add_int_weight_segments(name, cosine_segments, sine_segments, persist=True)
+
         if not base_is_segmented:
             L = int(pulse_info.length or 0)
             if L <= 0:
                 return
-            pm.add_int_weight(rot_cos_name,   C,  -S, L, persist=persist)
-            pm.add_int_weight(rot_sin_name,   S,   C, L, persist=persist)
-            pm.add_int_weight(rot_m_sin_name, -S, -C, L, persist=persist)
+            _write_rot_weight_const(rot_cos_name,   C,  -S, L)
+            _write_rot_weight_const(rot_sin_name,   S,   C, L)
+            _write_rot_weight_const(rot_m_sin_name, -S, -C, L)
         else:
             cos_cos_segs, cos_sin_segs = pm.get_integration_weight_segments(base_cos_name)
             sin_cos_segs, sin_sin_segs = pm.get_integration_weight_segments(base_sin_name)
 
             rc_cos = pm.lincomb_segments(C,  -S, cos_cos_segs, sin_cos_segs)
             rc_sin = pm.lincomb_segments(C,  -S, cos_sin_segs, sin_sin_segs)
-            pm.add_int_weight_segments(rot_cos_name, rc_cos, rc_sin, persist=persist)
+            _write_rot_weight_segments(rot_cos_name, rc_cos, rc_sin)
 
             rs_cos = pm.lincomb_segments(S,   C, cos_cos_segs, sin_cos_segs)
             rs_sin = pm.lincomb_segments(S,   C, cos_sin_segs, sin_sin_segs)
-            pm.add_int_weight_segments(rot_sin_name, rs_cos, rs_sin, persist=persist)
+            _write_rot_weight_segments(rot_sin_name, rs_cos, rs_sin)
 
             rm_cos = pm.lincomb_segments(-S, -C, cos_cos_segs, sin_cos_segs)
             rm_sin = pm.lincomb_segments(-S, -C, cos_sin_segs, sin_sin_segs)
-            pm.add_int_weight_segments(rot_m_sin_name, rm_cos, rm_sin, persist=persist)
+            _write_rot_weight_segments(rot_m_sin_name, rm_cos, rm_sin)
 
         # Update pulse mapping (+ synonyms matching legacy)
         for lab, iw in (
@@ -810,6 +912,16 @@ class ReadoutGEDiscrimination(ExperimentBase):
             pm.append_integration_weight_mapping(
                 pulse_info.pulse, lab, iw, override=True
             )
+
+        # Keep compile-time config overlay in sync with freshly rebuilt rot_* weights.
+        # Without this merge, ProgramRunner may compile from a stale pulse_overlay
+        # even though PulseOperationManager already holds updated coefficients.
+        cfg_engine = getattr(self._ctx, "config_engine", None)
+        if cfg_engine is not None:
+            try:
+                cfg_engine.merge_pulses(pm, include_volatile=True)
+            except Exception as exc:
+                _logger.warning("Failed to merge updated rot_* weights into config overlay: %s", exc)
 
         if burn_rot_weights:
             self.burn_pulses(include_volatile=True)
@@ -899,6 +1011,9 @@ class ReadoutGEDiscrimination(ExperimentBase):
             "angle": float(payload.get("angle", 0.0)),
             "threshold": float(payload.get("threshold", 0.0)),
             "fidelity_definition": payload.get("fidelity_definition"),
+            "rotated_weights_apply_requested": bool(params.get("rotated_weights_apply_requested", False)),
+            "rotated_weights_inline_applied": bool(params.get("rotated_weights_inline_applied", False)),
+            "strict_mode_rotated_weights_patch_pending": bool(params.get("strict_mode_rotated_weights_patch_pending", False)),
             "generated_at": datetime.now().isoformat(timespec="seconds"),
         }
         readout_state["hash"] = _stable_hash(_canonical_readout_state_payload(readout_state))
@@ -912,6 +1027,9 @@ class ReadoutGEDiscrimination(ExperimentBase):
             for mm in macro_refs:
                 mm._update_readout_discrimination(payload)
                 mm._ro_disc_params["qbx_readout_state"] = dict(readout_state)
+
+            if getattr(self, "_run_params", {}).get("debug", False):
+                _logger.info("GE signature dict: %s", json.dumps(readout_state, default=str, sort_keys=True))
 
             _logger.info(
                 "GE discrimination state pushed to measureMacro: hash=%s thr=%.6g angle=%.6g",
@@ -1611,6 +1729,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         *,
         use_stored_config: bool = True,
         det_L_threshold: float = 1e-8,
+        debug: bool = False,
     ) -> RunResult:
         attr = self.attr
         self.set_standard_frequencies()
@@ -1645,6 +1764,28 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                 )
 
         ge_state = (getattr(measureMacro, "_ro_disc_params", {}) or {}).get("qbx_readout_state", None)
+
+        if isinstance(ge_state, Mapping) and ge_state.get("strict_mode_rotated_weights_patch_pending"):
+            try:
+                element = measureMacro.active_element()
+                operation = measureMacro.active_op()
+                pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
+                weight_mapping = (pulse_info.int_weights_mapping if pulse_info is not None else {}) or {}
+                op_prefix = "" if (pulse_info is not None and pulse_info.op == "readout") else (f"{pulse_info.op}_" if pulse_info is not None else "")
+                triplet = self._pick_weight_triplet(weight_mapping, op_prefix)
+                using_rotated_labels = bool(
+                    triplet and all(str(lbl).startswith(("rot_", f"{op_prefix}rot_")) for lbl in triplet)
+                )
+                if using_rotated_labels:
+                    _logger.warning(
+                        "Strict-mode rotated-weight warning: GE requested apply_rotated_weights=True but inline application/burn was "
+                        "deferred to patch intent. Butterfly is about to run with labels=%s which may be stale if the patch was not "
+                        "applied. Next steps: apply orchestrator patch (SetMeasureWeights + TriggerPulseRecompile), then rerun GE→Butterfly.",
+                        triplet,
+                    )
+            except Exception as exc:
+                _logger.warning("Strict-mode rotated-weight warning preflight failed: %s", exc)
+
         if ge_state is None:
             sync_info["state_match"] = None
             sync_info["state_reason"] = "no_ge_state_signature"
@@ -1660,6 +1801,13 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                     "Butterfly readout state mismatch: GE hash=%s, butterfly hash=%s",
                     ge_state.get("hash"),
                     current_state.get("hash") if current_state else None,
+                )
+            if debug:
+                _logger.info("GE signature dict: %s", json.dumps(ge_state, default=str, sort_keys=True))
+                _logger.info("Butterfly signature dict: %s", json.dumps(current_state, default=str, sort_keys=True))
+                _logger.info(
+                    "GE vs Butterfly signature field diff: %s",
+                    json.dumps(_signature_field_diff(ge_state, current_state), default=str, sort_keys=True),
                 )
 
         # Resolve post-selection config (legacy-aligned fallback chain)
@@ -1745,7 +1893,68 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             "post_sel_source": post_sel_source,
             "measure_macro_sync": dict(sync_info),
             "update_measure_macro": bool(update_measure_macro),
+            "debug": bool(debug),
         }
+
+        if debug:
+            ro_disc = getattr(measureMacro, "_ro_disc_params", {}) or {}
+            _logger.info(
+                "Butterfly BLOBS frame debug: policy=%s kwargs=%s measureMacro(angle=%s, threshold=%s)",
+                post_sel_policy,
+                post_sel_kwargs,
+                ro_disc.get("angle"),
+                ro_disc.get("threshold"),
+            )
+            _logger.info(
+                "Butterfly post-select uses M0 demod outputs I0/Q0 from measureMacro.measure(...); "
+                "for BLOBS those I/Q values are compared directly to Ig/Qg/Ie/Qe in policy kwargs."
+            )
+
+            try:
+                element = measureMacro.active_element()
+                operation = measureMacro.active_op()
+                pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
+                weight_mapping = pulse_info.int_weights_mapping if pulse_info is not None else {}
+                op_prefix = "" if (pulse_info is not None and pulse_info.op == "readout") else (f"{pulse_info.op}_" if pulse_info is not None else "")
+                triplet = self._pick_weight_triplet(weight_mapping or {}, op_prefix)
+
+                cfg_engine = getattr(self._ctx, "config_engine", None)
+                qm_cfg = cfg_engine.build_qm_config() if cfg_engine is not None else {}
+                active_weights = measureMacro.get_outputs()
+
+                _logger.info(
+                    "Butterfly compile preflight: element=%s op=%s pulse=%s triplet=%s active_outputs=%s",
+                    element,
+                    operation,
+                    getattr(pulse_info, "pulse", None),
+                    triplet,
+                    active_weights,
+                )
+
+                labels: set[str] = set()
+                for out in active_weights:
+                    if isinstance(out, str):
+                        labels.add(out)
+                    elif isinstance(out, (list, tuple)):
+                        labels.update(str(x) for x in out)
+
+                pulse_key = ((qm_cfg.get("elements", {}) or {}).get(element, {}) or {}).get("operations", {})
+                pulse_key = (pulse_key or {}).get(operation)
+                _logger.info("Butterfly compile preflight: qm pulse mapping elements.%s.operations.%s -> %s", element, operation, pulse_key)
+
+                for label in sorted(labels):
+                    mapped_weight = (weight_mapping or {}).get(label)
+                    resolved_weight = mapped_weight if mapped_weight is not None else label
+                    checksum = _weight_checksum_from_qm_config(qm_cfg, resolved_weight)
+                    _logger.info(
+                        "Butterfly compile weight label '%s': mapped_weight=%s in_mapping=%s checksum=%s",
+                        label,
+                        mapped_weight,
+                        bool(label in (weight_mapping or {})),
+                        json.dumps(checksum, default=str, sort_keys=True),
+                    )
+            except Exception as exc:
+                _logger.warning("Butterfly debug compile preflight failed: %s", exc)
 
         _logger.info(
             "Butterfly measurement: n_samples=%d, policy=%r, source=%s",
@@ -1766,8 +1975,46 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             prog, n_total=n_samples,
             processors=[pp.bare_proc],
         )
+        if debug:
+            self._save_debug_runtime_snapshot(result.output, tag="butterfly_debug")
         self.save_output(result.output, "butterflyMeasurement")
         return result
+
+    def _save_debug_runtime_snapshot(self, output: Mapping[str, Any], *, tag: str) -> None:
+        try:
+            exp_path = Path(getattr(self._ctx, "experiment_path", "."))
+            runtime_dir = exp_path / "artifacts" / "debug_snapshots"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            npz_path = runtime_dir / f"{tag}_{ts}.npz"
+            meta_path = runtime_dir / f"{tag}_{ts}.meta.json"
+
+            payload: dict[str, Any] = {}
+            for key in ("states", "I0", "Q0", "I1", "Q1", "I2", "Q2", "acceptance_rate", "average_tries"):
+                value = output.get(key, None) if hasattr(output, "get") else None
+                if value is not None:
+                    payload[key] = np.asarray(value)
+
+            if payload:
+                np.savez(npz_path, **payload)
+                ro_disc = (getattr(measureMacro, "_ro_disc_params", {}) or {})
+                meta = {
+                    "timestamp": ts,
+                    "tag": tag,
+                    "keys": sorted(payload.keys()),
+                    "runtime_discriminator": {
+                        "threshold": ro_disc.get("threshold"),
+                        "angle": ro_disc.get("angle"),
+                        "fidelity_definition": ro_disc.get("fidelity_definition"),
+                        "active_outputs": measureMacro.get_outputs(),
+                    },
+                }
+                meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+                _logger.info("Butterfly debug runtime snapshot saved: %s", npz_path)
+            else:
+                _logger.warning("Butterfly debug runtime snapshot skipped: no matching output keys")
+        except Exception as exc:
+            _logger.warning("Butterfly debug runtime snapshot failed: %s", exc)
 
     def _current_readout_state_signature(self) -> dict[str, Any] | None:
         try:
