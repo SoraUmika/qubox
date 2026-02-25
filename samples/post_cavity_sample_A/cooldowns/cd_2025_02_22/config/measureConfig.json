@@ -28,12 +28,12 @@
     "active_op": "readout",
     "weights": [
       [
-        "rot_cos",
-        "rot_sin"
+        "cos",
+        "sin"
       ],
       [
-        "rot_m_sin",
-        "rot_cos"
+        "minus_sin",
+        "cos"
       ]
     ],
     "demod_fn": "dual_demod.full",

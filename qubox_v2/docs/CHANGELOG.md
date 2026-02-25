@@ -20,10 +20,69 @@ Each entry must include:
 1. Entries must be **appended only** — previous records must never be modified.
 2. The AI agent must self-assess the classification level for each change.
 3. Each entry should be self-contained and understandable without external context.
+4. **No automatic commits.** The AI agent must NEVER run `git commit` or
+   `git push` without explicit user approval. All changes must be staged and
+   presented for manual review before committing.
 
 ---
 
 ## Entries
+
+### 2026-02-24 — Notebook Usability Refactor + Rotation Calibration Port
+
+**Classification: Moderate**
+
+Comprehensive refactoring of `post_cavity_experiment_context.ipynb` for
+improved usability, mixer calibration workflow, bug fixes, and porting
+of the legacy arbitrary qubit rotation calibration pipeline.
+
+**Summary:**
+
+1. **A1 — Setup flow merge (Sections 1+2+2.1 -> Section 1)**
+   - Merged 11 cells (registry, sample, cooldown, session, open, preflight,
+     readout override) into a 4-cell idempotent initialization flow.
+   - Combined `SessionManager` creation and `session.open()` into a single cell.
+   - Preflight validation, config snapshot, and schema validation in Section 1.1.
+   - Imports consolidated into a single cell with all dependencies.
+
+2. **A2 — Dedicated readout override cell (Section 1.2)**
+   - Extracted readout override into its own cell with explicit I/O documentation.
+   - Clear inputs: element, operation, weights, demod, threshold, weight length.
+   - Clear outputs: updated measureMacro state, persisted measureConfig.json.
+
+3. **B — Mixer calibration overhaul (Section 2)**
+   - Added Section 2.0: Auto Calibration (Octave built-in) with
+     `hw.calibrate_element(method="auto", auto_sa_validate=True)`.
+   - Added Section 2.1: Manual Calibration UX Controls (scan bounds, SA settings).
+   - Added Section 2.2: Manual IQ Calibration Run with before/after metrics.
+   - Section renumbered from 3 to 2.
+
+4. **C — Bug fixes**
+   - Fixed `ro_pipeline_summary.get("discrimination")` using nonexistent keys;
+     replaced with `ro_pipeline_analysis.metrics` access.
+   - Fixed `eval(name)` security issue in session summary; replaced with
+     `globals().get(name)`.
+
+5. **D — Arbitrary qubit rotation calibration port (Sections 5.1d-5.1f)**
+   - Section 5.1d: Verify Run — applies knob corrections and re-runs
+     pulse-train tomography on a 3-prep subset at half n_avg.
+   - Section 5.1e: Verify Analysis — compares before/after angular deviations.
+   - Section 5.1f: Apply Corrections to All Standard Rotations — broadcasts
+     d_lambda/d_alpha/d_omega knob maps to all pi/2 and pi gates via
+     `register_rotations_from_ref_iq`.
+
+6. **Section renumbering**
+   - All sections renumbered: 3->2, 4->3, ..., 14->13 (net reduction of 1).
+   - TOC and summary table updated to match.
+
+7. **E — No auto-commit policy**
+   - Added Rule #4 to CHANGELOG.md policy section.
+
+**Files affected:**
+- `notebooks/post_cavity_experiment_context.ipynb` (116 cells, restructured)
+- `qubox_v2/docs/CHANGELOG.md` (policy update + this entry)
+
+---
 
 ### 2026-02-24 — Namespace Rename: device -> sample
 
