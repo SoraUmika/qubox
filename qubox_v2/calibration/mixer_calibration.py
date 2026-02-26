@@ -54,7 +54,7 @@ class MixerCalibrationConfig:
     **SA measurement** — spectrum analyser sweep configuration.
     **DC offset grid** — coarse + fine 2-D grid over (I0, Q0) to minimise LO leakage.
     **IQ correction grid** — coarse + fine 2-D grid over (gain, phase) to minimise image.
-    **Minimiser** — Nelder-Mead derivative-free optimiser settings.
+    **Minimiser** — bounded derivative-free optimiser settings.
     **CW tone** — continuous-wave probe signal parameters.
     **Settle times** — hardware settle delays after parameter changes.
     """
@@ -88,6 +88,16 @@ class MixerCalibrationConfig:
     max_total_evals: int = 40
     dc_maxiter: int = 12
     iq_maxiter: int = 28
+    minimizer_block_passes: int = 2
+    minimizer_joint_refine: bool = True
+    minimizer_joint_maxiter: int = 20
+    minimizer_invalid_penalty: float = 1e6
+
+    # Hard safety bounds (manual minimizer)
+    dc_i0_bounds: tuple[float, float] = (-0.2, 0.2)
+    dc_q0_bounds: tuple[float, float] = (-0.2, 0.2)
+    iq_gain_bounds: tuple[float, float] = (-0.2, 0.2)
+    iq_phase_bounds: tuple[float, float] = (-0.35, 0.35)
 
     # CW tone
     cw_pulse: str = "const"
@@ -271,6 +281,30 @@ class ManualMixerCalibrator:
         )
 
     @staticmethod
+    def _objective_cost_from_tones(
+        tones: dict[str, float],
+        *,
+        cfg: MixerCalibrationConfig,
+        p_target_ref_dbm: float | None = None,
+    ) -> float:
+        """Compute objective from measured tones with finite-value checks."""
+        p_target = float(tones["P_des_dBm"])
+        p_carrier = float(tones["P_LO_dBm"])
+        p_image = float(tones["P_img_dBm"])
+        if not (np.isfinite(p_target) and np.isfinite(p_carrier) and np.isfinite(p_image)):
+            raise ValueError("Invalid SA tones (NaN/inf).")
+        cost = ManualMixerCalibrator._objective_cost(
+            p_target_dbm=p_target,
+            p_carrier_dbm=p_carrier,
+            p_image_dbm=p_image,
+            cfg=cfg,
+            p_target_ref_dbm=p_target_ref_dbm,
+        )
+        if not np.isfinite(cost):
+            raise ValueError("Objective cost evaluated to NaN/inf.")
+        return float(cost)
+
+    @staticmethod
     def _is_result_worse(candidate: dict[str, float], baseline: dict[str, float], *, tolerance_db: float = 0.0) -> bool:
         """Return True if manual candidate degrades LO leak or IRR vs baseline."""
         tol = abs(float(tolerance_db))
@@ -380,6 +414,97 @@ class ManualMixerCalibrator:
         state["ax"].autoscale_view()
         state["clear_output"](wait=True)
         state["display"](state["fig"])
+
+    @staticmethod
+    def _init_live_minimizer_metrics(*, title: str):
+        try:
+            import matplotlib.pyplot as plt
+            from IPython.display import clear_output, display
+        except Exception:
+            return None
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        line_lo, = ax.plot([], [], "b.-", label="LO leak (dBc)")
+        line_irr, = ax.plot([], [], "g.-", label="IRR (dBc)")
+        line_cost, = ax.plot([], [], "r.-", label="cost")
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Metric value")
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best")
+        display_handle = None
+        try:
+            display_handle = display(fig, display_id=True)
+        except Exception:
+            display(fig)
+        return {
+            "fig": fig,
+            "ax": ax,
+            "line_lo": line_lo,
+            "line_irr": line_irr,
+            "line_cost": line_cost,
+            "lo_leak_dbc": [],
+            "irr_dbc": [],
+            "cost": [],
+            "display_handle": display_handle,
+            "display": display,
+            "clear_output": clear_output,
+        }
+
+    @staticmethod
+    def _render_live_minimizer_metrics(state: dict | None):
+        if not state:
+            return
+        n = len(state.get("cost", []))
+        if n <= 0:
+            return
+        x = np.arange(1, n + 1)
+        state["line_lo"].set_data(x, np.asarray(state["lo_leak_dbc"], dtype=float))
+        state["line_irr"].set_data(x, np.asarray(state["irr_dbc"], dtype=float))
+        state["line_cost"].set_data(x, np.asarray(state["cost"], dtype=float))
+        state["ax"].relim()
+        state["ax"].autoscale_view()
+        handle = state.get("display_handle")
+        if handle is not None and hasattr(handle, "update"):
+            try:
+                handle.update(state["fig"])
+                return
+            except Exception:
+                pass
+        state["clear_output"](wait=True)
+        state["display"](state["fig"])
+
+    @staticmethod
+    def _publish_live_minimizer_metrics_snapshot(state: dict | None):
+        if not state:
+            return
+        try:
+            import matplotlib.pyplot as plt
+            fig = state.get("fig")
+            if fig is None:
+                return
+            plt.figure(fig.number)
+            plt.show()
+        except Exception:
+            return
+
+    @staticmethod
+    def _update_live_minimizer_metrics(
+        state: dict | None,
+        *,
+        lo_leak_dbc: float,
+        irr_dbc: float,
+        cost: float,
+        every: int = 1,
+    ):
+        if not state:
+            return
+        state["lo_leak_dbc"].append(float(lo_leak_dbc))
+        state["irr_dbc"].append(float(irr_dbc))
+        state["cost"].append(float(cost))
+        n = len(state["cost"])
+        if every > 1 and (n % every) != 0:
+            return
+        ManualMixerCalibrator._render_live_minimizer_metrics(state)
 
     @staticmethod
     def _plot_parameter_history(
@@ -738,7 +863,7 @@ class ManualMixerCalibrator:
         save_to_db: bool = True,
         **config_overrides,
     ) -> dict:
-        """Coordinate-descent optimiser: DC offsets then IQ correction.
+        """Bounded block-coordinate optimiser with unified three-tone objective.
 
         Any keyword argument matching a ``MixerCalibrationConfig`` field
         overrides the corresponding value for this run only.
@@ -748,13 +873,20 @@ class ManualMixerCalibrator:
         """
         from scipy.optimize import minimize
 
-        _logger.info(
-            "minimizer: element=%s  LO=%.4f GHz  IF=%.2f MHz  sideband=%s  objective=%s  save_to_db=%s",
-            element, f_lo / 1e9, f_if / 1e6, self._cfg.sideband, self._cfg.objective_mode, save_to_db,
-        )
         cfg = self._cfg
         if config_overrides:
             cfg = dataclasses.replace(cfg, **config_overrides)
+
+        _logger.info(
+            "minimizer: element=%s  LO=%.4f GHz  IF=%.2f MHz  sideband=%s  objective=%s  save_to_db=%s  write_mode=%s",
+            element,
+            f_lo / 1e9,
+            f_if / 1e6,
+            cfg.sideband,
+            cfg.objective_mode,
+            save_to_db,
+            cfg.write_db_mode if save_to_db else "final_only",
+        )
 
         self._db_cache = self._read_db()
         write_per_point = (cfg.write_db_mode == "per_point") and save_to_db
@@ -770,6 +902,28 @@ class ManualMixerCalibrator:
         gain_init = float(if_cal.get("gain", 0.0))
         phase_init = float(if_cal.get("phase", 0.0))
 
+        i0_lo, i0_hi = map(float, cfg.dc_i0_bounds)
+        q0_lo, q0_hi = map(float, cfg.dc_q0_bounds)
+        g_lo, g_hi = map(float, cfg.iq_gain_bounds)
+        p_lo, p_hi = map(float, cfg.iq_phase_bounds)
+        if not (i0_lo < i0_hi and q0_lo < q0_hi and g_lo < g_hi and p_lo < p_hi):
+            raise ValueError("Invalid manual minimizer bounds: each lower bound must be < upper bound.")
+
+        penalty_cost = abs(float(cfg.minimizer_invalid_penalty))
+        if not np.isfinite(penalty_cost) or penalty_cost <= 0:
+            penalty_cost = 1e6
+
+        def _clip_to_bounds(x: np.ndarray) -> np.ndarray:
+            return np.asarray(
+                [
+                    float(np.clip(float(x[0]), i0_lo, i0_hi)),
+                    float(np.clip(float(x[1]), q0_lo, q0_hi)),
+                    float(np.clip(float(x[2]), g_lo, g_hi)),
+                    float(np.clip(float(x[3]), p_lo, p_hi)),
+                ],
+                dtype=float,
+            )
+
         with self._maybe_quiet_qm_logs(cfg.quiet_qm_logs):
             baseline = self._measure_final(
                 element,
@@ -782,6 +936,13 @@ class ManualMixerCalibrator:
                 write_db=save_to_db,
             )
 
+            if not all(np.isfinite(float(baseline[k])) for k in ("P_des_dBm", "P_LO_dBm", "P_img_dBm")):
+                raise RuntimeError("Invalid SA baseline tones (NaN/inf).")
+            if abs(float(baseline["f_target"]) - float(baseline["f_image"])) <= cfg.sa_span_hz:
+                raise RuntimeError(
+                    "Target/image frequencies overlap within SA span. Check IF sign/sideband mapping."
+                )
+
             dc_budget = max(6, int(cfg.dc_maxiter))
             iq_budget = max(6, int(cfg.iq_maxiter))
             total_budget = max(12, int(cfg.max_total_evals))
@@ -789,157 +950,261 @@ class ManualMixerCalibrator:
                 dc_budget = max(6, min(dc_budget, total_budget // 2))
                 iq_budget = max(6, total_budget - dc_budget)
 
-            _logger.info(
-                "Stage budgets: total<=%d evals (DC<=%d, IQ<=%d)",
-                total_budget,
-                dc_budget,
-                iq_budget,
-            )
-
-            _logger.info("Stage A: DC offset minimisation (maxiter=%d)", dc_budget)
-            dc_job = self._start_cw(element, gain=cfg.cw_gain_dc)
-
-            dc_hist = self._init_live_history(
-                title=f"{element}: DC minimizer history",
-                ylabel="P_LO (dBm)",
-            ) if cfg.live_plot else None
-            eval_count_dc = [0]
-            dc_param_history = {
-                "i0": [],
-                "q0": [],
-                "p_lo_dbm": [],
-            }
-
-            def _cost_dc(x):
-                self._set_dc_offsets(element, float(x[0]), float(x[1]))
-                time.sleep(cfg.dc_settle)
-                p = self._sa.measure_peak_power(f_lo)
-                eval_count_dc[0] += 1
-                dc_param_history["i0"].append(float(x[0]))
-                dc_param_history["q0"].append(float(x[1]))
-                dc_param_history["p_lo_dbm"].append(float(p))
-                self._update_live_history(dc_hist, p, every=max(1, int(cfg.live_plot_every)))
-                return p
-
-            res_dc = minimize(
-                _cost_dc,
-                x0=[i0_init, q0_init],
-                method="Nelder-Mead",
-                options={
-                    "maxiter": dc_budget,
-                    "maxfev": dc_budget,
-                    "xatol": cfg.minimizer_xtol,
-                    "fatol": 0.5,
-                    "adaptive": True,
-                },
-            )
-            best_i0, best_q0 = float(res_dc.x[0]), float(res_dc.x[1])
-            self._set_dc_offsets(element, best_i0, best_q0)
-            self._stop_cw(dc_job)
-
-            if cfg.live_plot:
-                self._plot_parameter_history(
-                    title=f"{element}: DC parameter history",
-                    x_label="Iteration",
-                    series=[
-                        ("i0", dc_param_history["i0"], "I0 offset"),
-                        ("q0", dc_param_history["q0"], "Q0 offset"),
-                        ("P_LO", dc_param_history["p_lo_dbm"], "P_LO (dBm)"),
-                    ],
-                )
-
-            _logger.info("Stage B: IQ correction minimisation (maxiter=%d)", iq_budget)
-            eval_count_iq = [0]
-            iq_hist = self._init_live_history(
-                title=f"{element}: IQ minimizer image-power history",
-                ylabel="P_image (dBm)",
-            ) if cfg.live_plot else None
-            iq_param_history = {
-                "gain": [],
-                "phase": [],
-                "p_image_dbm": [],
-            }
-
-            iq_job = self._start_cw(element)
-            self._set_dc_offsets(element, best_i0, best_q0)
-
-            baseline_tones = self._sa.measure_tones(f_lo, f_if)
-            if not all(
-                np.isfinite(float(baseline_tones[k]))
-                for k in ("P_des_dBm", "P_LO_dBm", "P_img_dBm")
-            ):
-                self._stop_cw(iq_job)
-                raise RuntimeError("Invalid SA baseline tones (NaN/inf).")
-            if abs(float(baseline_tones["f_target"]) - float(baseline_tones["f_image"])) <= cfg.sa_span_hz:
-                self._stop_cw(iq_job)
-                raise RuntimeError(
-                    "Target/image frequencies overlap within SA span. Check IF sign/sideband mapping."
-                )
-            if float(baseline_tones["P_LO_dBm"]) < -120.0:
-                self._stop_cw(iq_job)
-                raise RuntimeError("LO tone not detectable at baseline; aborting manual optimization.")
-            if abs(float(baseline_tones["P_des_dBm"]) - float(baseline_tones["P_img_dBm"])) < 0.5:
-                self._stop_cw(iq_job)
-                raise RuntimeError(
-                    "Target and image are too close in power at baseline; verify sideband/IF mapping."
-                )
-
+            passes = max(1, min(2, int(cfg.minimizer_block_passes)))
+            joint_maxiter = max(1, int(cfg.minimizer_joint_maxiter))
+            xtol = max(float(cfg.minimizer_xtol), 1e-8)
             target_ref_dbm = (
                 float(cfg.target_power_ref_dbm)
                 if cfg.target_power_ref_dbm is not None
-                else float(baseline_tones["P_des_dBm"])
+                else float(baseline["P_des_dBm"])
             )
 
-            def _cost_iq(x):
-                self._apply_iq_correction(
-                    element,
-                    f_lo,
-                    f_if,
-                    float(x[0]),
-                    float(x[1]),
-                    best_i0,
-                    best_q0,
-                    write_db=write_per_point,
-                    running_job=iq_job,
-                )
-                time.sleep(cfg.iq_settle)
-                tones = self._sa.measure_tones(f_lo, f_if)
-                p_image = float(tones["P_img_dBm"])
-                eval_count_iq[0] += 1
-                iq_param_history["gain"].append(float(x[0]))
-                iq_param_history["phase"].append(float(x[1]))
-                iq_param_history["p_image_dbm"].append(p_image)
-                self._update_live_history(iq_hist, p_image, every=max(1, int(cfg.live_plot_every)))
-                return p_image
+            _logger.info(
+                "Stage budgets: total<=%d evals (DC<=%d/pass, IQ<=%d/pass, passes=%d, joint_refine=%s)",
+                total_budget,
+                dc_budget,
+                iq_budget,
+                passes,
+                bool(cfg.minimizer_joint_refine),
+            )
 
+            live_metrics = self._init_live_minimizer_metrics(
+                title=f"{element}: minimizer live metrics (LO leak, IRR, cost)",
+            ) if cfg.live_plot else None
+
+            eval_count_dc = [0]
+            eval_count_iq = [0]
+            eval_count_joint = [0]
+            eval_count_total = [0]
+            opt_status: list[dict[str, Any]] = []
+
+            dc_param_history = {
+                "i0": [],
+                "q0": [],
+                "cost": [],
+                "p_des_dbm": [],
+                "p_lo_dbm": [],
+                "p_image_dbm": [],
+            }
+            iq_param_history = {
+                "gain": [],
+                "phase": [],
+                "cost": [],
+                "p_des_dbm": [],
+                "p_lo_dbm": [],
+                "p_image_dbm": [],
+            }
+
+            x_current = _clip_to_bounds(np.asarray([i0_init, q0_init, gain_init, phase_init], dtype=float))
+            best = {
+                "x": np.asarray(x_current, dtype=float),
+                "cost": float("inf"),
+                "tones": None,
+                "stage": "init",
+            }
+
+            def _record(stage: str, x: np.ndarray, cost: float, tones: dict[str, float]) -> None:
+                if stage.startswith("dc"):
+                    dc_param_history["i0"].append(float(x[0]))
+                    dc_param_history["q0"].append(float(x[1]))
+                    dc_param_history["cost"].append(float(cost))
+                    dc_param_history["p_des_dbm"].append(float(tones.get("P_des_dBm", float("nan"))))
+                    dc_param_history["p_lo_dbm"].append(float(tones.get("P_LO_dBm", float("nan"))))
+                    dc_param_history["p_image_dbm"].append(float(tones.get("P_img_dBm", float("nan"))))
+                elif stage.startswith("iq"):
+                    iq_param_history["gain"].append(float(x[2]))
+                    iq_param_history["phase"].append(float(x[3]))
+                    iq_param_history["cost"].append(float(cost))
+                    iq_param_history["p_des_dbm"].append(float(tones.get("P_des_dBm", float("nan"))))
+                    iq_param_history["p_lo_dbm"].append(float(tones.get("P_LO_dBm", float("nan"))))
+                    iq_param_history["p_image_dbm"].append(float(tones.get("P_img_dBm", float("nan"))))
+
+            job = self._start_cw(element)
             try:
-                res_iq = minimize(
-                    _cost_iq,
-                    x0=[gain_init, phase_init],
-                    method="Nelder-Mead",
-                    options={
-                        "maxiter": iq_budget,
-                        "maxfev": iq_budget,
-                        "xatol": cfg.minimizer_xtol,
-                        "fatol": 0.5,
-                        "adaptive": True,
-                    },
-                )
+                def _cost_full(x_in: np.ndarray, stage: str) -> float:
+                    x = _clip_to_bounds(np.asarray(x_in, dtype=float))
+                    if eval_count_total[0] >= total_budget:
+                        return penalty_cost
+
+                    if stage.startswith("dc"):
+                        eval_count_dc[0] += 1
+                    elif stage.startswith("iq"):
+                        eval_count_iq[0] += 1
+                    elif stage.startswith("joint"):
+                        eval_count_joint[0] += 1
+
+                    eval_count_total[0] += 1
+                    settle = cfg.dc_settle if stage.startswith("dc") else cfg.iq_settle
+
+                    try:
+                        self._apply_iq_correction(
+                            element,
+                            f_lo,
+                            f_if,
+                            float(x[2]),
+                            float(x[3]),
+                            float(x[0]),
+                            float(x[1]),
+                            write_db=write_per_point,
+                            running_job=job,
+                        )
+                        time.sleep(settle)
+                        tones = self._sa.measure_tones(f_lo, f_if)
+                        cost = self._objective_cost_from_tones(
+                            tones,
+                            cfg=cfg,
+                            p_target_ref_dbm=target_ref_dbm,
+                        )
+                    except Exception as exc:
+                        _logger.debug("Penalizing invalid trial (%s): x=%s err=%s", stage, x.tolist(), exc)
+                        cost = penalty_cost
+                        tones = {
+                            "P_des_dBm": float("nan"),
+                            "P_LO_dBm": float("nan"),
+                            "P_img_dBm": float("nan"),
+                        }
+
+                    _record(stage, x, float(cost), tones)
+                    lo_leak = float("nan")
+                    irr = float("nan")
+                    if np.isfinite(float(tones.get("P_des_dBm", float("nan")))) and np.isfinite(float(tones.get("P_LO_dBm", float("nan")))):
+                        lo_leak = float(tones["P_des_dBm"]) - float(tones["P_LO_dBm"])
+                    if np.isfinite(float(tones.get("P_des_dBm", float("nan")))) and np.isfinite(float(tones.get("P_img_dBm", float("nan")))):
+                        irr = float(tones["P_des_dBm"]) - float(tones["P_img_dBm"])
+                    self._update_live_minimizer_metrics(
+                        live_metrics,
+                        lo_leak_dbc=lo_leak,
+                        irr_dbc=irr,
+                        cost=float(cost),
+                        every=max(1, int(cfg.live_plot_every)),
+                    )
+
+                    if np.isfinite(cost) and float(cost) < float(best["cost"]):
+                        best["x"] = np.asarray(x, dtype=float)
+                        best["cost"] = float(cost)
+                        best["tones"] = dict(tones)
+                        best["stage"] = stage
+                    return float(cost)
+
+                _cost_full(x_current, "init")
+
+                def _run_block(
+                    *,
+                    stage_name: str,
+                    idx_a: int,
+                    idx_b: int,
+                    bounds_2d: list[tuple[float, float]],
+                    maxiter: int,
+                ) -> None:
+                    nonlocal x_current
+                    if eval_count_total[0] >= total_budget:
+                        return
+                    remaining = max(1, total_budget - eval_count_total[0])
+
+                    def _cost_block(z: np.ndarray) -> float:
+                        x_trial = np.asarray(x_current, dtype=float)
+                        x_trial[idx_a] = float(z[0])
+                        x_trial[idx_b] = float(z[1])
+                        return _cost_full(x_trial, stage_name)
+
+                    x0 = np.asarray([x_current[idx_a], x_current[idx_b]], dtype=float)
+                    x0[0] = float(np.clip(float(x0[0]), bounds_2d[0][0], bounds_2d[0][1]))
+                    x0[1] = float(np.clip(float(x0[1]), bounds_2d[1][0], bounds_2d[1][1]))
+
+                    res = minimize(
+                        _cost_block,
+                        x0=x0,
+                        method="Powell",
+                        bounds=bounds_2d,
+                        options={
+                            "maxiter": max(1, int(maxiter)),
+                            "maxfev": int(remaining),
+                            "xtol": xtol,
+                            "ftol": 1e-3,
+                        },
+                    )
+
+                    z_best = np.asarray(res.x, dtype=float)
+                    x_trial = np.asarray(x_current, dtype=float)
+                    x_trial[idx_a] = float(np.clip(float(z_best[0]), bounds_2d[0][0], bounds_2d[0][1]))
+                    x_trial[idx_b] = float(np.clip(float(z_best[1]), bounds_2d[1][0], bounds_2d[1][1]))
+                    candidate_cost = _cost_full(x_trial, f"{stage_name}_final")
+                    current_cost = _cost_full(x_current, f"{stage_name}_current")
+                    if np.isfinite(candidate_cost) and candidate_cost <= current_cost:
+                        x_current = _clip_to_bounds(x_trial)
+
+                    opt_status.append(
+                        {
+                            "stage": stage_name,
+                            "success": bool(getattr(res, "success", False)),
+                            "status": int(getattr(res, "status", -1)),
+                            "message": str(getattr(res, "message", "")),
+                            "nfev": int(getattr(res, "nfev", 0)),
+                            "nit": int(getattr(res, "nit", 0)) if hasattr(res, "nit") else 0,
+                            "x": [float(v) for v in _clip_to_bounds(np.asarray(x_trial, dtype=float))],
+                            "fun": float(candidate_cost),
+                        }
+                    )
+
+                for pass_idx in range(passes):
+                    _logger.info("Block pass %d/%d: DC block", pass_idx + 1, passes)
+                    _run_block(
+                        stage_name=f"dc_pass{pass_idx + 1}",
+                        idx_a=0,
+                        idx_b=1,
+                        bounds_2d=[(i0_lo, i0_hi), (q0_lo, q0_hi)],
+                        maxiter=dc_budget,
+                    )
+                    _logger.info("Block pass %d/%d: IQ block", pass_idx + 1, passes)
+                    _run_block(
+                        stage_name=f"iq_pass{pass_idx + 1}",
+                        idx_a=2,
+                        idx_b=3,
+                        bounds_2d=[(g_lo, g_hi), (p_lo, p_hi)],
+                        maxiter=iq_budget,
+                    )
+
+                if bool(cfg.minimizer_joint_refine) and eval_count_total[0] < total_budget:
+                    remaining = max(1, total_budget - eval_count_total[0])
+                    _logger.info("Final local joint refinement over (i0, q0, gain, phase)")
+                    res_joint = minimize(
+                        lambda x: _cost_full(np.asarray(x, dtype=float), "joint_refine"),
+                        x0=np.asarray(x_current, dtype=float),
+                        method="Powell",
+                        bounds=[(i0_lo, i0_hi), (q0_lo, q0_hi), (g_lo, g_hi), (p_lo, p_hi)],
+                        options={
+                            "maxiter": int(joint_maxiter),
+                            "maxfev": int(remaining),
+                            "xtol": xtol,
+                            "ftol": 1e-3,
+                        },
+                    )
+                    x_joint = _clip_to_bounds(np.asarray(res_joint.x, dtype=float))
+                    c_joint = _cost_full(x_joint, "joint_refine_final")
+                    c_curr = _cost_full(x_current, "joint_refine_current")
+                    if np.isfinite(c_joint) and c_joint <= c_curr:
+                        x_current = np.asarray(x_joint, dtype=float)
+                    opt_status.append(
+                        {
+                            "stage": "joint_refine",
+                            "success": bool(getattr(res_joint, "success", False)),
+                            "status": int(getattr(res_joint, "status", -1)),
+                            "message": str(getattr(res_joint, "message", "")),
+                            "nfev": int(getattr(res_joint, "nfev", 0)),
+                            "nit": int(getattr(res_joint, "nit", 0)) if hasattr(res_joint, "nit") else 0,
+                            "x": [float(v) for v in x_joint],
+                            "fun": float(c_joint),
+                        }
+                    )
             finally:
-                self._stop_cw(iq_job)
+                self._stop_cw(job)
 
             if cfg.live_plot:
-                self._plot_parameter_history(
-                    title=f"{element}: IQ parameter history",
-                    x_label="Iteration",
-                    series=[
-                        ("gain", iq_param_history["gain"], "Gain imbalance"),
-                        ("phase", iq_param_history["phase"], "Phase (rad)"),
-                        ("P_image", iq_param_history["p_image_dbm"], "P_image (dBm)"),
-                    ],
-                )
+                self._render_live_minimizer_metrics(live_metrics)
+                self._publish_live_minimizer_metrics_snapshot(live_metrics)
 
-            best_g, best_p = float(res_iq.x[0]), float(res_iq.x[1])
+            best_x = _clip_to_bounds(np.asarray(best["x"], dtype=float))
+            best_i0, best_q0, best_g, best_p = [float(v) for v in best_x]
             final = self._measure_final(
                 element,
                 f_lo,
@@ -987,15 +1252,25 @@ class ManualMixerCalibrator:
             "phase": best_p,
             "eval_count_dc": int(eval_count_dc[0]),
             "eval_count_iq": int(eval_count_iq[0]),
-            "eval_count_total": int(eval_count_dc[0] + eval_count_iq[0]),
+            "eval_count_joint": int(eval_count_joint[0]),
+            "eval_count_total": int(eval_count_total[0]),
+            "optimizer_status": opt_status,
+            "best_stage": str(best.get("stage", "")),
+            "best_objective_cost": float(best.get("cost", float("inf"))),
             "dc_history": {
                 "i0": [float(v) for v in dc_param_history["i0"]],
                 "q0": [float(v) for v in dc_param_history["q0"]],
+                "cost": [float(v) for v in dc_param_history["cost"]],
+                "p_des_dbm": [float(v) for v in dc_param_history["p_des_dbm"]],
                 "p_lo_dbm": [float(v) for v in dc_param_history["p_lo_dbm"]],
+                "p_image_dbm": [float(v) for v in dc_param_history["p_image_dbm"]],
             },
             "iq_history": {
                 "gain": [float(v) for v in iq_param_history["gain"]],
                 "phase": [float(v) for v in iq_param_history["phase"]],
+                "cost": [float(v) for v in iq_param_history["cost"]],
+                "p_des_dbm": [float(v) for v in iq_param_history["p_des_dbm"]],
+                "p_lo_dbm": [float(v) for v in iq_param_history["p_lo_dbm"]],
                 "p_image_dbm": [float(v) for v in iq_param_history["p_image_dbm"]],
             },
             "target_power_ref_dbm": float(target_ref_dbm),
@@ -1096,6 +1371,7 @@ class ManualMixerCalibrator:
             p_vals,
             title=f"IQ correction scan ({element}, sideband={cfg.sideband})",
         ) if cfg.live_plot else None
+        target_ref_dbm = float(cfg.target_power_ref_dbm) if cfg.target_power_ref_dbm is not None else None
         job = self._start_cw(element)
         self._set_dc_offsets(element, i0, q0)
         try:
@@ -1114,11 +1390,12 @@ class ManualMixerCalibrator:
                     )
                     time.sleep(cfg.iq_settle)
                     tones = self._sa.measure_tones(f_lo, f_if)
-                    P_img = self._objective_cost(
-                        p_target_dbm=float(tones["P_des_dBm"]),
-                        p_carrier_dbm=float(tones["P_LO_dBm"]),
-                        p_image_dbm=float(tones["P_img_dBm"]),
+                    if target_ref_dbm is None:
+                        target_ref_dbm = float(tones["P_des_dBm"])
+                    P_img = self._objective_cost_from_tones(
+                        tones,
                         cfg=cfg,
+                        p_target_ref_dbm=target_ref_dbm,
                     )
                     if P_img < best_P:
                         best_P, best_g, best_p = P_img, float(g), float(p)
