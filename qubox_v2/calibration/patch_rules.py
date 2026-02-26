@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .contracts import CalibrationResult, Patch
+from .transitions import resolve_pulse_name, primitive_family
 
 
 def _clone_payload(payload: Any) -> Any:
@@ -21,8 +22,7 @@ class PiAmpRule:
     """Build pi-amplitude patch ops and propagate primitive family updates."""
 
     session: Any
-    ref_pulse_name: str = "ref_r180"
-    primitive_family: tuple[str, ...] = ("x180", "y180", "x90", "xn90", "y90", "yn90")
+    ref_pulse_name: str = "ge_ref_r180"
 
     def __call__(self, result: CalibrationResult) -> Patch | None:
         if result.kind != "pi_amp":
@@ -35,7 +35,9 @@ class PiAmpRule:
             return None
 
         metadata = (result.evidence or {}).get("analysis_metadata", {}) or {}
-        target_op = str(metadata.get("target_op", self.ref_pulse_name))
+        target_op = resolve_pulse_name(
+            str(metadata.get("target_op", self.ref_pulse_name))
+        )
 
         ref_cal = self.session.calibration.get_pulse_calibration(target_op)
         ref_amp_old = float(getattr(ref_cal, "amplitude", 1.0) or 1.0)
@@ -157,10 +159,12 @@ class DragAlphaRule:
 
         alpha = params["optimal_alpha"]
         metadata = (result.evidence or {}).get("analysis_metadata", {}) or {}
-        target_op = str(metadata.get("target_op", "ref_r180"))
+        target_op = resolve_pulse_name(
+            str(metadata.get("target_op", "ge_ref_r180"))
+        )
 
         patch = Patch(reason="DragAlphaRule", provenance={"kind": result.kind})
-        # Only patch the target reference pulse — derived primitives (x180, y180, …)
+        # Only patch the target reference pulse — derived primitives (ge_x180, …)
         # inherit drag_coeff via the PulseFactory rotation_derived mechanism
         # and must NOT be stored in calibration.json.
         patch.add("SetCalibration", path=f"pulse_calibrations.{target_op}.drag_coeff", value=alpha)
@@ -253,7 +257,7 @@ class PulseTrainRule:
     """Build pulse-train calibration patch ops (corrected amplitude + phase)."""
 
     session: Any
-    ref_pulse_name: str = "ref_r180"
+    ref_pulse_name: str = "ge_ref_r180"
 
     def __call__(self, result: CalibrationResult) -> Patch | None:
         if result.kind != "pulse_train":
@@ -265,7 +269,9 @@ class PulseTrainRule:
             return None
 
         metadata = (result.evidence or {}).get("analysis_metadata", {}) or {}
-        target_op = str(metadata.get("target_op", self.ref_pulse_name))
+        target_op = resolve_pulse_name(
+            str(metadata.get("target_op", self.ref_pulse_name))
+        )
 
         patch = Patch(reason="PulseTrainRule", provenance={"kind": result.kind})
         patch.add("SetCalibration", path=f"pulse_calibrations.{target_op}.amplitude", value=corrected_amp)
@@ -289,6 +295,7 @@ def default_patch_rules(session) -> dict[str, list[Any]]:
     t2r_rule = T2RamseyRule(element=qb_el)
     t2e_rule = T2EchoRule(element=qb_el)
     qb_freq_rule = FrequencyRule(element=qb_el, kind="qubit_freq", metric_key="f0")
+    ef_freq_rule = FrequencyRule(element=qb_el, kind="ef_freq", metric_key="f0", field="ef_freq")
     ro_freq_rule = FrequencyRule(element=ro_el, kind="resonator_freq", metric_key="f0", field="resonator_freq")
     st_freq_rule = FrequencyRule(element=st_el, kind="storage_freq", metric_key="f_storage")
     drag_rule = DragAlphaRule()
@@ -304,6 +311,7 @@ def default_patch_rules(session) -> dict[str, list[Any]]:
         "t2_echo": [t2e_rule, weight_rule],
         "resonator_freq": [ro_freq_rule, weight_rule],
         "qubit_freq": [qb_freq_rule, weight_rule],
+        "ef_freq": [ef_freq_rule, weight_rule],
         "storage_freq": [st_freq_rule, weight_rule],
         "drag_alpha": [drag_rule, weight_rule],
         "pulse_train": [pulse_train_rule],

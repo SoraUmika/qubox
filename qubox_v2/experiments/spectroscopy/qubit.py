@@ -18,6 +18,17 @@ from ...analysis.output import Output
 from ...hardware.program_runner import ExecMode, RunResult
 from ...programs import cQED_programs
 from ...programs.macros.measure import measureMacro
+from ...calibration.transitions import Transition, DEFAULT_TRANSITION, resolve_pulse_name
+
+
+# ---------------------------------------------------------------------------
+# Transition → frequency-field routing
+# ---------------------------------------------------------------------------
+_TRANSITION_FREQ_MAP: dict[str, tuple[str, str]] = {
+    # transition_value → (calibration_kind, ElementFrequencies field)
+    "ge": ("qubit_freq", "qubit_freq"),
+    "ef": ("ef_freq",    "ef_freq"),
+}
 
 
 class QubitSpectroscopy(ExperimentBase):
@@ -32,6 +43,7 @@ class QubitSpectroscopy(ExperimentBase):
         qb_gain: float,
         qb_len: int,
         n_avg: int = 1000,
+        transition: str = "ge",
     ) -> RunResult:
         attr = self.attr
         lo_qb = self.hw.get_element_lo(attr.qb_el)
@@ -51,10 +63,14 @@ class QubitSpectroscopy(ExperimentBase):
                 pp.proc_attach("frequencies", lo_qb + if_freqs),
             ],
         )
+        result.metadata = {**(result.metadata or {}), "transition": transition}
         self.save_output(result.output, "qubitSpectroscopy")
         return result
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
+        transition = (result.metadata or {}).get("transition", "ge")
+        cal_kind, freq_field = _TRANSITION_FREQ_MAP.get(transition, ("qubit_freq", "qubit_freq"))
+
         freqs = result.output.extract("frequencies")
         S = result.output.extract("S")
         mag = np.abs(S)
@@ -75,7 +91,8 @@ class QubitSpectroscopy(ExperimentBase):
             metrics["gamma"] = fit.params["gamma"]
 
         metadata: dict[str, Any] = {
-            "calibration_kind": "qubit_freq",
+            "calibration_kind": cal_kind,
+            "transition": transition,
             "units": {"f0": "Hz", "f0_MHz": "MHz"},
         }
         if fit.params:
@@ -86,7 +103,7 @@ class QubitSpectroscopy(ExperimentBase):
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"frequencies.{self.attr.qb_el}.qubit_freq",
+                        "path": f"frequencies.{self.attr.qb_el}.{freq_field}",
                         "value": float(fit.params["f0"]),
                     },
                 }
@@ -138,12 +155,14 @@ class QubitSpectroscopyCoarse(ExperimentBase):
 
     def run(
         self,
+        pulse: str,
         rf_begin: float,
         rf_end: float,
         df: float,
         qb_gain: float,
         qb_len: int,
         n_avg: int = 1000,
+        transition: str = "ge",
     ) -> RunResult:
         attr = self.attr
         lo_list = make_lo_segments(rf_begin, rf_end)
@@ -156,7 +175,7 @@ class QubitSpectroscopyCoarse(ExperimentBase):
             ifs = if_freqs_for_segment(LO, rf_end, df)
 
             prog = cQED_programs.qubit_spectroscopy(
-                attr.ro_el, attr.qb_el, ifs, qb_gain, qb_len,
+                pulse, attr.qb_el, ifs, qb_gain, qb_len,
                 attr.qb_therm_clks, n_avg,
             )
             rr = self.run_program(
@@ -175,12 +194,15 @@ class QubitSpectroscopyCoarse(ExperimentBase):
         mode = seg_results[0].mode if seg_results else ExecMode.SIMULATE
         final = RunResult(
             mode=mode, output=final_output, sim_samples=None,
-            metadata={"segments": len(seg_results)},
+            metadata={"segments": len(seg_results), "transition": transition},
         )
         self.save_output(final_output, "qubitSpectroscopy")
         return final
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
+        transition = (result.metadata or {}).get("transition", "ge")
+        cal_kind, freq_field = _TRANSITION_FREQ_MAP.get(transition, ("qubit_freq", "qubit_freq"))
+
         freqs = result.output.extract("frequencies")
         S = result.output.extract("S")
         mag = np.abs(S)
@@ -201,7 +223,8 @@ class QubitSpectroscopyCoarse(ExperimentBase):
             metrics["gamma"] = fit.params["gamma"]
 
         metadata: dict[str, Any] = {
-            "calibration_kind": "qubit_freq",
+            "calibration_kind": cal_kind,
+            "transition": transition,
             "units": {"f0": "Hz", "f0_MHz": "MHz"},
         }
         if fit.params:
@@ -212,7 +235,7 @@ class QubitSpectroscopyCoarse(ExperimentBase):
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"frequencies.{self.attr.qb_el}.qubit_freq",
+                        "path": f"frequencies.{self.attr.qb_el}.{freq_field}",
                         "value": float(fit.params["f0"]),
                     },
                 }
@@ -256,7 +279,12 @@ class QubitSpectroscopyCoarse(ExperimentBase):
 
 
 class QubitSpectroscopyEF(ExperimentBase):
-    """e->f transition spectroscopy with prior pi-pulse excitation."""
+    """e->f transition spectroscopy with prior pi-pulse excitation.
+
+    The GE prep pulse (``ge_prep_pulse``) prepares |e> before sweeping
+    the EF drive frequency.  Calibration writeback targets
+    ``frequencies.<qb_el>.ef_freq`` via the ``"ef_freq"`` calibration kind.
+    """
 
     def run(
         self,
@@ -267,6 +295,7 @@ class QubitSpectroscopyEF(ExperimentBase):
         qb_gain: float,
         qb_len: int,
         n_avg: int = 1000,
+        ge_prep_pulse: str = "ge_x180",
     ) -> RunResult:
         attr = self.attr
         lo_qb = self.hw.get_element_lo(attr.qb_el)
@@ -277,7 +306,7 @@ class QubitSpectroscopyEF(ExperimentBase):
         prog = cQED_programs.qubit_spectroscopy_ef(
             pulse, attr.qb_el, if_freqs,
             self.hw.get_element_if(attr.qb_el),
-            qb_gain, qb_len, "x180", attr.qb_therm_clks, n_avg,
+            qb_gain, qb_len, ge_prep_pulse, attr.qb_therm_clks, n_avg,
         )
 
         result = self.run_program(
@@ -287,6 +316,11 @@ class QubitSpectroscopyEF(ExperimentBase):
                 pp.proc_attach("frequencies", lo_qb + if_freqs),
             ],
         )
+        result.metadata = {
+            **(result.metadata or {}),
+            "transition": "ef",
+            "ge_prep_pulse": ge_prep_pulse,
+        }
         self.save_output(result.output, "qubit_efSpectroscopy")
         return result
 
@@ -307,10 +341,30 @@ class QubitSpectroscopyEF(ExperimentBase):
 
         metrics: dict[str, Any] = {}
         if fit.params:
+            metrics["f0"] = fit.params["f0"]
             metrics["f_ef"] = fit.params["f0"]
             metrics["gamma"] = fit.params["gamma"]
 
-        return AnalysisResult.from_run(result, fit=fit, metrics=metrics)
+        metadata: dict[str, Any] = {
+            "calibration_kind": "ef_freq",
+            "transition": "ef",
+            "units": {"f0": "Hz", "f_ef": "Hz", "f0_MHz": "MHz"},
+        }
+        if fit.params:
+            metrics["f0_MHz"] = float(fit.params["f0"] / 1e6)
+
+        if update_calibration and fit.params:
+            metadata.setdefault("proposed_patch_ops", []).append(
+                {
+                    "op": "SetCalibration",
+                    "payload": {
+                        "path": f"frequencies.{self.attr.qb_el}.ef_freq",
+                        "value": float(fit.params["f0"]),
+                    },
+                }
+            )
+
+        return AnalysisResult.from_run(result, fit=fit, metrics=metrics, metadata=metadata)
 
     def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
         freqs = analysis.data.get("frequencies")

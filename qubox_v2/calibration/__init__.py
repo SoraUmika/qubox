@@ -19,6 +19,21 @@ from .models import (
     PulseTrainResult,
     ReadoutQuality,
 )
+from .transitions import (
+    Transition,
+    DEFAULT_TRANSITION,
+    TransitionLiteral,
+    resolve_pulse_name,
+    canonical_ref_pulse,
+    canonical_derived_pulse,
+    extract_transition,
+    strip_transition_prefix,
+    primitive_family,
+    is_canonical,
+    CANONICAL_REF_PULSES,
+    CANONICAL_DERIVED_PULSES,
+    ALL_CANONICAL,
+)
 from .algorithms import (
     apply_affine_correction,
     compute_corrected_knobs,
@@ -74,6 +89,20 @@ __all__ = [
     "PulseCalibration",
     "PulseTrainResult",
     "ReadoutQuality",
+    # Transition identity contracts
+    "Transition",
+    "DEFAULT_TRANSITION",
+    "TransitionLiteral",
+    "resolve_pulse_name",
+    "canonical_ref_pulse",
+    "canonical_derived_pulse",
+    "extract_transition",
+    "strip_transition_prefix",
+    "primitive_family",
+    "is_canonical",
+    "CANONICAL_REF_PULSES",
+    "CANONICAL_DERIVED_PULSES",
+    "ALL_CANONICAL",
     # Algorithms
     "apply_affine_correction",
     "compute_corrected_knobs",

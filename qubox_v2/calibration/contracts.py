@@ -29,6 +29,7 @@ class CalibrationResult:
     """Pure analysis product used to build mutation patches."""
 
     kind: str
+    transition: str | None = None  # "ge" or "ef"; None treated as "ge"
     params: dict[str, Any] = field(default_factory=dict)
     uncertainties: dict[str, Any] = field(default_factory=dict)
     quality: dict[str, Any] = field(default_factory=dict)

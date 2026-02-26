@@ -44,6 +44,7 @@ from .models import (
     PulseTrainResult,
     ReadoutQuality,
 )
+from .transitions import resolve_pulse_name
 
 _logger = get_logger(__name__)
 
@@ -110,6 +111,8 @@ class CalibrationStore:
                 ctx = raw["context"]
                 if "device_id" in ctx and "sample_id" not in ctx:
                     ctx["sample_id"] = ctx.pop("device_id")
+            # Auto-migrate legacy bare pulse calibration keys to canonical names
+            raw = self._migrate_pulse_cal_keys(raw)
             return CalibrationData.model_validate(raw)
         # Write defaults to disk immediately so the file actually exists.
         # Cannot call self.save() here because self._data is not yet assigned.
@@ -185,6 +188,35 @@ class CalibrationStore:
         if changed:
             self._data.last_modified = datetime.now().isoformat()
         return changed
+
+    @staticmethod
+    def _migrate_pulse_cal_keys(raw: dict) -> dict:
+        """Rename legacy bare pulse-calibration keys to canonical names.
+
+        Operates on the raw JSON dict *before* Pydantic validation so
+        that existing calibration files are transparently upgraded.
+        """
+        pc = raw.get("pulse_calibrations")
+        if not isinstance(pc, dict):
+            return raw
+
+        migrated: dict[str, Any] = {}
+        changed = False
+        for key, entry in pc.items():
+            canonical = resolve_pulse_name(key)
+            if canonical != key:
+                _logger.info(
+                    "Migrating pulse calibration key '%s' -> '%s'", key, canonical,
+                )
+                if isinstance(entry, dict):
+                    entry["pulse_name"] = canonical
+                    entry.setdefault("transition", "ge")
+                changed = True
+            migrated[canonical] = entry
+
+        if changed:
+            raw["pulse_calibrations"] = migrated
+        return raw
 
     # ------------------------------------------------------------------
     # Discrimination
@@ -262,19 +294,30 @@ class CalibrationStore:
     # Pulse calibrations
     # ------------------------------------------------------------------
     def get_pulse_calibration(self, name: str) -> PulseCalibration | None:
-        return self._data.pulse_calibrations.get(name)
+        """Retrieve a pulse calibration, resolving legacy aliases."""
+        canonical = resolve_pulse_name(name)
+        result = self._data.pulse_calibrations.get(canonical)
+        if result is None and canonical != name:
+            # Fallback: try the original name in case of custom pulses
+            result = self._data.pulse_calibrations.get(name)
+        return result
 
     def set_pulse_calibration(self, name: str, cal: PulseCalibration | None = None, **kw) -> None:
+        """Store a pulse calibration under its canonical name."""
+        canonical = resolve_pulse_name(name)
         if cal is None:
-            existing = self._data.pulse_calibrations.get(name)
+            existing = self._data.pulse_calibrations.get(canonical)
             if existing:
                 merged = existing.model_dump()
                 merged.update({k: v for k, v in kw.items() if v is not None})
                 cal = PulseCalibration(**merged)
             else:
-                kw.setdefault("pulse_name", name)
+                kw.setdefault("pulse_name", canonical)
                 cal = PulseCalibration(**kw)
-        self._data.pulse_calibrations[name] = cal
+        # Ensure pulse_name on the record is canonical
+        if cal.pulse_name != canonical:
+            cal = cal.model_copy(update={"pulse_name": canonical})
+        self._data.pulse_calibrations[canonical] = cal
         self._touch()
 
     # ------------------------------------------------------------------

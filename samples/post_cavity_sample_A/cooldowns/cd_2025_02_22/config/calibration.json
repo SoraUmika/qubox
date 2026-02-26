@@ -18,7 +18,7 @@
       "n_shots": 50000,
       "state_prep_ops": [
         "identity",
-        "x180"
+        "ge_x180"
       ]
     }
   },
@@ -42,7 +42,7 @@
       "n_shots": 50000,
       "state_prep_ops": [
         "identity",
-        "x180"
+        "ge_x180"
       ]
     }
   },
@@ -66,17 +66,19 @@
     }
   },
   "pulse_calibrations": {
-    "ref_r180": {
-      "pulse_name": "ref_r180",
+    "ge_ref_r180": {
+      "pulse_name": "ge_ref_r180",
       "element": "qubit",
+      "transition": "ge",
       "amplitude": 0.09614269205403701,
       "length": 16,
       "sigma": 2.6666666666666665,
       "drag_coeff": 0.0
     },
-    "sel_ref_r180": {
-      "pulse_name": "sel_ref_r180",
+    "ge_sel_ref_r180": {
+      "pulse_name": "ge_sel_ref_r180",
       "element": "qubit",
+      "transition": "ge",
       "amplitude": 1.0306391115882725
     }
   },

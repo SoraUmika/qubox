@@ -80,7 +80,7 @@ class TemporalRabi(ExperimentBase):
 
         if update_calibration and self.calibration_store and fit.params:
             if fit.params["f_Rabi"] != 0:
-                target_op = self._run_params.get("op") if hasattr(self, "_run_params") else "ref_r180"
+                target_op = self._run_params.get("op") if hasattr(self, "_run_params") else "ge_ref_r180"
                 sweep_lo = float(np.min(durations))
                 sweep_hi = float(np.max(durations))
                 self.guarded_calibration_commit(
@@ -137,7 +137,7 @@ class PowerRabi(ExperimentBase):
         self,
         max_gain: float,
         dg: float = 1e-3,
-        op: str = "ref_r180",
+        op: str = "ge_ref_r180",
         length: int | None = None,
         truncate_clks: int | None = None,
         n_avg: int = 1000,
@@ -204,7 +204,7 @@ class PowerRabi(ExperimentBase):
 
         metadata: dict[str, Any] = {
             "calibration_kind": "pi_amp",
-            "target_op": (self._run_params.get("op") if hasattr(self, "_run_params") else "ref_r180"),
+            "target_op": (self._run_params.get("op") if hasattr(self, "_run_params") else "ge_ref_r180"),
             "units": {"g_pi": "a.u."},
         }
 

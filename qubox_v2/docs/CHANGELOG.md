@@ -595,3 +595,119 @@ document and fixed 4 bugs in the state-handoff path.
 - `qubox_v2/calibration/orchestrator.py`
 - `qubox_v2/docs/READOUT_PIPELINE_AUDIT.md` (new)
 - `qubox_v2/docs/CHANGELOG.md`
+
+---
+
+### 2026-02-25 — Canonical Transition Identity Layer (Phase 1)
+
+**Classification: Major**
+
+Defined and applied the canonical naming / metadata normalization layer for
+qubit transition identity (`ge`, `ef`).  All pulse names, calibration records,
+and patch rules now use a single source of truth for transition-prefixed names.
+
+**Summary:**
+
+1. **New module: `calibration/transitions.py`**
+   - `Transition` enum (`GE`, `EF`), `DEFAULT_TRANSITION`, `TransitionLiteral`.
+   - `CANONICAL_REF_PULSES` / `CANONICAL_DERIVED_PULSES` / `ALL_CANONICAL` sets.
+   - Legacy alias map: bare names (`x180`, `ref_r180`) → canonical `ge_*`.
+   - Public helpers: `resolve_pulse_name()`, `canonical_ref_pulse()`,
+     `canonical_derived_pulse()`, `extract_transition()`,
+     `strip_transition_prefix()`, `primitive_family()`, `is_canonical()`.
+
+2. **Model metadata: `transition` field**
+   - Added `transition: str | None = None` to `PulseCalibration`,
+     `PulseTrainResult` (models), `CalibrationResult` (contracts),
+     and `PulseSpecEntry` (spec_models).
+
+3. **Calibration store migration**
+   - `CalibrationStore` resolves aliases on get/set via `resolve_pulse_name()`.
+   - `_migrate_pulse_cal_keys()` auto-renames legacy bare keys on load.
+
+4. **Patch rules canonical defaults**
+   - `PiAmpRule`, `DragAlphaRule`, `PulseTrainRule` default to `ge_ref_r180`.
+   - All rules resolve target ops through `resolve_pulse_name()`.
+
+5. **cQED_attributes canonical fields**
+   - Added `ge_r180_amp`, `ge_rlen`, `ge_rsigma`, `ef_r180_amp`, `ef_rlen`,
+     `ef_rsigma` with legacy promotion in `__post_init__`.
+
+6. **Experiment defaults**
+   - `DRAGCalibration`, `PowerRabi` default ops updated to canonical names.
+
+7. **Sample data migration**
+   - `calibration.json`: keys renamed to `ge_ref_r180`, `ge_sel_ref_r180`
+     with `transition: "ge"` field.
+   - `cqed_params.json`: added `ge_*` prefixed fields.
+
+8. **Exports**
+   - `calibration/__init__.py` exports entire transitions module.
+
+**Files affected:**
+
+- `qubox_v2/calibration/transitions.py` (new)
+- `qubox_v2/calibration/models.py`
+- `qubox_v2/calibration/contracts.py`
+- `qubox_v2/calibration/store.py`
+- `qubox_v2/calibration/patch_rules.py`
+- `qubox_v2/calibration/__init__.py`
+- `qubox_v2/pulses/spec_models.py`
+- `qubox_v2/analysis/cQED_attributes.py`
+- `qubox_v2/experiments/calibration/gates.py`
+- `qubox_v2/experiments/time_domain/rabi.py`
+- `samples/post_cavity_sample_A/cooldowns/cd_2025_02_22/config/calibration.json`
+- `samples/post_cavity_sample_A/config/cqed_params.json`
+- `qubox_v2/docs/CHANGELOG.md`
+
+---
+
+### 2026-02-25 — Transition-Aware Spectroscopy & Frequency Storage (Phase 2)
+
+**Classification: Moderate**
+
+Made the spectroscopy layer and frequency storage contract explicitly
+transition-aware using the canonical naming layer from Phase 1.
+
+**Summary:**
+
+1. **`ElementFrequencies.ef_freq` field (`models.py`)**
+   - Added `ef_freq: float | None = None` to `ElementFrequencies`.
+   - `qubit_freq` remains the legacy/canonical GE slot; `ef_freq` is the
+     new canonical EF slot.
+
+2. **`QubitSpectroscopy` transition-aware (`spectroscopy/qubit.py`)**
+   - `run()` accepts `transition: str = "ge"` parameter.
+   - `analyze()` reads transition from `result.metadata`, routes
+     `calibration_kind` and patch path via `_TRANSITION_FREQ_MAP`.
+   - GE → `qubit_freq` field, EF → `ef_freq` field.
+
+3. **`QubitSpectroscopyCoarse` transition-aware + bug fix**
+   - Added `pulse: str` parameter (was missing — first arg to builder was
+     incorrectly `attr.ro_el`, a readout element name, not a pulse op).
+   - Added `transition: str = "ge"` parameter.
+   - `analyze()` routes via `_TRANSITION_FREQ_MAP` like `QubitSpectroscopy`.
+
+4. **`QubitSpectroscopyEF` canonical cleanup**
+   - Hardcoded `"x180"` → configurable `ge_prep_pulse: str = "ge_x180"`.
+   - Added `transition="ef"` metadata to run result.
+   - `analyze()` now produces `calibration_kind: "ef_freq"` metadata and
+     `proposed_patch_ops` targeting `frequencies.<qb_el>.ef_freq`.
+   - Emits both `f0` and `f_ef` metrics for compatibility.
+
+5. **`default_patch_rules` EF frequency rule (`patch_rules.py`)**
+   - Added `FrequencyRule(element=qb_el, kind="ef_freq", metric_key="f0",
+     field="ef_freq")` registered under `"ef_freq"` kind.
+
+6. **Focused tests (`tests/test_transition_spectroscopy.py`)**
+   - 17 tests covering: `ElementFrequencies.ef_freq` model, transition
+     routing map, `FrequencyRule` for EF, `default_patch_rules` registration,
+     and canonical naming defaults.
+
+**Files affected:**
+
+- `qubox_v2/calibration/models.py`
+- `qubox_v2/calibration/patch_rules.py`
+- `qubox_v2/experiments/spectroscopy/qubit.py`
+- `tests/test_transition_spectroscopy.py` (new)
+- `qubox_v2/docs/CHANGELOG.md`

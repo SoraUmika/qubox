@@ -48,9 +48,20 @@ class cQED_attributes:
     qb_T1_relax:     Optional[float] = None
     qb_T2_ramsey:    Optional[float] = None
     qb_T2_echo:      Optional[float] = None
+
+    # Canonical transition-prefixed pulse fields (preferred)
+    ge_r180_amp:     Optional[float] = None
+    ge_rlen:         Optional[float] = None
+    ge_rsigma:       Optional[int] = None
+    ef_r180_amp:     Optional[float] = None
+    ef_rlen:         Optional[float] = None
+    ef_rsigma:       Optional[int] = None
+
+    # Legacy bare pulse fields (backward compat — reads fall through)
     r180_amp       : Optional[float] = None
     rlen           : Optional[float] = None
     rsigma         : Optional[int] = None
+
     b_coherent_amp : Optional[float] = None
     b_coherent_len : Optional[int] = None
     b_alpha :        Optional[float] = None
@@ -61,9 +72,21 @@ class cQED_attributes:
     _loaded_at: Optional[str] = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
-        """Convert fock_fqs to numpy array if it's a list."""
+        """Convert fock_fqs to numpy array if it's a list.
+
+        Also promote legacy bare pulse fields → ge_* canonical fields
+        when the canonical fields are not already set.
+        """
         if self.fock_fqs is not None and isinstance(self.fock_fqs, list):
             self.fock_fqs = np.array(self.fock_fqs)
+
+        # Legacy → canonical promotion: bare r180_amp/rlen/rsigma → ge_*
+        if self.ge_r180_amp is None and self.r180_amp is not None:
+            self.ge_r180_amp = self.r180_amp
+        if self.ge_rlen is None and self.rlen is not None:
+            self.ge_rlen = self.rlen
+        if self.ge_rsigma is None and self.rsigma is not None:
+            self.ge_rsigma = self.rsigma
 
     # ------------------------------------------------------------------
     # Serialisation

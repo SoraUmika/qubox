@@ -193,11 +193,11 @@ class DRAGCalibration(ExperimentBase):
         n_avg: int = 1000,
         *,
         base_alpha: float = 1.0,
-        calibration_op: str = "ref_r180",
-        x180: str = "x180",
-        x90: str = "x90",
-        y180: str = "y180",
-        y90: str = "y90",
+        calibration_op: str = "ge_ref_r180",
+        x180: str = "ge_x180",
+        x90: str = "ge_x90",
+        y180: str = "ge_y180",
+        y90: str = "ge_y90",
     ) -> RunResult:
         """Run the Yale DRAG calibration sweep.
 
@@ -214,7 +214,7 @@ class DRAGCalibration(ExperimentBase):
             ``amps`` axis directly represents the DRAG coefficient.
         calibration_op : str
             Reference pulse calibration entry to read parameters from
-            and to target for DRAG coefficient updates (default: ``"ref_r180"``).
+            and to target for DRAG coefficient updates (default: ``"ge_ref_r180"``).
         x180, x90, y180, y90 : str
             Fallback pulse operation names (used only when ``base_alpha``
             is exactly 0, i.e. no temporary waveform generation).
@@ -361,7 +361,7 @@ class DRAGCalibration(ExperimentBase):
 
         metadata: dict[str, Any] = {
             "calibration_kind": "drag_alpha",
-            "target_op": (self._run_params.get("calibration_op") if hasattr(self, "_run_params") else "ref_r180"),
+            "target_op": (self._run_params.get("calibration_op") if hasattr(self, "_run_params") else "ge_ref_r180"),
             "units": {"optimal_alpha": "a.u."},
             "quality_gate_required": True,
         }

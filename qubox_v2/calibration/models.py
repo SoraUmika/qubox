@@ -95,7 +95,8 @@ class ElementFrequencies(BaseModel):
     lo_freq: float | None = None   # Hz — local oscillator frequency
     if_freq: float | None = None   # Hz — intermediate frequency (may be negative)
     rf_freq: float | None = None   # Hz — absolute RF drive frequency
-    qubit_freq: float | None = None
+    qubit_freq: float | None = None   # Hz — GE transition frequency (legacy / canonical GE slot)
+    ef_freq: float | None = None      # Hz — EF transition frequency (canonical EF slot)
     anharmonicity: float | None = None
     fock_freqs: list[float] | None = None
     chi: float | None = None       # dispersive shift (Hz)
@@ -128,14 +129,19 @@ class CoherenceParams(BaseModel):
 class PulseCalibration(BaseModel):
     """Calibrated pulse parameters (e.g., from Rabi, DRAG cal).
 
-    Only true calibration primitives (e.g. ``ref_r180``, ``sel_ref_r180``)
-    should be stored here.  Derived pulses like ``x180``, ``y180``, etc.
+    Only true calibration primitives (e.g. ``ge_ref_r180``, ``ge_sel_ref_r180``)
+    should be stored here.  Derived pulses like ``ge_x180``, ``ge_y180``, etc.
     are generated programmatically from the reference pulse and must NOT
     appear in ``calibration.json``.
+
+    The ``transition`` field records which qubit transition this pulse
+    belongs to (``"ge"`` or ``"ef"``).  Legacy records without a
+    transition field are assumed to be ``"ge"``.
     """
 
     pulse_name: str
     element: str | None = None
+    transition: str | None = None  # "ge" or "ef"; None treated as "ge"
     amplitude: float | None = None
     length: int | None = None      # ns
     sigma: float | None = None
@@ -217,11 +223,12 @@ class PulseTrainResult(BaseModel):
     """Stores amp_err, phase_err, delta, zeta from pulse-train tomography."""
 
     element: str
+    transition: str | None = None  # "ge" or "ef"; None treated as "ge"
     amp_err: float
     phase_err: float
     delta: float = 0.0
     zeta: float = 0.0
-    rotation_pulse: str = "x180"
+    rotation_pulse: str = "ge_x180"
     N_values: list[int] = []
     timestamp: str | None = None
 

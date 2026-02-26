@@ -144,6 +144,7 @@ class PulseSpecEntry(BaseModel):
     shape: str
     element: str
     op: str
+    transition: str | None = None  # "ge" or "ef"; None treated as "ge"
     params: dict[str, Any] = Field(default_factory=dict)
     constraints: PulseConstraints | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
