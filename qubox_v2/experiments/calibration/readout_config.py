@@ -191,3 +191,66 @@ class ReadoutConfig:
 
     def resolved_n_samples_disc(self) -> int:
         return int(self.n_samples) if self.n_samples is not None else int(self.n_samples_disc)
+
+    @classmethod
+    def from_binding(
+        cls,
+        ro: "Any",
+        *,
+        r180: str = "x180",
+        **overrides: Any,
+    ) -> "ReadoutConfig":
+        """Construct a ReadoutConfig from a ReadoutBinding.
+
+        Parameters
+        ----------
+        ro : ReadoutBinding
+            The readout binding to derive configuration from.
+        r180 : str
+            Pi-pulse operation name.
+        **overrides
+            Any additional field overrides.
+
+        Returns
+        -------
+        ReadoutConfig
+        """
+        from ...core.bindings import ReadoutBinding
+
+        if not isinstance(ro, ReadoutBinding):
+            raise TypeError(
+                f"ReadoutConfig.from_binding: expected ReadoutBinding, "
+                f"got {type(ro).__name__}"
+            )
+
+        # Derive ro_op from the binding's active_op or pulse_op
+        ro_op = ro.active_op or "readout"
+        if ro.pulse_op is not None:
+            ro_op = getattr(ro.pulse_op, "op", ro_op)
+
+        # Derive ro_el from the physical_id (no element name dependency)
+        ro_el = ro.physical_id
+
+        # Derive weight keys from binding
+        weight_sets = ro.demod_weight_sets
+        cos_key = "cos"
+        sin_key = "sin"
+        m_sin_key = "minus_sin"
+        if weight_sets and len(weight_sets) >= 2:
+            if len(weight_sets[0]) >= 2:
+                cos_key = weight_sets[0][0]
+                sin_key = weight_sets[0][1]
+            if len(weight_sets[1]) >= 1:
+                m_sin_key = weight_sets[1][0]
+
+        kwargs: dict[str, Any] = {
+            "ro_op": ro_op,
+            "ro_el": ro_el,
+            "r180": r180,
+            "drive_frequency": ro.drive_frequency,
+            "cos_weight_key": cos_key,
+            "sin_weight_key": sin_key,
+            "m_sin_weight_key": m_sin_key,
+        }
+        kwargs.update(overrides)
+        return cls(**kwargs)

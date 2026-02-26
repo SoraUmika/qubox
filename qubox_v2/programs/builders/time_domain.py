@@ -6,7 +6,7 @@ from ..macros.sequence import sequenceMacros
 import numpy as np
 
 
-def temporal_rabi(qb_el, pulse, pulse_clks, pulse_gain, qb_therm_clks, n_avg):
+def temporal_rabi(pulse, pulse_clks, pulse_gain, qb_therm_clks, n_avg, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Perform Rabi oscillations in the time domain by varying the pulse duration (in clock cycles).
 
@@ -19,6 +19,14 @@ def temporal_rabi(qb_el, pulse, pulse_clks, pulse_gain, qb_therm_clks, n_avg):
         pulse             : Name of the qubit drive pulse (default "gaussian_X")
         n_avg             : Number of averaging iterations (default=1)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+    else:
+        qb_el = qb_el or "qubit"
+
     with program() as rabi_prog:
         pulse_clk = declare(int)
         n = declare(int)
@@ -42,7 +50,7 @@ def temporal_rabi(qb_el, pulse, pulse_clks, pulse_gain, qb_therm_clks, n_avg):
             n_st.save("iteration")
     return rabi_prog
 
-def power_rabi(qb_el, qb_clock_len:int, gains, qb_therm_clks, pulse, truncate_clks, n_avg:int=1000):
+def power_rabi(qb_clock_len:int, gains, qb_therm_clks, pulse, truncate_clks, n_avg:int=1000, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Perform Rabi oscillations in the amplitude domain by sweeping pulse amplitude (gain).
 
@@ -56,6 +64,14 @@ def power_rabi(qb_el, qb_clock_len:int, gains, qb_therm_clks, pulse, truncate_cl
         truncate       : Whether to truncate the pulse (default False)
         n_avg          : Number of averaging iterations (default=1000)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+    else:
+        qb_el = qb_el or "qubit"
+
     with program() as power_rabi_prog:
         g = declare(fixed)
         n = declare(int)
@@ -79,7 +95,7 @@ def power_rabi(qb_el, qb_clock_len:int, gains, qb_therm_clks, pulse, truncate_cl
             n_st.save("iteration")
     return power_rabi_prog
 
-def time_rabi_chevron(ro_el, qb_el, pulse, pulse_gain, qb_if, dfs, duration_clks, qb_therm_clks, n_avg:int=1):
+def time_rabi_chevron(pulse, pulse_gain, qb_if, dfs, duration_clks, qb_therm_clks, n_avg:int=1, *, ro_el: str | None = None, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Generate a Rabi chevron (time vs. frequency) by sweeping both pulse duration and detuning.
 
@@ -94,6 +110,17 @@ def time_rabi_chevron(ro_el, qb_el, pulse, pulse_gain, qb_if, dfs, duration_clks
         qb_therm_clks   : Thermalization wait time after readout
         n_avg           : Number of averaging iterations (default=1)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+        if ro_el is None:
+            ro_el = _names.get("readout", "__ro")
+    else:
+        qb_el = qb_el or "qubit"
+        ro_el = ro_el or "resonator"
+
     with program() as time_rabi_chevron_program:
         n = declare(int)
         f = declare(int)
@@ -122,7 +149,7 @@ def time_rabi_chevron(ro_el, qb_el, pulse, pulse_gain, qb_if, dfs, duration_clks
             n_st.save("iteration")
     return time_rabi_chevron_program
 
-def power_rabi_chevron(ro_el, qb_el, pulse, pulse_duration, qb_if, dfs, amplitudes, qb_therm_clks, n_avg:int=1):
+def power_rabi_chevron(pulse, pulse_duration, qb_if, dfs, amplitudes, qb_therm_clks, n_avg:int=1, *, ro_el: str | None = None, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Generate a Rabi chevron (power vs. frequency) by sweeping both pulse amplitude and detuning.
 
@@ -137,6 +164,17 @@ def power_rabi_chevron(ro_el, qb_el, pulse, pulse_duration, qb_if, dfs, amplitud
         qb_therm_clks   : Thermalization wait after readout
         n_avg           : Number of averaging iterations (default=1)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+        if ro_el is None:
+            ro_el = _names.get("readout", "__ro")
+    else:
+        qb_el = qb_el or "qubit"
+        ro_el = ro_el or "resonator"
+
     with program() as rabi_chevron_prog:
         n = declare(int)
         df = declare(int)
@@ -163,7 +201,7 @@ def power_rabi_chevron(ro_el, qb_el, pulse, pulse_duration, qb_if, dfs, amplitud
             n_st.save("iteration")
     return rabi_chevron_prog
 
-def ramsey_chevron(ro_el, qb_el, r90, qb_if, dfs, delay_clks, qb_therm_clks, n_avg:int=1):
+def ramsey_chevron(r90, qb_if, dfs, delay_clks, qb_therm_clks, n_avg:int=1, *, ro_el: str | None = None, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Perform Ramsey chevron: sweep both delay time and detuning to map out Ramsey fringes.
 
@@ -177,6 +215,17 @@ def ramsey_chevron(ro_el, qb_el, r90, qb_if, dfs, delay_clks, qb_therm_clks, n_a
         qb_therm_clks   : Thermalization wait after readout
         n_avg           : Number of averaging iterations (default=1)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+        if ro_el is None:
+            ro_el = _names.get("readout", "__ro")
+    else:
+        qb_el = qb_el or "qubit"
+        ro_el = ro_el or "resonator"
+
     with program() as ramsey_chevron_prog:
         n = declare(int)
         df = declare(int)
@@ -209,7 +258,7 @@ def ramsey_chevron(ro_el, qb_el, r90, qb_if, dfs, delay_clks, qb_therm_clks, n_a
             n_st.save("iteration")
     return ramsey_chevron_prog
 
-def T1_relaxation(qb_el, r180, wait_cycles_list, qb_therm_clks, n_avg):
+def T1_relaxation(r180, wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Measure T1 (energy relaxation) by applying a pi_val-pulse and then waiting variable times.
 
@@ -221,6 +270,14 @@ def T1_relaxation(qb_el, r180, wait_cycles_list, qb_therm_clks, n_avg):
         qb_therm_clks     : Thermalization wait after readout
         n_avg             : Number of averaging iterations
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+    else:
+        qb_el = qb_el or "qubit"
+
     with program() as T1_prog:
         cycles_to_wait = declare(int)
         n = declare(int)
@@ -245,7 +302,7 @@ def T1_relaxation(qb_el, r180, wait_cycles_list, qb_therm_clks, n_avg):
             n_st.save("iteration")
     return T1_prog
 
-def T2_ramsey(qb_el, r90, wait_cycles_list, qb_therm_clks, n_avg):
+def T2_ramsey(r90, wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Measure T2* (Ramsey dephasing) by applying two pi_val/2 pulses separated by variable wait times.
 
@@ -257,6 +314,14 @@ def T2_ramsey(qb_el, r90, wait_cycles_list, qb_therm_clks, n_avg):
         qb_therm_clks     : Thermalization wait after readout
         n_avg             : Number of averaging iterations
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+    else:
+        qb_el = qb_el or "qubit"
+
     with program() as T2_ramsey_prog:
         delay_clk = declare(int)
         n = declare(int)
@@ -280,8 +345,8 @@ def T2_ramsey(qb_el, r90, wait_cycles_list, qb_therm_clks, n_avg):
             n_st.save("iteration")
     return T2_ramsey_prog
 
-def T2_echo(qb_el, r180, r90,
-            half_wait_cycles_list, qb_therm_clks, n_avg):
+def T2_echo(r180, r90,
+            half_wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Measure T2 (Hahn echo) by applying pi_val/2 -- wait -- pi_val -- wait -- pi_val/2 sequence,
     with the wait time swept in half-intervals.
@@ -295,6 +360,14 @@ def T2_echo(qb_el, r180, r90,
         qb_therm_clks        : Thermalization wait after measurement
         n_avg                : Number of averaging iterations
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+    else:
+        qb_el = qb_el or "qubit"
+
     with program() as T2_echo_prog:
         delay_clk = declare(int)
         n = declare(int)
@@ -319,14 +392,24 @@ def T2_echo(qb_el, r180, r90,
     return T2_echo_prog
 
 def ac_stark_shift(
-    qb_el: str,
     iter_min: int,
     d: int,
     iters,              # array/list of iteration counts
     r180: str,          # name of the registered temp pi pulse
     qb_therm_clks: int,
-    n_avg: int
+    n_avg: int,
+    *,
+    qb_el: str | None = None,
+    bindings: "ExperimentBindings | None" = None,
 ):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+    else:
+        qb_el = qb_el or "qubit"
+
     with program() as ac_stark_prog:
         n      = declare(int)
         it     = declare(int)
@@ -361,12 +444,20 @@ def ac_stark_shift(
     return ac_stark_prog
 
 
-def residual_photon_ramsey(qb_el, test_ro_op, t_R_clks, t_relax_clk, t_buffer_clk, prep_e, test_ro_amp,
-                            r90, r180, qb_therm_clks, n_avg):
+def residual_photon_ramsey(test_ro_op, t_R_clks, t_relax_clk, t_buffer_clk, prep_e, test_ro_amp,
+                            r90, r180, qb_therm_clks, n_avg, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Measure residual photons via a Ramsey experiment after a variable relaxation time. Based on
     PHYS. REV. APPLIED 5, 011001 (2016)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+    else:
+        qb_el = qb_el or "qubit"
+
     with program() as residual_photon_ramsey_prog:
         t_R_clk = declare(int)
         n = declare(int)

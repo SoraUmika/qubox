@@ -37,7 +37,7 @@ class sequenceMacros:
         therm_clks=None,
         targets=None,
         axis: str = "z",
-        qb_el="qubit",
+        qb_el=None,
         x90="x90",
         yn90="yn90",
         qb_probe_if=None,
@@ -45,7 +45,16 @@ class sequenceMacros:
         selective_freq: int = None,
         wait_after: bool = False,
         wait_after_clks=None,
+        bindings=None,
     ):
+        if bindings is not None:
+            from ...core.bindings import ConfigBuilder
+            _names = ConfigBuilder.ephemeral_names(bindings)
+            if qb_el is None:
+                qb_el = _names.get("qubit", "__qb")
+        else:
+            qb_el = qb_el or "qubit"
+
         if state_prep:
             state_prep()
             align()
@@ -104,10 +113,22 @@ class sequenceMacros:
     @classmethod
     def num_splitting_spectroscopy(cls, probe_ifs, state_prep, I, Q, I_st, Q_st, st_therm_clks,
         *,
-        qb_el="qubit",
-        st_el="storage",
+        qb_el=None,
+        st_el=None,
         sel_r180="sel_x180",
+        bindings=None,
     ):
+        if bindings is not None:
+            from ...core.bindings import ConfigBuilder
+            _names = ConfigBuilder.ephemeral_names(bindings)
+            if qb_el is None:
+                qb_el = _names.get("qubit", "__qb")
+            if st_el is None:
+                st_el = _names.get("storage", "__st")
+        else:
+            qb_el = qb_el or "qubit"
+            st_el = st_el or "storage"
+
         f = declare(int)
         with for_(*from_array(f, probe_ifs)):
             update_frequency(qb_el, f)
@@ -123,8 +144,20 @@ class sequenceMacros:
 
     @classmethod
     def fock_resolved_spectroscopy(cls, fock_ifs, state_prep, I, Q, I_st, Q_st, st_therm_clks,
-        *, qb_el="qubit", st_el="storage", sel_r180="sel_x180"
+        *, qb_el=None, st_el=None, sel_r180="sel_x180",
+        bindings=None,
     ):
+        if bindings is not None:
+            from ...core.bindings import ConfigBuilder
+            _names = ConfigBuilder.ephemeral_names(bindings)
+            if qb_el is None:
+                qb_el = _names.get("qubit", "__qb")
+            if st_el is None:
+                st_el = _names.get("storage", "__st")
+        else:
+            qb_el = qb_el or "qubit"
+            st_el = st_el or "storage"
+
         f = declare(int)
 
         with for_each_(f, fock_ifs):
@@ -148,10 +181,11 @@ class sequenceMacros:
         target_state: str = "g",           # "g" or "e"
         policy: str | None = None,         # "ZSCORE", "AFFINE", "HYSTERESIS", "BLOBS", "POSTERIOR", or None
         r180: str = "x180",
-        qb_el: str = "qubit",
+        qb_el: str = None,
         max_trials: int = 4,
         targets: list | None = None,
         state=None,
+        bindings=None,
         **prep_kwargs,
     ):
         """
@@ -195,6 +229,14 @@ class sequenceMacros:
                 Ig, Qg, Ie, Qe, sigma_g, sigma_e,
                 posterior_classification_threshold=0.5
         """
+
+        if bindings is not None:
+            from ...core.bindings import ConfigBuilder
+            _names = ConfigBuilder.ephemeral_names(bindings)
+            if qb_el is None:
+                qb_el = _names.get("qubit", "__qb")
+        else:
+            qb_el = qb_el or "qubit"
 
         # -------------------------------
         # Normalize inputs

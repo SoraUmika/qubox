@@ -251,6 +251,15 @@ class CalibrationOrchestrator:
                 _logger.warning("measureMacro sync_from_calibration failed: %s", exc, exc_info=True)
                 sync_ok = False
 
+            # Sync bindings from CalibrationStore (binding-driven API)
+            try:
+                bindings = getattr(self.session, "bindings", None)
+                if bindings is not None:
+                    bindings.readout.sync_from_calibration(self.session.calibration)
+            except Exception as exc:
+                _logger.warning("ReadoutBinding sync_from_calibration failed: %s", exc, exc_info=True)
+                sync_ok = False
+
             tag = getattr(patch, "reason", None) or f"patch_{len(self._applied_patches)}"
             self._applied_patches.append(tag)
 

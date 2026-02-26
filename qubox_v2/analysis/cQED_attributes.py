@@ -245,6 +245,28 @@ class cQED_attributes:
         else:
             _logger.warning("No element bindings found in experiment context")
 
+    def to_bindings(self, hw: "Any") -> "Any":
+        """Construct ExperimentBindings from this attribute set and a HardwareConfig.
+
+        Parameters
+        ----------
+        hw : HardwareConfig
+            Parsed hardware.json configuration.
+
+        Returns
+        -------
+        ExperimentBindings
+
+        Notes
+        -----
+        This is the reverse-compatibility bridge: cQED_attributes carries the
+        element names; this method translates them into the binding-driven
+        API.  ``ro_el`` / ``qb_el`` / ``st_el`` become derived properties
+        from bindings rather than stored directly.
+        """
+        from ..core.bindings import bindings_from_hardware_config
+        return bindings_from_hardware_config(hw, self)
+
     def get_fock_frequencies(self, fock_levels, from_chi: bool = True) -> np.ndarray:
         if not from_chi:
             # Use the calibrated fock frequencies directly

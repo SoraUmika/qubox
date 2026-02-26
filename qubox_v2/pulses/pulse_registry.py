@@ -33,7 +33,11 @@ _logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 _RESERVED_PULSE_NAMES = frozenset({"readout_pulse"})
 _RESERVED_WF_NAMES = frozenset({"readout_I_wf", "readout_Q_wf"})
-_RESERVED_OPS = frozenset({"readout"})
+# NOTE: "readout" is no longer a reserved operation as of the binding-driven
+# API redesign.  Readout pulse registration now happens explicitly via
+# ReadoutBinding → ConfigBuilder flow.  The readout pulse and waveforms
+# remain reserved _names_ so they aren't accidentally overwritten.
+_RESERVED_OPS: frozenset[str] = frozenset()
 
 
 class PulseRegistry:
@@ -86,7 +90,9 @@ class PulseRegistry:
         self._perm.el_ops["*"] = {
             "const": "const_pulse",
             "zero": "zero_pulse",
-            "readout": "readout_pulse",
+            # NOTE: "readout" removed from wildcard mapping as of binding-driven
+            # API redesign.  Readout ops are registered explicitly per-element
+            # via ReadoutBinding → ConfigBuilder.
         }
 
         # Canonical readout pulse

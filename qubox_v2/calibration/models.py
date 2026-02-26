@@ -189,14 +189,20 @@ class CalibrationContext(BaseModel):
 # Top-level calibration data container
 # ---------------------------------------------------------------------------
 class CalibrationData(BaseModel):
-    """Root container for all calibration data in a session."""
+    """Root container for all calibration data in a session.
+
+    As of v5.0.0, all per-element dicts are keyed by **physical channel ID**
+    (``ChannelRef.canonical_id``, e.g. ``"con1:analog_in:1"``) rather than
+    element name strings.  An ``alias_index`` maps human-friendly names
+    to physical IDs for backward compatibility.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    version: str = "4.0.0"
+    version: str = "5.0.0"
     context: CalibrationContext | None = None
 
-    # Keyed by element name
+    # PRIMARY KEY: physical channel ID (ChannelRef.canonical_id) or legacy element name
     discrimination: dict[str, DiscriminationParams] = {}
     readout_quality: dict[str, ReadoutQuality] = {}
     frequencies: dict[str, ElementFrequencies] = {}
@@ -210,6 +216,10 @@ class CalibrationData(BaseModel):
     pulse_train_results: dict[str, "PulseTrainResult"] = {}
     fock_sqr_calibrations: dict[str, list["FockSQRCalibration"]] = {}
     multi_state_calibration: dict[str, "MultiStateCalibration"] = {}
+
+    # ALIAS INDEX: maps human-friendly names to physical IDs
+    # e.g. {"resonator": "oct1:RF_in:1", "qubit": "oct1:RF_out:3"}
+    alias_index: dict[str, str] = {}
 
     # Timestamps
     created: str | None = None

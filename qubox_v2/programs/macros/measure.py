@@ -1898,7 +1898,143 @@ class measureMacro:
             else:
                 assign(state, False)
             return (*target_vars, state)
-     
+
+
+# ---------------------------------------------------------------------------
+# Binding-based measurement API (replaces singleton for new code)
+# ---------------------------------------------------------------------------
+def measure_with_binding(
+    ro,
+    *,
+    element_name: str,
+    with_state: bool = False,
+    gain=None,
+    timestamp_stream=None,
+    adc_stream=None,
+    state=None,
+    targets: list = None,
+    axis="z",
+    x90="x90",
+    yn90="yn90",
+    qb_el: str | None = None,
+):
+    """Emit a QUA ``measure()`` statement using a ReadoutBinding.
+
+    This is the binding-based replacement for ``measureMacro.measure()``.
+    All DSP state (discrimination, weights, thresholds) lives on the
+    ``ReadoutBinding`` instance rather than on class-level singletons.
+
+    Parameters
+    ----------
+    ro : ReadoutBinding
+        The readout binding containing drive/acquire config and DSP state.
+    element_name : str
+        Ephemeral QM element name (from ConfigBuilder).
+    with_state : bool
+        If True, apply discrimination threshold and return a state variable.
+    gain : float | None
+        Override gain for this measurement.
+    timestamp_stream, adc_stream
+        QUA stream handles passed through to ``measure()``.
+    state : QUA variable | None
+        Pre-declared state variable; if None and ``with_state`` is True,
+        one will be declared.
+    targets : list | None
+        Pre-declared QUA variable targets for demod outputs.
+    axis : str
+        Tomography basis rotation ("z", "x", or "y").
+    x90, yn90 : str
+        Operation names for basis rotation pulses.
+    qb_el : str | None
+        Qubit element name for basis rotation (if needed).
+
+    Returns
+    -------
+    tuple
+        ``(I, Q)`` or ``(I, Q, state)`` depending on ``with_state``.
+    """
+    from ...core.bindings import ReadoutBinding
+
+    if not isinstance(ro, ReadoutBinding):
+        raise TypeError(
+            f"measure_with_binding: expected ReadoutBinding, got {type(ro).__name__}"
+        )
+
+    weight_sets = ro.demod_weight_sets
+    num_out = len(weight_sets)
+    if num_out < 1 and not adc_stream:
+        raise RuntimeError("measure_with_binding: no demod weight sets configured")
+
+    # Resolve targets
+    if targets is not None:
+        if len(targets) != num_out:
+            raise ValueError(
+                f"measure_with_binding: len(targets)={len(targets)} != outputs={num_out}"
+            )
+        target_vars = list(targets)
+    else:
+        target_vars = [declare(fixed) for _ in range(num_out)]
+
+    # State variable
+    make_state = with_state or (state is not None)
+    if make_state and state is None:
+        state = declare(bool)
+
+    # Op handle with optional gain
+    op_handle = ro.active_op
+    if op_handle is None and ro.pulse_op is not None:
+        op_handle = getattr(ro.pulse_op, "op", None) or getattr(ro.pulse_op, "pulse", None)
+    if op_handle is None:
+        raise RuntimeError(
+            "measure_with_binding: no active_op configured on ReadoutBinding"
+        )
+
+    eff_gain = gain if gain is not None else ro.gain
+    pulse_handle = op_handle if eff_gain is None else op_handle * amp(eff_gain)
+
+    # Build demod outputs using dual_demod.full (same as measureMacro default)
+    outputs = []
+    for k in range(num_out):
+        ws = weight_sets[k]
+        if isinstance(ws, str):
+            outputs.append(dual_demod.full(ws, target_vars[k]))
+        else:
+            iw1, iw2 = ws
+            outputs.append(dual_demod.full(iw1, iw2, target_vars[k]))
+
+    # Basis rotation for qubit tomography
+    if axis == "x" and qb_el is not None:
+        play(yn90, qb_el)
+        align(qb_el, element_name)
+    elif axis == "y" and qb_el is not None:
+        play(x90, qb_el)
+        align(qb_el, element_name)
+
+    measure(
+        pulse_handle,
+        element_name,
+        None,
+        *outputs,
+        timestamp_stream=timestamp_stream,
+        adc_stream=adc_stream,
+    )
+    align()
+
+    if make_state:
+        threshold = ro.discrimination.get("threshold")
+        if threshold is None:
+            threshold = 0.0
+            logger.warning(
+                "measure_with_binding: threshold is None on ReadoutBinding; using 0.0"
+            )
+        if num_out > 0:
+            assign(state, target_vars[0] > threshold)
+        else:
+            assign(state, False)
+        return (*target_vars, state)
+
+    return tuple(target_vars)
+
 
 
 

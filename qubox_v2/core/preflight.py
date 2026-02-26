@@ -203,6 +203,24 @@ def preflight_check(
     else:
         _warn(tag, "No measureConfig.json found — measureMacro using defaults")
 
+    # ---- 8. Bindings validation ----
+    tag = "bindings"
+    try:
+        from .bindings import validate_binding
+        bindings_obj = session.bindings
+        issues: list[str] = []
+        issues.extend(validate_binding(bindings_obj.qubit))
+        issues.extend(validate_binding(bindings_obj.readout))
+        if bindings_obj.storage is not None:
+            issues.extend(validate_binding(bindings_obj.storage))
+        if issues:
+            for issue in issues:
+                _warn(tag, issue)
+        else:
+            _ok(tag, "ExperimentBindings validated")
+    except Exception as exc:
+        _warn(tag, f"Could not validate bindings: {exc}")
+
     # ---- Summary ----
     all_ok = len(errors) == 0
     _logger.info(

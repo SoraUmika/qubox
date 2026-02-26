@@ -710,3 +710,95 @@ transition-aware using the canonical naming layer from Phase 1.
 - `qubox_v2/experiments/spectroscopy/qubit.py`
 - `tests/test_transition_spectroscopy.py` (new)
 - `qubox_v2/docs/CHANGELOG.md`
+
+---
+
+### 2026-02-26 — Binding-Driven API Redesign (v2.0.0)
+
+**Classification: Major**
+
+Complete architectural refactor replacing implicit element-name coupling
+with explicit binding objects throughout the codebase.  This is a
+**breaking change** that affects calibration storage, measurement macros,
+program builders, sequence macros, and session management.
+
+**What broke:**
+
+- `CalibrationData` schema bumped from v4.0.0 to v5.0.0.  All per-element
+  dicts now key by physical channel ID (`ChannelRef.canonical_id`) instead
+  of element name strings.  An `alias_index` field provides backward
+  compatibility for legacy access patterns.
+- `PulseRegistry._RESERVED_OPS` no longer includes `"readout"`.  The
+  wildcard `"*"` element-ops mapping no longer auto-registers a `"readout"`
+  operation on every element.
+- Program builder functions' element-name parameters changed from
+  hardcoded defaults (e.g. `qb_el="qubit"`) to `None` with runtime
+  resolution from `bindings` when provided.
+- `sequence.py` macro defaults similarly changed from hardcoded strings
+  to `None` + conditional resolution.
+
+**Migration path:**
+
+1. **Existing code** continues to work unchanged -- all old-style element
+   name parameters are still accepted.  When `bindings=None` (the default),
+   functions fall back to the original string defaults.
+2. **New code** should pass `bindings=session.bindings` to experiments and
+   program builders.  Element names are derived from bindings at call time.
+3. **Calibration data** is auto-migrated from v4 to v5 on load.  Legacy
+   element-name keys continue to resolve through `alias_index`.
+
+**Compatibility shims:**
+
+- `measureMacro` singleton remains fully functional -- existing callsites
+  are unaffected.
+- `cQED_attributes.ro_el` / `qb_el` / `st_el` remain stored and usable.
+  A new `.to_bindings(hw)` method bridges to the binding-driven API.
+- `CalibrationStore` accessors accept both physical channel IDs and legacy
+  element names transparently via dual-lookup.
+
+**Summary:**
+
+1. **New module: `core/bindings.py`** -- ChannelRef, OutputBinding,
+   InputBinding, ReadoutBinding, ExperimentBindings, ConfigBuilder,
+   bindings_from_hardware_config(), build_alias_map(), validate_binding().
+
+2. **CalibrationStore updates** -- v5.0.0 schema, alias_index, dual-lookup
+   accessors, register_alias(), auto-migration v3->v4->v5.
+
+3. **`measure_with_binding()` free function** -- binding-based drop-in
+   replacement for measureMacro.measure().
+
+4. **Session + ExperimentBase** -- .bindings property, invalidate_bindings(),
+   auto alias registration.
+
+5. **Preflight** -- bindings validation check #8.
+
+6. **PulseRegistry** -- _RESERVED_OPS cleared, wildcard readout removed.
+
+7. **cQED_attributes** -- to_bindings(hw) method.
+
+8. **ReadoutConfig** -- from_binding(ro) factory.
+
+9. **CalibrationOrchestrator** -- post-patch ReadoutBinding sync.
+
+10. **Program builders + sequence macros** -- optional bindings parameter,
+    element-name defaults changed to None + conditional resolution.
+
+**Files affected:**
+
+- `qubox_v2/core/bindings.py` (new)
+- `qubox_v2/core/preflight.py`
+- `qubox_v2/calibration/models.py`
+- `qubox_v2/calibration/store.py`
+- `qubox_v2/calibration/orchestrator.py`
+- `qubox_v2/programs/macros/measure.py`
+- `qubox_v2/programs/macros/sequence.py`
+- `qubox_v2/programs/builders/*.py`
+- `qubox_v2/experiments/session.py`
+- `qubox_v2/experiments/experiment_base.py`
+- `qubox_v2/experiments/calibration/readout_config.py`
+- `qubox_v2/analysis/cQED_attributes.py`
+- `qubox_v2/pulses/pulse_registry.py`
+- `qubox_v2/docs/CHANGELOG.md`
+- `qubox_v2/docs/API_REFERENCE.md`
+- `docs/api_refactor_output_binding_report.md`

@@ -1,9 +1,15 @@
 # qubox\_v2 — API Reference & Architecture Guide
 
-**Version**: 1.8.0
-**Date**: 2026-02-25
+**Version**: 2.0.0
+**Date**: 2026-02-26
 **Status**: Governing Document
 **Changelog**:
+- v2.0.0 — Binding-driven API redesign: explicit `ChannelRef` / `OutputBinding`
+  / `ReadoutBinding` / `ExperimentBindings` types replace implicit element-name
+  coupling.  CalibrationStore schema v5.0.0 with `alias_index` and physical
+  channel ID keying.  `measure_with_binding()` free function.  `PulseRegistry`
+  `_RESERVED_OPS` cleared.  Session `.bindings` property.  Preflight bindings
+  validation.  See CHANGELOG.md for full details.
 - v1.8.0 — Audit-driven bug fixes and hardening: Wigner negativity formula,
   T1Rule heuristic, QubitStateTomography plot, SPA exception logging, patch
   rule deduplication, missing resonator\_freq FrequencyRule, dead
@@ -71,6 +77,7 @@
 21. [Experiment ↔ Macro Interaction Rules](#21-experiment--macro-interaction-rules)
 22. [Macro State Ownership & Persistence Boundaries](#22-macro-state-ownership--persistence-boundaries)
 23. [Writing Custom Experiments](#23-writing-custom-experiments)
+24. [Binding-Driven API](#24-binding-driven-api)
 
 **Appendices:**
 
@@ -526,6 +533,14 @@ class SessionManager:
 | `devices` | `DeviceManager` | External instrument fleet |
 | `attributes` | `cQED_attributes` | Physics parameters |
 
+**New in v2.0.0** — Binding-related members:
+
+| Attribute / Property | Type | Description |
+|----------------------|------|-------------|
+| `bindings` | `ExperimentBindings` | Lazily computed binding bundle (qubit, readout, storage) from `hardware.json` + `cqed_params.json`.  Cached; call `invalidate_bindings()` to recompute. |
+| `invalidate_bindings()` | method | Clears the cached `ExperimentBindings` so the next access re-derives them. |
+| `from_sample(cls, ...)` | classmethod | Convenience constructor for context-mode with bindings. |
+
 **Public Methods:**
 
 | Method | Signature | Return | Side Effects |
@@ -647,6 +662,18 @@ class CalibrationStore:
 
 **Side effects**: All `set_*` methods call `_touch()`, which auto-saves if
 `auto_save=True`.
+
+**New in v2.0.0** — Alias index and dual-lookup:
+
+| Method | Signature | Return | Description |
+|--------|-----------|--------|-------------|
+| `register_alias` | `(alias: str, physical_id: str) -> None` | `None` | Add an entry to `alias_index` mapping an element name to a physical channel ID |
+| `_resolve_key` | `(key: str) -> str` | `str` | Internal: resolve a key via alias_index if not found directly |
+| `_dual_lookup` | `(section: str, key: str) -> Any` | `Any` | Internal: look up in a calibration section by direct key first, then alias fallback |
+
+The alias index is persisted inside `calibration.json` under the `alias_index`
+field (schema v5.0.0).  Auto-migration from v4.0.0 adds an empty `alias_index`.
+`SessionManager.bindings` automatically calls `register_alias()` on first access.
 
 ---
 
@@ -802,6 +829,7 @@ class ExperimentBase:
 | `device_manager` | `DeviceManager \| None` | Device manager |
 | `measure_macro` | `measureMacro` | Readout macro singleton |
 | `calibration_store` | `CalibrationStore \| None` | Calibration store |
+| `bindings` | `ExperimentBindings` | Binding bundle derived from session (v2.0.0) |
 
 **Abstract methods** (must be overridden by subclasses):
 
@@ -1023,7 +1051,7 @@ All models are Pydantic v2 `BaseModel` subclasses.
 | `PulseTrainResult` | Pulse-train tomography | `amp_err`, `phase_err`, `delta`, `zeta` |
 | `FockSQRCalibration` | Per-Fock SQR gate | `fock_number`, `model_type`, `params`, `fidelity?` |
 | `MultiStateCalibration` | Multi-alpha affine calibration | `alpha_values`, `affine_matrix`, `offset_vector` |
-| `CalibrationData` | **Root container** (schema v4.0.0) | All of the above, plus `version`, `context?`, `created`, `last_modified` |
+| `CalibrationData` | **Root container** (schema v5.0.0) | All of the above, plus `version`, `context?`, `alias_index?`, `created`, `last_modified` |
 
 **Null-handling policy:**
 
@@ -1426,14 +1454,17 @@ the `"module:Class"` format, supporting QCoDeS and InstrumentServer backends.
 
 ```json
 {
-  "version": "4.0.0",
+  "version": "5.0.0",
   "context": {
     "sample_id": "...",
     "cooldown_id": "...",
     "wiring_rev": "...",
-    "schema_version": "4.0.0",
+    "schema_version": "5.0.0",
     "config_hash": "...",
     "created": "..."
+  },
+  "alias_index": {
+    "<element_alias>": "<physical_channel_id>"
   },
   "discrimination": {
     "<element>": {
@@ -1476,7 +1507,10 @@ the `"module:Class"` format, supporting QCoDeS and InstrumentServer backends.
 - Fields with `None` / unset values are **omitted** from the JSON (not stored as `null`).
 - Only calibration primitives (`ref_r180`, `sel_ref_r180`) appear in `pulse_calibrations`.
   Derived pulses (`x180`, `y180`, etc.) are computed by `PulseFactory` at runtime.
-- The `context` block is present in v4.0.0; absent (or `null`) in legacy v3.0.0 files.
+- The `context` block is present in v4.0.0+; absent (or `null`) in legacy v3.0.0 files.
+- The `alias_index` block (v5.0.0) maps human-friendly element names to physical
+  channel IDs (e.g. `"resonator"` → `"oct1:RF_in:1"`).  This enables dual-lookup
+  in `CalibrationStore` — keys can be either physical IDs or legacy aliases.
 - `discrimination` and `readout_quality` entries should only contain fields that
   were actually produced by the calibration pipeline.  Do not include `confusion_matrix`
   unless one was computed.
@@ -1515,7 +1549,7 @@ unsupported versions and never silently upgrades.
 |------|---------------|-----------------|
 | `hardware.json` | `version` | 1 |
 | `pulse_specs.json` | `schema_version` | 1 |
-| `calibration.json` | `version` | `"4.0.0"` |
+| `calibration.json` | `version` | `"5.0.0"` |
 | `measureConfig.json` | `_version` | 5 |
 | `devices.json` | `schema_version` | 1 |
 | `pulses.json` (deprecated) | `_schema_version` | 2 |
@@ -1525,9 +1559,10 @@ unsupported versions and never silently upgrades.
 ```python
 # Register a migration step
 register_migration("calibration", target_version=4, func=migrate_3_to_4)
+register_migration("calibration", target_version=5, func=migrate_4_to_5)
 
 # Apply migration chain
-migrate(data, "calibration", from_version=3, to_version=4) -> dict
+migrate(data, "calibration", from_version=3, to_version=5) -> dict
 
 # Validate any config file
 validate_schema(file_path, file_type) -> ValidationResult
@@ -2607,12 +2642,13 @@ The `CalibrationData` model (root of `calibration.json`) now includes:
 
 ```python
 class CalibrationData(BaseModel):
-    version: str = "4.0.0"
+    version: str = "5.0.0"
     context: CalibrationContext | None = None   # NEW in v4.0.0
+    alias_index: dict[str, str] = {}            # NEW in v5.0.0
     # ... existing fields ...
 ```
 
-#### Schema Migration v3 → v4
+#### Schema Migration v3 → v4 → v5
 
 On load, `CalibrationStore._load_or_create()` detects `version < "4.0.0"`
 and calls `_migrate_calibration_3_to_4()` (registered in `core/schemas.py`),
@@ -2622,6 +2658,13 @@ which:
 2. Adds an empty `context: null` block.
 3. The migration is in-memory only; the file is updated on next
    `calibration.save()`.
+
+Migration v4 → v5 (`_migrate_calibration_4_to_5()`):
+
+1. Sets `version = "5.0.0"`.
+2. Adds an empty `alias_index: {}` dict.
+3. Existing element-name keys in calibration sections continue to work
+   via dual-lookup.
 
 ### 17.2 Context Validation in CalibrationStore
 
@@ -3895,6 +3938,326 @@ session.close()
 
 ---
 
+## 24. Binding-Driven API
+
+*New in v2.0.0.*
+
+The binding-driven API replaces the implicit element-name coupling that
+previously permeated the codebase.  Physical channels (`ChannelRef`) are the
+stable identity layer; human-friendly aliases map to physical channels, not
+to QM element definitions.
+
+**Module**: `qubox_v2.core.bindings`
+
+### 24.1 Core Types
+
+#### `ChannelRef`
+
+Immutable identifier for a physical hardware port.
+
+```python
+@dataclass(frozen=True)
+class ChannelRef:
+    device: str          # controller or octave name
+    port_type: str       # "analog_out", "analog_in", "RF_out", "RF_in", "digital_out"
+    port_number: int
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `canonical_id` | `str` | Stable key `"{device}:{port_type}:{port_number}"` for calibration/artifact storage |
+
+Examples:
+
+```python
+ChannelRef("con1", "analog_out", 3).canonical_id  # "con1:analog_out:3"
+ChannelRef("oct1", "RF_out", 1).canonical_id       # "oct1:RF_out:1"
+ChannelRef("con1", "analog_in", 1).canonical_id    # "con1:analog_in:1"
+```
+
+#### `OutputBinding`
+
+A bound control output channel.
+
+```python
+@dataclass
+class OutputBinding:
+    channel: ChannelRef
+    intermediate_frequency: float = 0.0
+    lo_frequency: float | None = None
+    gain: float | None = None
+    digital_inputs: dict[str, ChannelRef] = field(default_factory=dict)
+    operations: dict[str, str] = field(default_factory=dict)
+```
+
+#### `InputBinding`
+
+A bound acquisition input channel.
+
+```python
+@dataclass
+class InputBinding:
+    channel: ChannelRef
+    lo_frequency: float | None = None
+    time_of_flight: int = 24
+    smearing: int = 0
+    weight_keys: list[list[str]] = field(
+        default_factory=lambda: [["cos", "sin"], ["minus_sin", "cos"]]
+    )
+    weight_length: int | None = None
+```
+
+#### `ReadoutBinding`
+
+Paired output + input for readout/measurement.  Encapsulates everything
+`measure_with_binding()` needs: the drive output, the acquisition input,
+and all DSP configuration.
+
+```python
+@dataclass
+class ReadoutBinding:
+    drive_out: OutputBinding
+    acquire_in: InputBinding
+    pulse_op: Any = None          # PulseOp | None
+    active_op: str | None = None  # QUA operation handle
+    demod_weight_sets: list[list[str]] = ...
+    discrimination: dict[str, Any] = ...  # threshold, angle, fidelity, etc.
+    quality: dict[str, Any] = ...         # F, Q, V, confusion_matrix, etc.
+    drive_frequency: float | None = None
+    gain: float | None = None
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `physical_id` | `str` | Canonical key for calibration storage (keyed to acquisition ADC) |
+| `drive_channel_id` | `str` | Canonical key for the drive output |
+
+| Method | Signature | Return | Description |
+|--------|-----------|--------|-------------|
+| `sync_from_calibration` | `(cal_store) -> None` | `None` | One-way sync: CalibrationStore → ReadoutBinding discrimination + quality dicts |
+
+#### `ExperimentBindings`
+
+Named collection of bindings passed to experiments.
+
+```python
+@dataclass
+class ExperimentBindings:
+    qubit: OutputBinding
+    readout: ReadoutBinding
+    storage: OutputBinding | None = None
+    extras: dict[str, OutputBinding | ReadoutBinding] = field(default_factory=dict)
+```
+
+#### `AliasMap`
+
+```python
+AliasMap = dict[str, ChannelRef]
+```
+
+Mapping from human-friendly alias (e.g. `"qubit"`) to physical `ChannelRef`.
+
+### 24.2 `ConfigBuilder`
+
+Synthesizes ephemeral QM element dicts from bindings at compile time.  This
+is the ONLY place where element dicts should be created from bindings.
+
+```python
+class ConfigBuilder:
+    _QB_NAME = "__qb"
+    _RO_NAME = "__ro"
+    _ST_NAME = "__st"
+```
+
+| Method | Signature | Return | Description |
+|--------|-----------|--------|-------------|
+| `build_element` | `(name, binding) -> dict` | element dict | Build a single QM element from a binding |
+| `build_elements` | `(bindings: ExperimentBindings) -> dict[str, dict]` | elements dict | Build a complete elements dict from a bindings bundle |
+| `ephemeral_names` | `(bindings: ExperimentBindings) -> dict[str, str]` | name map | Return `{"qubit": "__qb", "readout": "__ro", ...}` |
+
+### 24.3 Factory Functions
+
+| Function | Signature | Return | Description |
+|----------|-----------|--------|-------------|
+| `bindings_from_hardware_config` | `(hw: HardwareConfig, attr: cQED_attributes) -> ExperimentBindings` | `ExperimentBindings` | Backward-compatible: derive bindings from existing hardware.json + cqed_params |
+| `build_alias_map` | `(hw: HardwareConfig, attr: cQED_attributes) -> AliasMap` | `AliasMap` | Build element-name → ChannelRef mapping |
+| `validate_binding` | `(binding, hw=None) -> list[str]` | error strings | Check consistency (e.g. drive/acquire on same octave, LO match) |
+
+### 24.4 `measure_with_binding()`
+
+**Module**: `qubox_v2.programs.macros.measure`
+
+A binding-aware free function that replaces the `measureMacro.measure()`
+singleton for new binding-driven code.
+
+```python
+def measure_with_binding(
+    ro: ReadoutBinding,
+    *,
+    I: Any,
+    Q: Any,
+    state: Any | None = None,
+    demod_fn: str = "dual_demod.full",
+    **kwargs,
+) -> None:
+    """Emit a QUA measure() statement from a ReadoutBinding.
+
+    This is the binding-aware replacement for measureMacro.measure().
+    Must be called inside a `with program()` block.
+    """
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `ro` | `ReadoutBinding` | The readout binding to measure |
+| `I`, `Q` | QUA variables | I/Q demod result variables |
+| `state` | QUA variable \| None | State discrimination result (optional) |
+| `demod_fn` | `str` | Demodulation function name |
+
+### 24.5 Session Integration
+
+The `SessionManager.bindings` property is the primary entry point for the
+binding-driven API.  It is **lazily computed** on first access and cached.
+
+```python
+# Access bindings from session
+b = session.bindings            # ExperimentBindings
+qb_id = b.qubit.channel.canonical_id  # e.g. "oct1:RF_out:3"
+ro_id = b.readout.physical_id          # e.g. "oct1:RF_in:1"
+
+# Invalidate and recompute (e.g. after hardware config change)
+session.invalidate_bindings()
+```
+
+On first access, `SessionManager.bindings`:
+
+1. Calls `bindings_from_hardware_config(hw, attr)` to derive bindings.
+2. Calls `readout.sync_from_calibration(cal_store)` to populate
+   discrimination/quality state from the canonical `CalibrationStore`.
+3. Calls `_register_alias_index()` to register element-name → physical-ID
+   mappings in the `CalibrationStore` alias index.
+
+### 24.6 `ExperimentBase.bindings`
+
+All experiments have access to bindings via the `.bindings` property:
+
+```python
+class ExperimentBase:
+    @property
+    def bindings(self) -> ExperimentBindings:
+        """Access to binding bundle from session."""
+```
+
+### 24.7 Preflight Validation
+
+The preflight system (check #8) validates bindings on session open:
+
+```python
+from qubox_v2.core.preflight import preflight_check
+
+report = preflight_check(session)
+# Validates:
+# - Qubit OutputBinding channel type is RF_out or analog_out
+# - ReadoutBinding drive/acquire on same device
+# - ReadoutBinding LO frequency match
+# - Storage binding (if present) consistency
+```
+
+### 24.8 CalibrationStore v5.0.0 Changes
+
+The `CalibrationStore` now supports dual-lookup via `alias_index`:
+
+- **Direct lookup**: key is a physical channel ID (e.g. `"oct1:RF_in:1"`).
+- **Alias fallback**: if the direct key is not found, check `alias_index`
+  for a mapping from the alias (e.g. `"resonator"` → `"oct1:RF_in:1"`).
+- The alias index is populated automatically by `SessionManager.bindings`.
+- All `get_*` / `set_*` methods on `CalibrationStore` pass through
+  `_resolve_key()` which handles both lookup paths transparently.
+
+### 24.9 Sequence Macro Integration
+
+Sequence macros in `programs/macros/sequence.py` accept an optional
+`bindings` parameter (v2.0.0).  When provided, element names are resolved
+from the bindings via `ConfigBuilder.ephemeral_names()`:
+
+```python
+from qubox_v2.programs.macros.sequence import sequenceMacros
+
+# With explicit bindings
+sequenceMacros.qubit_state_tomography(
+    ..., bindings=session.bindings,
+)
+
+# Without bindings (legacy — uses default element names)
+sequenceMacros.qubit_state_tomography(...)
+```
+
+Updated methods: `qubit_state_tomography`, `num_splitting_spectroscopy`,
+`fock_resolved_spectroscopy`, `prepare_state`.
+
+### 24.10 `PulseRegistry` Changes
+
+The `PulseRegistry` `_RESERVED_OPS` set is now `frozenset()` (empty).  The
+wildcard readout operation previously auto-mapped to all elements has been
+removed.  Readout operations must be explicitly registered via bindings or
+the standard `PulseOperationManager` API.
+
+### 24.11 Migration from Legacy Element-Name API
+
+The binding-driven API is backward-compatible.  Existing code that uses
+element names (e.g. `"qubit"`, `"resonator"`) continues to work because:
+
+1. `bindings_from_hardware_config()` derives bindings from the same
+   `hardware.json` + `cqed_params.json` files.
+2. `CalibrationStore` dual-lookup resolves element-name keys via
+   `alias_index`.
+3. `measureMacro` remains available for legacy program builders.
+4. Sequence macros default to legacy behavior when `bindings=None`.
+
+**Recommended migration path:**
+
+```python
+# Before (v1.x — implicit element names):
+ro_el = attr.ro_el              # "resonator"
+cal.get_discrimination(ro_el)   # keyed by element name
+
+# After (v2.0 — explicit bindings):
+b = session.bindings
+ro_id = b.readout.physical_id   # "oct1:RF_in:1"
+cal.get_discrimination(ro_id)   # keyed by physical channel ID
+# OR: cal.get_discrimination("resonator")  # still works via alias_index
+```
+
+### 24.12 `ReadoutConfig.from_binding()`
+
+**Module**: `qubox_v2.experiments.calibration.readout_config`
+
+The `ReadoutConfig` dataclass has a new classmethod for constructing a
+readout config from a `ReadoutBinding`:
+
+```python
+@classmethod
+def from_binding(cls, ro: ReadoutBinding, *, r180: str = "x180", **overrides) -> ReadoutConfig:
+    """Construct a ReadoutConfig from a ReadoutBinding.
+
+    Derives ro_el, measure_op, drive_frequency from the binding's
+    physical channel ID and active operation.
+    """
+```
+
+### 24.13 `cQED_attributes.to_bindings()`
+
+**Module**: `qubox_v2.analysis.cQED_attributes`
+
+Convenience method to derive bindings directly from physics attributes:
+
+```python
+attr = session.attributes
+bindings = attr.to_bindings(session.config_engine.hardware)
+```
+
+---
+
 ## Appendix A: Utility Functions
 
 ### `qubox_v2.experiments.experiment_base`
@@ -3996,6 +4359,14 @@ implementation at time of writing.  They are listed here for transparency.*
 from qubox_v2.experiments.session import SessionManager
 from qubox_v2.experiments import ExperimentBase, ExperimentRunner
 from qubox_v2.devices import SampleRegistry, ContextResolver
+
+# Binding-driven API (v2.0.0)
+from qubox_v2.core.bindings import (
+    ChannelRef, OutputBinding, InputBinding, ReadoutBinding,
+    ExperimentBindings, AliasMap, ConfigBuilder,
+    bindings_from_hardware_config, build_alias_map, validate_binding,
+)
+from qubox_v2.programs.macros.measure import measure_with_binding
 
 # Built-in experiments (import any you need)
 from qubox_v2.experiments import (

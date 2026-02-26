@@ -100,12 +100,17 @@ class CalibrationStore:
             _logger.info("Loading calibration from %s", self._path)
             with open(self._path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-            # Auto-migrate v3 → v4 in memory (adds context=None)
+            # Auto-migrate v3 → v4 → v5 in memory
             version_str = raw.get("version", "3.0.0")
             if version_str == "3.0.0":
                 raw["version"] = "4.0.0"
                 raw.setdefault("context", None)
                 _logger.info("Auto-migrated calibration in-memory from v3.0.0 to v4.0.0")
+                version_str = "4.0.0"
+            if version_str == "4.0.0":
+                raw["version"] = "5.0.0"
+                raw.setdefault("alias_index", {})
+                _logger.info("Auto-migrated calibration in-memory from v4.0.0 to v5.0.0")
             # Backward compat: remap legacy "device_id" → "sample_id" in context
             if "context" in raw and isinstance(raw["context"], dict):
                 ctx = raw["context"]
@@ -127,7 +132,7 @@ class CalibrationStore:
                 created=datetime.now().isoformat(),
             )
         data = CalibrationData(
-            version="4.0.0",
+            version="5.0.0",
             context=ctx_block,
             created=datetime.now().isoformat(),
         )
@@ -219,75 +224,101 @@ class CalibrationStore:
         return raw
 
     # ------------------------------------------------------------------
+    # Alias index — maps human-friendly names to physical channel IDs
+    # ------------------------------------------------------------------
+    def register_alias(self, alias: str, physical_id: str) -> None:
+        """Map a human-friendly name to a physical channel ID."""
+        self._data.alias_index[alias] = physical_id
+        self._touch()
+
+    def _resolve_key(self, key: str) -> str:
+        """If *key* is an alias, return the physical_id. Otherwise return as-is."""
+        return self._data.alias_index.get(key, key)
+
+    def _dual_lookup(self, store: dict, key: str):
+        """Look up by key directly, then try alias resolution."""
+        result = store.get(key)
+        if result is not None:
+            return result
+        physical_id = self._data.alias_index.get(key)
+        if physical_id:
+            return store.get(physical_id)
+        return None
+
+    # ------------------------------------------------------------------
     # Discrimination
     # ------------------------------------------------------------------
     def get_discrimination(self, element: str) -> DiscriminationParams | None:
-        return self._data.discrimination.get(element)
+        return self._dual_lookup(self._data.discrimination, element)
 
     def set_discrimination(self, element: str, params: DiscriminationParams | None = None, **kw) -> None:
+        physical_id = self._resolve_key(element)
         if params is None:
-            existing = self._data.discrimination.get(element)
+            existing = self._dual_lookup(self._data.discrimination, element)
             if existing:
                 merged = existing.model_dump()
                 merged.update({k: v for k, v in kw.items() if v is not None})
                 params = DiscriminationParams(**merged)
             else:
                 params = DiscriminationParams(**kw)
-        self._data.discrimination[element] = params
+        self._data.discrimination[physical_id] = params
         self._touch()
 
     # ------------------------------------------------------------------
     # Readout quality
     # ------------------------------------------------------------------
     def get_readout_quality(self, element: str) -> ReadoutQuality | None:
-        return self._data.readout_quality.get(element)
+        return self._dual_lookup(self._data.readout_quality, element)
 
     def set_readout_quality(self, element: str, params: ReadoutQuality | None = None, **kw) -> None:
+        physical_id = self._resolve_key(element)
         if params is None:
-            existing = self._data.readout_quality.get(element)
+            existing = self._dual_lookup(self._data.readout_quality, element)
             if existing:
                 merged = existing.model_dump()
                 merged.update({k: v for k, v in kw.items() if v is not None})
                 params = ReadoutQuality(**merged)
             else:
                 params = ReadoutQuality(**kw)
-        self._data.readout_quality[element] = params
+        self._data.readout_quality[physical_id] = params
         self._touch()
 
     # ------------------------------------------------------------------
     # Frequencies
     # ------------------------------------------------------------------
     def get_frequencies(self, element: str) -> ElementFrequencies | None:
-        return self._data.frequencies.get(element)
+        return self._dual_lookup(self._data.frequencies, element)
 
     def set_frequencies(self, element: str, freqs: ElementFrequencies | None = None, **kw) -> None:
+        physical_id = self._resolve_key(element)
         if freqs is None:
-            existing = self._data.frequencies.get(element)
+            existing = self._dual_lookup(self._data.frequencies, element)
             if existing:
                 merged = existing.model_dump()
                 merged.update({k: v for k, v in kw.items() if v is not None})
                 freqs = ElementFrequencies(**merged)
             else:
                 freqs = ElementFrequencies(**kw)
-        self._data.frequencies[element] = freqs
+        self._data.frequencies[physical_id] = freqs
         self._touch()
 
     # ------------------------------------------------------------------
     # Coherence
     # ------------------------------------------------------------------
     def get_coherence(self, element: str) -> CoherenceParams | None:
-        return self._data.coherence.get(element)
+        return self._dual_lookup(self._data.coherence, element)
 
     def set_coherence(self, element: str, params: CoherenceParams | None = None, **kw) -> None:
+        physical_id = self._resolve_key(element)
         if params is None:
-            existing = self._data.coherence.get(element)
+            existing = self._dual_lookup(self._data.coherence, element)
             if existing:
                 merged = existing.model_dump()
                 merged.update({k: v for k, v in kw.items() if v is not None})
                 params = CoherenceParams(**merged)
             else:
                 params = CoherenceParams(**kw)
-        self._data.coherence[element] = params
+        self._data.coherence[physical_id] = params
         self._touch()
 
     # ------------------------------------------------------------------
@@ -529,7 +560,7 @@ class CalibrationStore:
             config_hash=getattr(context, "config_hash", "") or "",
             created=datetime.now().isoformat(),
         )
-        self._data.version = "4.0.0"
+        self._data.version = "5.0.0"
         self._touch()
 
     # ------------------------------------------------------------------

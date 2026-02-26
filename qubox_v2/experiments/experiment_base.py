@@ -220,6 +220,26 @@ class ExperimentBase:
         from ..programs.macros.measure import measureMacro
         return measureMacro
 
+    @property
+    def bindings(self):
+        """Access ExperimentBindings from the session context.
+
+        Returns the session's binding bundle if available, or raises
+        RuntimeError.
+        """
+        b = getattr(self._ctx, "bindings", None)
+        if b is not None:
+            return b
+        # Fallback: try to construct from attributes + hardware config
+        from ..core.bindings import bindings_from_hardware_config
+        hw = getattr(self._ctx, "config_engine", None)
+        if hw is not None:
+            return bindings_from_hardware_config(hw.hardware, self.attr)
+        raise RuntimeError(
+            "Experiment context has no bindings. Use a SessionManager "
+            "with hardware.json and cqed_params.json."
+        )
+
     # ------------------------------------------------------------------
     # Common helpers
     # ------------------------------------------------------------------
@@ -525,10 +545,10 @@ class ExperimentBase:
         return getattr(self._ctx, "calibration", None)
 
     def get_confusion_matrix(self, element: str | None = None):
-        """Return the readout confusion matrix, preferring CalibrationStore.
+        """Return the readout confusion matrix, preferring bindings then CalibrationStore.
 
-        Falls back to ``measureMacro._ro_quality_params`` if the calibration
-        store is unavailable or has no confusion matrix for the element.
+        Falls back to ``measureMacro._ro_quality_params`` if no other source
+        provides a confusion matrix.
 
         Parameters
         ----------
@@ -540,11 +560,23 @@ class ExperimentBase:
         numpy.ndarray or None
         """
         import numpy as _np
+
+        # 1. Try bindings (ReadoutBinding.quality)
+        try:
+            b = self.bindings
+            cm = b.readout.quality.get("confusion_matrix")
+            if cm is not None:
+                return _np.asarray(cm)
+        except (RuntimeError, AttributeError):
+            pass
+
+        # 2. Try CalibrationStore
         el = element or self.attr.ro_el
         cal = self.calibration_store
         if cal is not None:
             rq = cal.get_readout_quality(el)
             if rq is not None and rq.confusion_matrix is not None:
                 return _np.asarray(rq.confusion_matrix)
-        # Fallback to macro
+
+        # 3. Fallback to measureMacro singleton
         return self.measure_macro._ro_quality_params.get("confusion_matrix")

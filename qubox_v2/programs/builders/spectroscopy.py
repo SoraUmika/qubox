@@ -36,12 +36,13 @@ def readout_trace(ro_therm_clks, n_avg):
     return raw_trace_prog
 
 def resonator_spectroscopy(
-    ro_el,
     if_frequencies,
     depletion_clks=None,
     n_avg: int = 1,
     *,
+    ro_el: str | None = None,
     depletion_len=None,
+    bindings: "ExperimentBindings | None" = None,
 ):
     """
     Sweep readout IF frequencies to perform 1D resonator spectroscopy.
@@ -56,6 +57,14 @@ def resonator_spectroscopy(
         depletion_len  : Deprecated alias for depletion_clks
         n_avg          : Number of averaging iterations (default=1)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if ro_el is None:
+            ro_el = _names.get("readout", "__ro")
+    else:
+        ro_el = ro_el or "resonator"
+
     if depletion_clks is None:
         depletion_clks = depletion_len
     elif depletion_len is not None and int(depletion_len) != int(depletion_clks):
@@ -136,7 +145,7 @@ def resonator_power_spectroscopy(
             Q_st.buffer(len(gains)).buffer(len(if_frequencies)).average().save("Q")
     return resonator_spec_2D
 
-def qubit_spectroscopy(sat_pulse, qb_el, if_frequencies, qb_gain, qb_len, qb_therm_clks:int=4, n_avg:int=1):
+def qubit_spectroscopy(sat_pulse, if_frequencies, qb_gain, qb_len, qb_therm_clks:int=4, n_avg:int=1, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Perform spectroscopy on the qubit by sweeping drive IF and measuring readout response.
 
@@ -149,6 +158,14 @@ def qubit_spectroscopy(sat_pulse, qb_el, if_frequencies, qb_gain, qb_len, qb_the
         qb_therm_clks  : Number of clock cycles to wait for qubit thermalization (default=4)
         n_avg          : Number of averaging iterations (default=1)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+    else:
+        qb_el = qb_el or "qubit"
+
     with program() as qubit_spec:
         n = declare(int)
         if_freq = declare(int)
@@ -176,7 +193,7 @@ def qubit_spectroscopy(sat_pulse, qb_el, if_frequencies, qb_gain, qb_len, qb_the
             n_st.save("iteration")
         return qubit_spec
 
-def qubit_spectroscopy_ef(sat_pulse, qb_el, if_frequencies, qb_ge_if, qb_gain, qb_len, r180 , qb_therm_clks, n_avg:int=1):
+def qubit_spectroscopy_ef(sat_pulse, if_frequencies, qb_ge_if, qb_gain, qb_len, r180, qb_therm_clks, n_avg:int=1, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Perform |e>-|f> spectroscopy by first preparing |e> via a pi_val-pulse (r180), then sweeping drive IF.
 
@@ -191,6 +208,14 @@ def qubit_spectroscopy_ef(sat_pulse, qb_el, if_frequencies, qb_ge_if, qb_gain, q
         qb_therm_clks  : Thermalization wait time after readout
         n_avg          : Number of averaging iterations (default=1)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+    else:
+        qb_el = qb_el or "qubit"
+
     with program() as qubit_spec:
         n = declare(int)
         if_freq = declare(int)
@@ -219,7 +244,7 @@ def qubit_spectroscopy_ef(sat_pulse, qb_el, if_frequencies, qb_ge_if, qb_gain, q
             n_st.save("iteration")
         return qubit_spec
 
-def resonator_spectroscopy_x180(qb_el, if_frequencies, r180, qb_therm_clks, n_avg):
+def resonator_spectroscopy_x180(if_frequencies, r180, qb_therm_clks, n_avg, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Pulsed resonator spectroscopy sweeping the readout IF.
     For each IF, measure twice:
@@ -230,6 +255,13 @@ def resonator_spectroscopy_x180(qb_el, if_frequencies, r180, qb_therm_clks, n_av
       - "I" / "Q" are length 2*len(IFs) per average.
         First half -> ground (g), second half -> excited (e).
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        if qb_el is None:
+            qb_el = _names.get("qubit", "__qb")
+    else:
+        qb_el = qb_el or "qubit"
 
     with program() as pulsed_ro_program:
         ro_if = declare(int)

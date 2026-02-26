@@ -229,6 +229,48 @@ class SessionManager:
         """The ExperimentContext for this session, or None in legacy mode."""
         return self._experiment_context
 
+    # ------------------------------------------------------------------
+    # Binding-driven API
+    # ------------------------------------------------------------------
+    _bindings_cache = None
+
+    @property
+    def bindings(self):
+        """Auto-derived ExperimentBindings from hardware.json + cqed_params.
+
+        Lazily constructed on first access.  Call :meth:`invalidate_bindings`
+        after changing hardware config or attributes to force re-derivation.
+
+        Returns
+        -------
+        ExperimentBindings
+        """
+        if self._bindings_cache is None:
+            from ..core.bindings import bindings_from_hardware_config
+            self._bindings_cache = bindings_from_hardware_config(
+                self.config_engine.hardware, self.attributes,
+            )
+            # Sync readout DSP state from calibration store
+            try:
+                self._bindings_cache.readout.sync_from_calibration(self.calibration)
+            except Exception:
+                pass
+            # Register aliases in calibration store
+            self._register_alias_index()
+            _logger.info("ExperimentBindings derived from hardware config.")
+        return self._bindings_cache
+
+    def invalidate_bindings(self) -> None:
+        """Force re-derivation of bindings on next access."""
+        self._bindings_cache = None
+
+    def _register_alias_index(self) -> None:
+        """Register element-name → physical-ID aliases in the CalibrationStore."""
+        from ..core.bindings import build_alias_map
+        alias_map = build_alias_map(self.config_engine.hardware, self.attributes)
+        for alias, channel_ref in alias_map.items():
+            self.calibration.register_alias(alias, channel_ref.canonical_id)
+
     @classmethod
     def from_sample(
         cls,
