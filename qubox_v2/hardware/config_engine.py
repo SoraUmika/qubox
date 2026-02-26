@@ -160,10 +160,9 @@ class ConfigEngine:
 
         cfg = deepcopy(self.hardware_base)
 
-        # Merge pulse overlay
+        # Merge pulse overlay (deep merge, consistent with other layers)
         if self.pulse_overlay:
-            for k, v in self.pulse_overlay.items():
-                cfg[k] = deepcopy(v)
+            cfg = deep_merge(cfg, deepcopy(self.pulse_overlay))
 
         # Merge element operations overlay (deep merge)
         if self.element_ops_overlay:

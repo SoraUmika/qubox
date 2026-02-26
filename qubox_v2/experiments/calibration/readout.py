@@ -829,7 +829,8 @@ class ReadoutGEDiscrimination(ExperimentBase):
             gg = np.sum(Ig_rot < threshold) / len(Ig_rot)
             ee = np.sum(Ie_rot > threshold) / len(Ie_rot)
             return float(100.0 * (gg + ee) / 2.0)
-        except Exception:
+        except Exception as exc:
+            _logger.debug("Cross-validated fidelity computation failed: %s", exc, exc_info=True)
             return None
 
     def _build_rotated_weights(self, metrics: dict) -> None:
@@ -1759,8 +1760,8 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             thr = (getattr(measureMacro, "_ro_disc_params", {}) or {}).get("threshold", None)
             if ro_el is not None and (thr is None):
                 measureMacro.sync_from_calibration(self.calibration_store, ro_el)
-        except Exception:
-            pass
+        except Exception as exc:
+            _logger.warning("Butterfly: measureMacro.sync_from_calibration failed: %s", exc, exc_info=True)
 
         if update_measure_macro:
             sync_info = self._sync_measure_macro_from_current_mapping(prefer_rotated=True)
@@ -2441,8 +2442,8 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                             "T1 decay correction: readout=%.0f ns, T1=%.1f us, factor=%.4f",
                             t_readout_ns, T1_s * 1e6, decay_factor,
                         )
-            except Exception:
-                pass  # T1 correction is optional, never fail on it
+            except Exception as exc:
+                _logger.debug("T1 decay correction skipped: %s", exc, exc_info=True)
 
         # Legacy parity: show_analysis prints metrics and triggers discriminator plots
         show_analysis = kw.get("show_analysis", getattr(self, "_show_analysis", False))

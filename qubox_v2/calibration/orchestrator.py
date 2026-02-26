@@ -57,7 +57,12 @@ class CalibrationOrchestrator:
         if getattr(out, "fit", None) is not None:
             fit = out.fit
             quality["r_squared"] = getattr(fit, "r_squared", None)
-        quality["passed"] = True
+        r_sq = quality.get("r_squared")
+        if r_sq is not None and r_sq < 0.5:
+            quality["passed"] = False
+            quality["failure_reason"] = f"r_squared={r_sq:.3f} < 0.5"
+        else:
+            quality["passed"] = True
 
         return CalibrationResult(
             kind=kind,
@@ -228,10 +233,12 @@ class CalibrationOrchestrator:
             self.session.calibration.save()
             self.session.save_pulses()
 
+            sync_ok = True
             try:
                 self.session.refresh_attribute_frequencies_from_calibration(persist=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                _logger.warning("refresh_attribute_frequencies_from_calibration failed: %s", exc, exc_info=True)
+                sync_ok = False
 
             # Sync measureMacro from CalibrationStore after every commit
             # so discrimination/quality params stay in sync.
@@ -241,7 +248,8 @@ class CalibrationOrchestrator:
                 if ro_el is not None:
                     measureMacro.sync_from_calibration(self.session.calibration, ro_el)
             except Exception as exc:
-                _logger.warning("measureMacro sync_from_calibration failed: %s", exc)
+                _logger.warning("measureMacro sync_from_calibration failed: %s", exc, exc_info=True)
+                sync_ok = False
 
             tag = getattr(patch, "reason", None) or f"patch_{len(self._applied_patches)}"
             self._applied_patches.append(tag)
@@ -250,6 +258,7 @@ class CalibrationOrchestrator:
             "dry_run": dry_run,
             "n_updates": len(patch.updates),
             "preview": preview,
+            "sync_ok": sync_ok if not dry_run else True,
         }
 
     def list_applied_patches(self) -> list[str]:

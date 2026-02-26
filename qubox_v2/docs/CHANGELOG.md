@@ -447,7 +447,7 @@ decision to standardize on `CalibrationOrchestrator`.
 
 **Classification: Moderate**
 
-Systematic fixes for all issues identified in `AUDIT_REPORT.md`: 4 bugs,
+Systematic fixes for all issues identified in the audit (see below): 4 bugs,
 duplicate/missing patch rules, dead parameters, incomplete calibration
 patterns, and documentation updates.
 
@@ -561,7 +561,7 @@ document and fixed 4 bugs in the state-handoff path.
 
 **Summary:**
 
-1. **Audit document (`READOUT_PIPELINE_AUDIT.md`)**
+1. **Audit document (inline in this CHANGELOG)**
    - Full Legacy ↔ qubox_v2 pipeline ordering comparison.
    - Policy-object tables: readout discrimination, quality, and state-prep.
    - State-handoff invariant analysis (GE → Butterfly).
@@ -593,8 +593,7 @@ document and fixed 4 bugs in the state-handoff path.
 
 - `qubox_v2/programs/macros/measure.py`
 - `qubox_v2/calibration/orchestrator.py`
-- `qubox_v2/docs/READOUT_PIPELINE_AUDIT.md` (new)
-- `qubox_v2/docs/CHANGELOG.md`
+- `qubox_v2/docs/CHANGELOG.md` (audit content inline)
 
 ---
 

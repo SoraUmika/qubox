@@ -4085,6 +4085,34 @@ class MyExp(ExperimentBase):
 
 ---
 
+## Unit Conventions
+
+| Quantity | Canonical Unit | Notes |
+|---|---|---|
+| Frequencies (LO, IF, RF, qubit, cavity) | Hz | All frequency fields in `ElementFrequencies`, `HardwareConfig` |
+| Coherence times (T1, T2_ramsey, T2_echo) | seconds | `*_us` companion fields are microseconds |
+| Pulse lengths | nanoseconds (ns) | `PulseCalibration.length`, QUA `play()` durations |
+| Integration weight length | clock cycles | 1 clock = 4 ns |
+| Thermalization waits | clock cycles | `qb_therm_clks`, `ro_therm_clks` |
+| `create_clks_array` input | nanoseconds | Converted to clock cycles internally |
+| Dispersive shift (chi), kerr, kappa | Hz | Stored in `ElementFrequencies` |
+
+### Clock Cycle Conversion
+
+The OPX+ clock period is 4 ns.  Functions like `create_clks_array()` accept
+nanosecond inputs and return integer clock-cycle arrays.  Values not aligned
+to the 4 ns grid are snapped with a `RuntimeWarning`.
+
+### qualang_tools.units
+
+Notebook code uses `u = unit()` from `qualang_tools.units` for dimensional
+arithmetic:
+
+    rf_begin = 8560 * u.MHz   # -> 8.56e9 Hz
+    delay_end = 50 * u.us     # -> 50000 ns
+
+---
+
 *This document is auto-generated from source inspection and existing
 architecture documents.  Cross-reference with the governing documents in
 `qubox_v2/docs/` for policy-level requirements.*

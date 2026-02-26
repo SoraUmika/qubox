@@ -164,6 +164,7 @@ class ProgramRunner:
         use_queue: bool = False,
         queue_to_start: bool = False,
         queue_only: bool = False,
+        timeout_sec: float | None = None,
         **kwargs,
     ) -> RunResult:
         """Execute a QUA program on hardware."""
@@ -180,6 +181,8 @@ class ProgramRunner:
             raise JobError("This QUA program is marked SIMULATE-only. Use simulate() instead.")
 
         require(self.hw.qm is not None, "QM not initialized.", ConfigError)
+
+        _t0 = time.monotonic()
 
         # Config snapshot
         cfg_snapshot = self.config.build_qm_config()
@@ -224,7 +227,7 @@ class ProgramRunner:
 
                 # Progress
                 if show_progress:
-                    self._report_progress(self.job, n_total, progress_handle, show_progress=True)
+                    self._report_progress(self.job, n_total, progress_handle, show_progress=True, timeout_sec=timeout_sec, t0=_t0)
 
                 # Execution report
                 if print_report:
@@ -275,7 +278,7 @@ class ProgramRunner:
         except Exception as e:
             _logger.error("Failed to halt job: %s", e)
 
-    def _report_progress(self, job: RunningQmJob, n_total: int, handle: str, *, show_progress: bool = True) -> None:
+    def _report_progress(self, job: RunningQmJob, n_total: int, handle: str, *, show_progress: bool = True, timeout_sec: float | None = None, t0: float = 0.0) -> None:
         if not n_total:
             _logger.info("n_total not passed; skipping progress.")
             return
@@ -291,12 +294,22 @@ class ProgramRunner:
         if actual_handle is None:
             _logger.info("No progress handle found (tried '%s' + fallbacks); waiting for completion...", handle)
             while handles.is_processing():
+                if timeout_sec is not None and (time.monotonic() - t0) > timeout_sec:
+                    _logger.error("Program execution timed out after %.1f s", timeout_sec)
+                    with contextlib.suppress(Exception):
+                        self.halt_job()
+                    raise JobError(f"Program execution timed out after {timeout_sec:.1f} s")
                 time.sleep(0.1)
             _logger.info("Job complete.")
             return
 
         with tqdm(total=n_total, desc="Running Program...", disable=not show_progress) as bar:
             while handles.is_processing():
+                if timeout_sec is not None and (time.monotonic() - t0) > timeout_sec:
+                    _logger.error("Program execution timed out after %.1f s", timeout_sec)
+                    with contextlib.suppress(Exception):
+                        self.halt_job()
+                    raise JobError(f"Program execution timed out after {timeout_sec:.1f} s")
                 time.sleep(0.05)
                 with contextlib.suppress(Exception):
                     h = handles.get(actual_handle)

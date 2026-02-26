@@ -21,11 +21,22 @@ class _ResourceStore:
         self.el_ops:    Dict[str, Dict[str, str]] = {}
 
     # â”€â”€â”€ merge this store into an arbitrary QM config dict â”€â”€â”€â”€
-    def merge_into(self, cfg: Dict[str, Any]) -> None:
-        cfg.setdefault("waveforms",            {}).update(self.waveforms)
-        cfg.setdefault("digital_waveforms",{}).update(self.dig_waveforms)
-        cfg.setdefault("pulses",               {}).update(self.pulses)
-        cfg.setdefault("integration_weights",  {}).update(self.weights)
+    def merge_into(self, cfg: Dict[str, Any], *, warn_collisions: bool = False, tag: str = "") -> None:
+        for section, store in [
+            ("waveforms", self.waveforms),
+            ("digital_waveforms", self.dig_waveforms),
+            ("pulses", self.pulses),
+            ("integration_weights", self.weights),
+        ]:
+            target = cfg.setdefault(section, {})
+            if warn_collisions:
+                collisions = set(target) & set(store)
+                if collisions:
+                    _logger.warning(
+                        "POM %s: %d key collision(s) in '%s': %s (volatile overwrites)",
+                        tag, len(collisions), section, sorted(collisions)[:5],
+                    )
+            target.update(store)
         elems = cfg.setdefault("elements", {})
         for el, ops in self.el_ops.items():
             elems.setdefault(el, {}).setdefault("operations", {}).update(ops)
@@ -1567,7 +1578,7 @@ class PulseOperationManager:
     def burn_to_config(self, cfg: Dict[str, Any], *, include_volatile=True):
         self._perm.merge_into(cfg)
         if include_volatile:
-            self._volatile.merge_into(cfg)
+            self._volatile.merge_into(cfg, warn_collisions=True, tag="volatile")
         return cfg
 
     def print_state(self, *, include_volatile=True):

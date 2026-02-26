@@ -77,6 +77,9 @@ class HardwareController:
     def open_qm(self, config_dict: Optional[dict] = None, *, close_other_machines: bool = True) -> None:
         """Open a QM instance with the given or auto-built config."""
         with self._lock:
+            if self.qm is not None:
+                _logger.warning("open_qm() called while QM already open; closing existing instance first.")
+                self.close()
             cfg = config_dict or self.config.build_qm_config()
             cfg_qm = {k: v for k, v in numeric_keys_to_ints(cfg).items() if k in QM_TOPLEVEL_WHITELIST}
             try:

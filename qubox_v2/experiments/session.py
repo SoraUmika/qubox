@@ -202,6 +202,7 @@ class SessionManager:
         self._runtime_settings = self._load_runtime_settings()
         self.allow_inline_mutations = False
         self.orchestrator = CalibrationOrchestrator(self)
+        self._opened = False
 
         _logger.info("SessionManager ready.")
 
@@ -480,10 +481,14 @@ class SessionManager:
     # ------------------------------------------------------------------
     def open(self) -> "SessionManager":
         """Open the QM connection and initialise hardware elements."""
+        if self._opened:
+            _logger.warning("SessionManager.open() called again; closing previous session first.")
+            self.close()
         self.config_engine.merge_pulses(self.pulse_mgr)
         self.hardware.open_qm()
         self._load_measure_config()
         self.validate_runtime_elements(auto_map=True, verbose=True)
+        self._opened = True
         return self
 
     def validate_runtime_elements(self, *, auto_map: bool = True, verbose: bool = True) -> dict[str, Any]:
@@ -648,20 +653,20 @@ class SessionManager:
         try:
             self.hardware.close()
         except Exception as e:
-            _logger.warning("Error closing hardware: %s", e)
+            _logger.warning("Error closing hardware: %s", e, exc_info=True)
         for name, handle in self.devices.handles.items():
             try:
                 handle.disconnect()
             except Exception as e:
-                _logger.warning("Error disconnecting device '%s': %s", name, e)
+                _logger.warning("Error disconnecting device '%s': %s", name, e, exc_info=True)
         try:
             self.save_pulses()
         except Exception as e:
-            _logger.warning("Error saving pulses: %s", e)
+            _logger.warning("Error saving pulses: %s", e, exc_info=True)
         try:
             self.save_runtime_settings()
         except Exception as e:
-            _logger.warning("Error saving runtime settings: %s", e)
+            _logger.warning("Error saving runtime settings: %s", e, exc_info=True)
         self.calibration.save()
         try:
             from ..programs.macros.measure import measureMacro
@@ -669,7 +674,8 @@ class SessionManager:
             dst.parent.mkdir(parents=True, exist_ok=True)
             measureMacro.save_json(str(dst))
         except Exception as e:
-            _logger.warning("Error saving measureConfig.json on close: %s", e)
+            _logger.warning("Error saving measureConfig.json on close: %s", e, exc_info=True)
+        self._opened = False
         _logger.info("SessionManager closed.")
 
     def __enter__(self) -> "SessionManager":
