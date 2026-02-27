@@ -1,6 +1,6 @@
 # QUBOX_V2 Codebase Survey
 
-**Date**: 2025-07-14  
+**Date**: 2026-02-27  
 **Auditor**: Automated Static Analysis + Manual Code Review  
 **Scope**: All source files under `qubox_v2/`  
 **Methodology**: Read-only; no source files modified.
@@ -11,14 +11,16 @@
 
 `qubox_v2` is a well-structured, multi-layered experiment orchestration framework for circuit-QED on Quantum Machines OPX+ hardware. It has undergone substantial active refactoring from a ~5,200-line monolith (`cQED_Experiment`) toward a clean modular architecture with strong Pydantic-typed models, an explicit Patch/Artifact/Orchestrator pipeline, and a binding-driven hardware abstraction layer.
 
-The framework's design intentions are sound and documented thoroughly in `qubox_v2/docs/API_REFERENCE.md` (v2.0.0, 27 sections). The calibration pipeline — Run → Artifact → CalibrationResult → Patch → Apply — is properly expressed in `calibration/orchestrator.py`. The `CalibrationStore` with v5.0.0 schema, alias index, and context validation is a mature persistence layer.
+The framework's design intentions are sound and documented thoroughly in `docs/CHANGELOG.md`. The calibration pipeline — Run → Artifact → CalibrationResult → Patch → Apply — is properly expressed in `calibration/orchestrator.py`. The `CalibrationStore` with v5.0.0 schema, alias index, and context validation is a mature persistence layer.
 
-**However, several concrete bugs and structural issues exist that require attention before production use:**
+Several issues present in earlier versions of the codebase have since been fixed: the missing `resonator_freq` field in `ElementFrequencies`, the absent quality guard in `run_analysis_patch_cycle`, and the unconverted T2 values emitted directly by `T2RamseyRule`/`T2EchoRule`. These are now handled correctly in the current code.
+
+**Remaining concrete bugs and structural issues that require attention before production use:**
 
 - **2 Critical issues**: `measureMacro` class-level singleton state and a bare `KeyError`-prone threshold access in QUA program construction.
-- **5 High risk issues**: Silent resonator frequency calibration loss, T2 unit mismatches that persist through apply_patch, unguarded application of failed calibrations, and an acknowledged `BUGFIX` comment in config loading.
+- **3 High risk issues**: T2 unit mismatch via the `proposed_patch_ops` / `WeightRegistrationRule` path, a fragile `sync_ok` reference pattern, and an acknowledged `BUGFIX` comment in config loading.
 - **8 Medium issues**: Duplicate utility functions, giant legacy god-class still actively used, orphaned model fields, fragile quality gate logic.
-- **7 Low issues**: Naming inconsistencies, hard-coded element strings, style debt.
+- **6 Low issues**: Naming inconsistencies, hard-coded element strings, style debt.
 
 The overall calibration architecture is correct in design; the bugs are implementation-level and mostly fixable with targeted changes.
 
@@ -91,34 +93,7 @@ In contrast, other consumers use `.get("threshold", 0.0)` (e.g., `programs/macro
 
 ---
 
-### HIGH-01 — `resonator_freq` Calibration Silently Discarded: Field Not in `ElementFrequencies`
-
-**Severity**: High  
-**File**: `qubox_v2/calibration/patch_rules.py`, `default_patch_rules()` (line 299)  
-**Also**: `qubox_v2/calibration/models.py`, class `ElementFrequencies` (line 72)
-
-**Evidence**:
-```python
-# patch_rules.py:299
-ro_freq_rule = FrequencyRule(
-    element=ro_el,
-    kind="resonator_freq",
-    metric_key="f0",
-    field="resonator_freq"   # ← this field does NOT exist in ElementFrequencies
-)
-```
-
-`ElementFrequencies` (models.py, line 72–108) defines: `lo_freq`, `if_freq`, `rf_freq`, `qubit_freq`, `ef_freq`, `anharmonicity`, `fock_freqs`, `chi`, `chi2`, `chi3`, `kappa`, `kerr`, `kerr2`. There is **no `resonator_freq` field**.
-
-When `FrequencyRule` fires, it creates a `SetCalibration` patch op with `path="frequencies.{ro_el}.resonator_freq"`. This goes through `CalibrationStore._set_calibration_path()` → `self.session.calibration.set_frequencies(element, resonator_freq=value)`. Pydantic v2 with default configuration (`extra='ignore'`) will silently discard the unknown field.
-
-**Result**: The resonator spectroscopy calibration result (the fitted `f0` peak frequency) is completely lost. No error is raised. `get_frequencies(ro_el).resonator_freq` does not exist; any downstream code relying on the stored resonator frequency will get `None`.
-
-Note: `ResonatorSpectroscopy.analyze()` (with `update_calibration=True`) separately proposes `lo_freq`/`if_freq` patch ops correctly — so the IF frequency update path is functional. But the canonical `resonator_freq` field route silently fails.
-
----
-
-### HIGH-02 — T2 Coherence Time Unit Mismatch: ns Stored in Seconds Fields
+### HIGH-01 — T2 Coherence Time Unit Mismatch via `proposed_patch_ops` / `WeightRegistrationRule` Path
 
 **Severity**: High  
 **Files**: `qubox_v2/calibration/patch_rules.py` (lines 97–100, 118–121); `qubox_v2/experiments/time_domain/coherence.py` (lines 139, 329–330); `qubox_v2/calibration/models.py` (lines 118–121)
@@ -151,39 +126,7 @@ The same pattern applies to `T2Echo` (coherence.py:329 produces `T2_echo` in ns;
 
 ---
 
-### HIGH-03 — Failed Calibration Can Be Applied Without Guard
-
-**Severity**: High  
-**File**: `qubox_v2/calibration/orchestrator.py`, `run_analysis_patch_cycle()` (lines 131–145)
-
-**Evidence**:
-```python
-def run_analysis_patch_cycle(self, exp, *, ..., apply: bool = False) -> dict:
-    artifact = self.run_experiment(exp, **run_kwargs)
-    calibration_result = self.analyze(exp, artifact, **analyze_kwargs)
-    patch = self.build_patch(calibration_result)
-    dry_run = self.apply_patch(patch, dry_run=True)
-    apply_result = self.apply_patch(patch, dry_run=False) if apply else None  # line 145
-```
-
-When `apply=True`, the patch is applied unconditionally regardless of `calibration_result.quality["passed"]`. The `passed` flag is set to `False` when `r_squared < 0.5` (line 62), but is **never checked** before calling `apply_patch`.
-
-**Analysis of `analyze()` quality logic**:
-```python
-r_sq = quality.get("r_squared")
-if r_sq is not None and r_sq < 0.5:
-    quality["passed"] = False
-else:
-    quality["passed"] = True   # passes if r_sq is None (no fit available!)
-```
-
-For readout experiments (`ReadoutGEDiscrimination`, `ReadoutButterflyMeasurement`), there is typically no `fit` attribute on the `AnalysisResult`, so `r_sq` is `None`, and `quality["passed"]` is unconditionally `True` — providing no quality gate at all for these critical experiments.
-
-**Impact**: A calibration run that produced noisy, non-Gaussian, or degenerate IQ blobs will have its results written to `calibration.json` when `apply=True`.
-
----
-
-### HIGH-04 — `sync_ok` Referenced Before Assignment in `apply_patch` Dry-Run Edge Case
+### HIGH-02 — `sync_ok` Referenced Before Assignment in `apply_patch` Dry-Run Edge Case
 
 **Severity**: High (latent)  
 **File**: `qubox_v2/calibration/orchestrator.py`, `apply_patch()` (line 270)
@@ -206,7 +149,7 @@ Python's short-circuit evaluation means `sync_ok` is never evaluated when `not d
 
 ---
 
-### HIGH-05 — Documented `BUGFIX` in `load_exp_config` Never Fixed
+### HIGH-03 — Documented `BUGFIX` in `load_exp_config` Never Fixed
 
 **Severity**: High  
 **File**: `qubox_v2/experiments/legacy_experiment.py`, lines 200–213
@@ -451,32 +394,16 @@ Any system that uses element names other than `"qubit"` or pulse names other tha
 
 ---
 
-### LOW-02 — `_ro_disc_params["qbx_readout_state"]` Has Undocumented Purpose
-
-**Severity**: Low  
-**File**: `qubox_v2/programs/macros/measure.py`, class `measureMacro` (line 160)
-
-```python
-_ro_disc_params = {
-    ...
-    "qbx_readout_state": None,   # ← purpose unknown; never documented
-}
-```
-
-This field appears in the default dict and is passed through some state-serialisation paths, but its purpose, data type, and write/read contract are not documented anywhere in the codebase. No code writes a non-None value through the official API (search of all `.py` files confirms no setter).
-
----
-
-### LOW-03 — `cqed_params.json` / `cQED_attributes` Still the Primary Source of Element Names
+### LOW-02 — `cqed_params.json` / `cQED_attributes` Still the Primary Source of Element Names
 
 **Severity**: Low  
 **File**: `qubox_v2/analysis/cQED_attributes.py` (lines 31–33); `qubox_v2/experiments/experiment_base.py` (line 185)
 
-Despite the new `ChannelRef` / `ExperimentBindings` binding-driven API (documented in `API_REFERENCE.md` §24), the majority of experiments still rely on `self.attr.qb_el`, `self.attr.ro_el`, `self.attr.st_el` string names from `cqed_params.json` for all hardware targeting. The binding system is opt-in and not yet the default path.
+Despite the new `ChannelRef` / `ExperimentBindings` binding-driven API, the majority of experiments still rely on `self.attr.qb_el`, `self.attr.ro_el`, `self.attr.st_el` string names from `cqed_params.json` for all hardware targeting. The binding system is opt-in and not yet the default path.
 
 ---
 
-### LOW-04 — `CoherenceParams.qb_therm_clks` Is Stored in Both `coherence` and `cQED_attributes`
+### LOW-03 — `CoherenceParams.qb_therm_clks` Is Stored in Both `coherence` and `cQED_attributes`
 
 **Severity**: Low  
 **Files**: `qubox_v2/calibration/models.py` (line 123); `qubox_v2/analysis/cQED_attributes.py` (line 44)
@@ -495,7 +422,7 @@ class cQED_attributes:
 
 ---
 
-### LOW-05 — `ReadoutQuality.alpha`/`.beta` Comment References Old Butterfly Nomenclature
+### LOW-04 — `ReadoutQuality.alpha`/`.beta` Comment References Old Butterfly Nomenclature
 
 **Severity**: Low  
 **File**: `qubox_v2/calibration/models.py`, line 52–53
@@ -509,7 +436,7 @@ These fields appear to be remnants of an earlier butterfly analysis output notat
 
 ---
 
-### LOW-06 — `DiscriminationParams` Has Separate `n_shots`, `integration_time_ns` Metadata That Is Never Populated via Pipeline
+### LOW-05 — `DiscriminationParams` Has Separate `n_shots`, `integration_time_ns` Metadata That Is Never Populated via Pipeline
 
 **Severity**: Low  
 **File**: `qubox_v2/calibration/models.py`, class `DiscriminationParams` (lines 42–46)
@@ -525,7 +452,7 @@ These metadata fields (also present in `ReadoutQuality`) were added in schema v1
 
 ---
 
-### LOW-07 — `WeightLabel` Enum Defined but Integration-Weight Keys Are Bare Strings Throughout
+### LOW-06 — `WeightLabel` Enum Defined but Integration-Weight Keys Are Bare Strings Throughout
 
 **Severity**: Low  
 **File**: `qubox_v2/core/types.py` (lines 30–34); everywhere integration weights are referenced
@@ -559,9 +486,8 @@ The `ExperimentBase.attr` duck-type pattern (MED-07) is the bridge between them.
 The `Run → Artifact → CalibrationResult → Patch → Apply` flow in `CalibrationOrchestrator` is architecturally clean and correct. The Patch object with named `UpdateOp` operations (`SetCalibration`, `SetPulseParam`, `TriggerPulseRecompile`, etc.) is an excellent design for auditability and dry-run previewing.
 
 The gaps are:
-- The quality gate for non-fitting experiments is absent (HIGH-03 / MED-04).
-- The `resonator_freq` field mismatch means one rule silently fails (HIGH-01).
-- The unit mismatch for T2 means the patch writes a wrong value (HIGH-02).
+- The quality gate for non-fitting experiments is absent (MED-04).
+- The T2 unit mismatch via `proposed_patch_ops` means the patch writes a wrong value (HIGH-01).
 
 ### 3. `measureMacro` Is a Design Antipattern
 
@@ -613,13 +539,11 @@ Orchestrator.apply_patch(dry_run=False) → mutations to CalibrationStore + puls
 
 The pipeline design is correct. Key integrity gaps:
 
-1. **Quality not gated before apply** (HIGH-03): `apply_patch` is called unconditionally. The `CalibrationResult.passed` flag is computed but never checked by the orchestrator before applying.
+1. **T2 unit mismatch in-flight** (HIGH-01): `T2Ramsey.analyze()` and `T2Echo.analyze()` populate `proposed_patch_ops` in metadata with raw ns values. `WeightRegistrationRule` applies these after `T2RamseyRule`/`T2EchoRule` (which correctly convert ns→s), overwriting the correct seconds value with ns. The in-memory and on-disk value is wrong until the session is restarted.
 
-2. **`resonator_freq` calibration route broken** (HIGH-01): The `resonator_freq` FrequencyRule produces a `SetCalibration` op that references a non-existent Pydantic field; the value is silently dropped.
+2. **Quality gate ineffective for non-fitting experiments** (MED-04): For readout experiments with no `fit` object (e.g., `ReadoutGEDiscrimination`), `quality["passed"]` is always `True` regardless of actual IQ blob quality. The guard in `run_analysis_patch_cycle` is correct, but the quality gate it relies on is meaningless for these experiments.
 
-3. **T2 unit mismatch in-flight** (HIGH-02): The orchestrator stores T2 in ns into seconds fields; normalized only on next load.
-
-4. **No rollback mechanism**: There is no `undo` or transaction boundary. `CalibrationStore.snapshot()` must be called manually before a patch cycle to enable rollback.
+3. **No rollback mechanism**: There is no `undo` or transaction boundary. `CalibrationStore.snapshot()` must be called manually before a patch cycle to enable rollback.
 
 ### Patch Rule Coverage
 
@@ -628,17 +552,17 @@ All standard calibration flows have corresponding patch rules in `default_patch_
 | Calibration Kind | Rule | Status |
 |-----------------|------|--------|
 | `"t1"` | `T1Rule` | ✅ |
-| `"t2_ramsey"` | `T2RamseyRule` | ✅ (unit bug HIGH-02) |
-| `"t2_echo"` | `T2EchoRule` | ✅ (unit bug HIGH-02) |
+| `"t2_ramsey"` | `T2RamseyRule` + `WeightRegistrationRule` | ⚠️ (unit bug HIGH-01: proposed_patch_ops ns→WeightRegistrationRule overwrites) |
+| `"t2_echo"` | `T2EchoRule` + `WeightRegistrationRule` | ⚠️ (unit bug HIGH-01: same as above) |
 | `"qubit_freq"` | `FrequencyRule(field="qubit_freq")` | ✅ |
 | `"ef_freq"` | `FrequencyRule(field="ef_freq")` | ✅ |
-| `"resonator_freq"` | `FrequencyRule(field="resonator_freq")` | ❌ (HIGH-01: field missing) |
+| `"resonator_freq"` | `FrequencyRule(field="resonator_freq")` | ✅ (`resonator_freq` field present in `ElementFrequencies`) |
 | `"pi_amp"` | `PiAmpRule` | ✅ |
 | `"drag_alpha"` | `DragAlphaRule` | ✅ |
 | `"pulse_train"` | `PulseTrainRule` | ✅ |
-| `"ReadoutGEDiscrimination"` | `DiscriminationRule` | ✅ (no quality gate) |
+| `"ReadoutGEDiscrimination"` | `DiscriminationRule` | ✅ (no quality gate: MED-04) |
 | `"ReadoutWeightsOptimization"` | `WeightRegistrationRule` | ✅ |
-| `"ReadoutButterflyMeasurement"` | `ReadoutQualityRule` | ✅ (alpha/beta orphaned) |
+| `"ReadoutButterflyMeasurement"` | `ReadoutQualityRule` | ✅ (alpha/beta orphaned: MED-03) |
 
 ---
 
@@ -671,26 +595,16 @@ This is a strong protection against using stale calibrations after hardware rewi
 
 ## Recommended Strategic Improvements (Non-Breaking)
 
-### 1. Fix `resonator_freq` Field Mismatch (HIGH-01)
+### 1. Fix T2 Unit Mismatch in `proposed_patch_ops` (HIGH-01)
 
-Add `resonator_freq: float | None = None` to `ElementFrequencies` in `calibration/models.py`, or change `FrequencyRule`'s `field` to `"rf_freq"` which already exists. A one-line change with zero API breakage.
-
-### 2. Fix T2 Unit Mismatch in Patch Rules (HIGH-02)
-
-In `T2RamseyRule` and `T2EchoRule`, convert the incoming ns value to seconds before patching:
+In `T2Ramsey.analyze()` and `T2Echo.analyze()` (`experiments/time_domain/coherence.py`), convert the fit value to seconds before populating `proposed_patch_ops`:
 ```python
-# T2RamseyRule — add unit conversion
-if "T2_star" in params:
-    t2_s = float(params["T2_star"]) * 1e-9   # ns → s
-    patch.add("SetCalibration", path=f"coherence.{self.element}.T2_ramsey", value=t2_s)
+# coherence.py — T2Ramsey.analyze() proposed_patch_ops correction
+"value": float(fit.params["T2"]) * 1e-9,   # ns → s
 ```
-This eliminates reliance on the `_normalize_coherence_units` correction-on-reload.
+This ensures the `WeightRegistrationRule` path also produces the correct seconds value, and eliminates the overwrite race with `T2RamseyRule`/`T2EchoRule`. Alternatively, suppress the `SetCalibration` ops for `T2_ramsey`/`T2_echo` from `proposed_patch_ops` entirely and rely solely on the dedicated `T2RamseyRule`/`T2EchoRule` which already perform the conversion correctly.
 
-### 3. Guard `apply_patch` with `CalibrationResult.passed` (HIGH-03)
-
-In `run_analysis_patch_cycle()`, add a `check_quality` parameter (default `True`) that prevents `apply_patch(dry_run=False)` when `calibration_result.quality.get("passed") is False`. This is a 3-line change that prevents silent calibration corruption.
-
-### 4. Replace Bare Dict Access with `.get()` for `threshold` (CRIT-02)
+### 2. Replace Bare Dict Access with `.get()` for `threshold` (CRIT-02)
 
 In `programs/builders/readout.py:668` and `programs/builders/simulation.py:34`, change:
 ```python
@@ -702,11 +616,11 @@ thr = measureMacro._ro_disc_params.get("threshold") or 0.0
 ```
 And add a warning log if the value was `None`.
 
-### 5. Add Explicit Quality Metric for Readout Experiments (MED-04)
+### 3. Add Explicit Quality Metric for Readout Experiments (MED-04)
 
 `ReadoutGEDiscrimination.analyze()` should populate `metadata["quality"]` with a fidelity-based threshold (e.g., `passed = fidelity > 85.0`). `CalibrationOrchestrator.analyze()` should extract this if present. One approach: extend `AnalysisResult` to carry a `quality_passed: bool` flag.
 
-### 6. Consolidate Duplicate Utility Functions (MED-01)
+### 4. Consolidate Duplicate Utility Functions (MED-01)
 
 Remove `create_if_frequencies`, `create_clks_array`, `_make_lo_segments`, `_if_frequencies_for_segment`, `_merge_segments` from `legacy_experiment.py` and have it import from `experiment_base.py`. This requires verifying that signatures are compatible (they are nearly identical already).
 
