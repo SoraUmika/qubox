@@ -665,7 +665,7 @@ def active_qubit_reset_benchmark(qb_el: str, post_sel_policy, post_sel_kwargs, r
     MAX_PREP_TRIALS = int(MAX_PREP_TRIALS)
 
     # Threshold used for the *correction* (the post-select policy can be different)
-    thr=measureMacro._ro_disc_params["threshold"]
+    thr = measureMacro._ro_disc_params.get("threshold") or 0.0
     with program() as active_reset_benchmark:
         # --- Per-measurement I/Q ---
         I0, Q0 = declare(fixed), declare(fixed)
