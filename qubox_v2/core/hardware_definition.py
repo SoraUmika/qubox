@@ -1,10 +1,11 @@
 # qubox_v2/core/hardware_definition.py
 """Notebook-first hardware definition.
 
-Lets users define all hardware elements, LO/IF frequencies, and wiring
-in the notebook.  ``HardwareDefinition`` generates the full
-``hardware.json`` (controllers, octaves, elements, __qubox, octave_links)
-and seeds ``cqed_params.json`` (element names + initial frequencies).
+Lets users define all hardware elements, LO/IF frequencies, wiring, and
+external devices in the notebook.  ``HardwareDefinition`` generates the full
+``hardware.json`` (controllers, octaves, elements, __qubox, octave_links),
+seeds ``cqed_params.json`` (element names + initial frequencies), and
+optionally generates ``devices.json`` (external instruments).
 
 Usage::
 
@@ -15,10 +16,15 @@ Usage::
     hw.add_control("qubit", rf_out=3, lo_frequency=6.2e9, ...)
     hw.set_roles(qubit="qubit", readout="resonator", storage="storage")
 
-    # Pass to SessionManager — hardware.json is auto-generated
+    # External devices (optional — generates devices.json)
+    hw.set_instrument_server("10.0.0.1", 50183)
+    hw.add_device("external_lo", instrument_name="sc_34F3",
+                  settings={"frequency": 3.5e9, "power": 8.5})
+
+    # Pass to SessionManager — config files are auto-generated
     session = SessionManager.from_sample(..., hardware=hw, ...)
 
-On subsequent sessions, the persisted ``hardware.json`` is loaded
+On subsequent sessions, the persisted config files are loaded
 automatically and no ``HardwareDefinition`` is needed.
 """
 from __future__ import annotations
@@ -59,6 +65,18 @@ class _ElementDef:
     # Each entry: (port_number, delay, buffer)
 
 
+@dataclass
+class _DeviceDef:
+    """Internal description of one external instrument."""
+
+    name: str
+    driver: str = "instrumentserver:Instrument"
+    backend: str = "instrumentserver"
+    connect: dict[str, Any] = field(default_factory=dict)
+    settings: dict[str, Any] = field(default_factory=dict)
+    enabled: bool = True
+
+
 # ---------------------------------------------------------------------------
 # Public builder
 # ---------------------------------------------------------------------------
@@ -80,6 +98,8 @@ class HardwareDefinition:
         self._external_los: dict[int, dict[str, str]] = {}
         self._roles: dict[str, str] = {}
         self._adc_offsets: dict[int, float] = {}
+        self._devices: dict[str, _DeviceDef] = {}
+        self._instrument_server: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
     # Builder methods
@@ -245,6 +265,97 @@ class HardwareDefinition:
         self._adc_offsets = dict(offsets)
         return self
 
+    def set_instrument_server(
+        self, host: str, port: int, timeout: int = 60000
+    ) -> "HardwareDefinition":
+        """Set shared InstrumentServer connection defaults for :meth:`add_device`.
+
+        Devices added after this call inherit these connection parameters
+        unless ``connect=`` is explicitly provided.
+
+        Parameters
+        ----------
+        host : str
+            InstrumentServer hostname or IP address.
+        port : int
+            InstrumentServer port number.
+        timeout : int
+            Connection timeout in milliseconds (default 60000).
+        """
+        self._instrument_server = {
+            "host": host,
+            "port": port,
+            "timeout": timeout,
+        }
+        return self
+
+    def add_device(
+        self,
+        name: str,
+        *,
+        driver: str = "instrumentserver:Instrument",
+        backend: str | None = None,
+        connect: dict[str, Any] | None = None,
+        settings: dict[str, Any] | None = None,
+        enabled: bool = True,
+        instrument_name: str | None = None,
+    ) -> "HardwareDefinition":
+        """Add an external device definition (written to ``devices.json``).
+
+        When :meth:`set_instrument_server` has been called and *connect* is
+        not provided, the device inherits the shared server connection
+        with ``instrument_name`` set to *instrument_name* (or *name* if
+        not specified).
+
+        Parameters
+        ----------
+        name : str
+            Device identifier (e.g. ``"octave_external_lo2"``).
+        driver : str
+            Python class path ``"module:ClassName"`` (default
+            ``"instrumentserver:Instrument"``).
+        backend : str, optional
+            ``"instrumentserver"``, ``"qcodes"``, or ``"direct"``.
+            Defaults to ``"instrumentserver"`` when a shared server is set,
+            ``"qcodes"`` otherwise.
+        connect : dict, optional
+            Connection parameters.  When *None* and a shared server is set,
+            auto-populated from :meth:`set_instrument_server`.
+        settings : dict, optional
+            Initial device settings to apply on connect.
+        enabled : bool
+            Include this device in ``instantiate_all()`` (default True).
+        instrument_name : str, optional
+            Shorthand for ``connect["instrument_name"]``.  Only used when
+            *connect* is *None* and a shared server is set.  Defaults to
+            *name*.
+        """
+        if name in self._devices:
+            raise ConfigError(f"Device '{name}' already defined.")
+
+        # Resolve backend
+        if backend is None:
+            backend = "instrumentserver" if self._instrument_server else "qcodes"
+
+        # Resolve connect dict
+        if connect is None and self._instrument_server is not None:
+            connect = {
+                **self._instrument_server,
+                "instrument_name": instrument_name or name,
+            }
+        elif connect is None:
+            connect = {}
+
+        self._devices[name] = _DeviceDef(
+            name=name,
+            driver=driver,
+            backend=backend,
+            connect=connect,
+            settings=dict(settings) if settings else {},
+            enabled=enabled,
+        )
+        return self
+
     # ------------------------------------------------------------------
     # Validation
     # ------------------------------------------------------------------
@@ -341,6 +452,18 @@ class HardwareDefinition:
                         f"port={port} out of range 1-10."
                     )
 
+        # 10. External LO device cross-reference (warning, not error)
+        defined_devices = set(self._devices.keys())
+        for rf_out, lo_info in self._external_los.items():
+            dev_name = lo_info.get("device", "")
+            if dev_name and dev_name not in defined_devices:
+                _logger.warning(
+                    "set_external_lo(rf_out=%d) references device '%s' which "
+                    "was not defined via add_device(). If it exists in a "
+                    "pre-existing devices.json this is fine.",
+                    rf_out, dev_name,
+                )
+
         return errors
 
     # ------------------------------------------------------------------
@@ -408,6 +531,26 @@ class HardwareDefinition:
         return seed
 
     # ------------------------------------------------------------------
+    # Generation: devices.json
+    # ------------------------------------------------------------------
+    def to_devices_dict(self) -> dict[str, Any]:
+        """Generate the devices.json content.
+
+        Returns an empty dict if no devices have been defined via
+        :meth:`add_device`.
+        """
+        return {
+            dev.name: {
+                "driver": dev.driver,
+                "backend": dev.backend,
+                "connect": dev.connect,
+                "settings": dev.settings,
+                "enabled": dev.enabled,
+            }
+            for dev in self._devices.values()
+        }
+
+    # ------------------------------------------------------------------
     # Persistence helpers
     # ------------------------------------------------------------------
     def save_hardware(self, path: str | Path) -> Path:
@@ -443,6 +586,39 @@ class HardwareDefinition:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(seed, indent=4), encoding="utf-8")
         _logger.info("Seeded cqed_params.json → %s", p)
+        return p
+
+    def save_devices(
+        self, path: str | Path, *, merge_existing: bool = True
+    ) -> Path | None:
+        """Write devices.json to *path*.
+
+        Returns *None* (and writes nothing) if no devices have been
+        defined via :meth:`add_device`.
+
+        When *merge_existing* is True and the file already exists, the
+        builder's device definitions are merged into the existing file
+        (preserving any manually-added devices).  Devices with matching
+        names are overwritten by the builder definitions.
+        """
+        devices = self.to_devices_dict()
+        if not devices:
+            return None
+
+        p = Path(path)
+
+        if merge_existing and p.exists():
+            try:
+                existing = json.loads(p.read_text(encoding="utf-8-sig"))
+            except Exception:
+                existing = {}
+            if isinstance(existing, dict):
+                existing.update(devices)
+                devices = existing
+
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(devices, indent=2), encoding="utf-8")
+        _logger.info("Generated devices.json → %s", p)
         return p
 
     # ------------------------------------------------------------------
@@ -645,10 +821,15 @@ class HardwareDefinition:
     # ------------------------------------------------------------------
     def __repr__(self) -> str:
         el_names = sorted(self._elements.keys())
-        return (
-            f"HardwareDefinition(controller={self._controller!r}, "
-            f"octave={self._octave!r}, elements={el_names})"
-        )
+        dev_names = sorted(self._devices.keys())
+        parts = [
+            f"controller={self._controller!r}",
+            f"octave={self._octave!r}",
+            f"elements={el_names}",
+        ]
+        if dev_names:
+            parts.append(f"devices={dev_names}")
+        return f"HardwareDefinition({', '.join(parts)})"
 
 
 # ---------------------------------------------------------------------------

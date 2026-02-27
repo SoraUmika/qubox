@@ -28,6 +28,65 @@ Each entry must include:
 
 ## Entries
 
+### 2026-02-26 — HardwareDefinition Device Builder (v2.3)
+
+**Classification: Moderate**
+
+Extended `HardwareDefinition` to generate `devices.json` alongside
+`hardware.json` and `cqed_params.json`, making notebook cell 4 the single
+source of truth for all hardware setup — no manual JSON editing required.
+
+**Summary:**
+
+1. **`_DeviceDef` dataclass (`hardware_definition.py`)**
+   - Internal representation for external instrument definitions: `name`,
+     `driver`, `backend`, `connect`, `settings`, `enabled`.
+
+2. **`set_instrument_server()` method**
+   - Stores shared InstrumentServer connection defaults (`host`, `port`,
+     `timeout`).  Devices added after this call auto-inherit these
+     connection parameters.
+
+3. **`add_device()` method**
+   - Adds an external device with smart defaults: when a shared server is
+     set and `connect=None`, auto-populates the connect dict.
+     `instrument_name` shorthand avoids verbose connect dicts for the
+     common InstrumentServer case.
+
+4. **`to_devices_dict()` / `save_devices()` methods**
+   - `to_devices_dict()` returns the flat dict matching the existing
+     `devices.json` schema.
+   - `save_devices(path, merge_existing=True)` writes the file, preserving
+     any manually-added devices.  Returns `None` if no devices defined.
+
+5. **Validation check 10**
+   - `validate()` now warns (not errors) when `set_external_lo(device=X)`
+     references a device not defined via `add_device()`.
+
+6. **Session integration (`session.py`)**
+   - `_apply_hardware_definition()` now also generates `devices.json` after
+     `hardware.json` and `cqed_params.json`.
+
+7. **Notebook update (`post_cavity_experiment_context.ipynb`)**
+   - Cell 4 updated with `set_instrument_server()` and `add_device()` calls
+     for all 4 external instruments (`octave_external_lo2`,
+     `octave_external_lo4`, `octodac_bf`, `sa124b`).
+
+8. **Documentation (`API_REFERENCE.md`)**
+   - Added Section 27 "HardwareDefinition Builder (v2.3)" covering
+     constructor, element methods, device builder methods, generation &
+     persistence, validation, session integration, and usage example.
+
+**Files affected:**
+
+- `qubox_v2/core/hardware_definition.py`
+- `qubox_v2/experiments/session.py`
+- `notebooks/post_cavity_experiment_context.ipynb`
+- `qubox_v2/docs/API_REFERENCE.md` — Section 27
+- `qubox_v2/docs/CHANGELOG.md` — This entry
+
+---
+
 ### 2026-02-26 — QUA Program Build & Simulation Refactor (v2.2)
 
 **Classification: Major**

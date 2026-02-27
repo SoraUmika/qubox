@@ -425,7 +425,7 @@ class SessionManager:
         return self.readout_handle(alias, **kw)
 
     def _apply_hardware_definition(self, hw_def: Any) -> None:
-        """Generate hardware.json and seed cqed_params.json from a HardwareDefinition.
+        """Generate hardware.json, cqed_params.json, and devices.json from a HardwareDefinition.
 
         Called before ``ConfigEngine`` creation when the user passes a
         ``HardwareDefinition`` object to the session constructor.
@@ -433,7 +433,8 @@ class SessionManager:
         When the ``HardwareDefinition`` is provided it *always* regenerates
         hardware.json (the user explicitly wants to set/update the wiring).
         cqed_params.json is seeded with element names and initial frequencies
-        but existing physics parameters are preserved.
+        but existing physics parameters are preserved.  devices.json is
+        generated only when :meth:`HardwareDefinition.add_device` was called.
         """
         from ..core.hardware_definition import HardwareDefinition
 
@@ -451,13 +452,15 @@ class SessionManager:
             )
 
         # Determine target paths.
-        # hardware.json is a sample-level file (shared across cooldowns).
+        # hardware.json and devices.json are sample-level files (shared across cooldowns).
         if self._sample_config_dir is not None:
             hw_path = self._sample_config_dir / "hardware.json"
             cqed_path = self._sample_config_dir / "cqed_params.json"
+            dev_path = self._sample_config_dir / "devices.json"
         else:
             hw_path = self.experiment_path / "config" / "hardware.json"
             cqed_path = self.experiment_path / "config" / "cqed_params.json"
+            dev_path = self.experiment_path / "config" / "devices.json"
 
         # Warn if overwriting an existing hardware.json
         if hw_path.exists():
@@ -471,6 +474,9 @@ class SessionManager:
 
         # Seed cqed_params.json (merge with existing to preserve physics params)
         hw_def.save_cqed_params(cqed_path, merge_existing=True)
+
+        # Generate devices.json (merge with existing to preserve manual devices)
+        hw_def.save_devices(dev_path, merge_existing=True)
 
     @classmethod
     def from_sample(
