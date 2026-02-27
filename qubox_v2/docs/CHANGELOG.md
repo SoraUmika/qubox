@@ -28,6 +28,57 @@ Each entry must include:
 
 ## Entries
 
+### 2026-02-27 — Generic Alias System (v2.3.1)
+
+**Classification: Minor**
+
+Replaced the fixed-role `set_roles(qubit=..., readout=..., storage=...)` API
+with a generic `set_aliases()` that accepts arbitrary alias→element mappings.
+No mandatory role names are enforced by the builder; well-known names
+(`"qubit"`, `"readout"`, `"storage"`) are convention-mapped to legacy
+`cqed_params.json` fields for backward compatibility.
+
+**Summary:**
+
+1. **`set_aliases()` replaces `set_roles()` (`hardware_definition.py`)**
+   - Accepts `dict[str, str]` and/or `**kwargs` (merged, kwargs win).
+   - No specific alias names are required — the builder is fully generic.
+   - Internally stores `self._aliases` instead of `self._roles`.
+
+2. **Validation relaxed**
+   - Removed check 1 (qubit/readout roles required).
+   - Check 2 (readout alias validation) only triggers when a `"readout"`
+     alias is present.
+   - Remaining checks renumbered 1–9.
+
+3. **`to_cqed_seed()` convention-based mapping**
+   - Well-known aliases map to legacy fields: `"qubit"` → `qb_el`/`qb_fq`,
+     `"readout"` → `ro_el`/`ro_fq`, `"storage"` → `st_el`/`st_fq`.
+   - All aliases stored under `__aliases` key for forward-compatible readers.
+
+4. **`_build_qubox_extras()` generic roles**
+   - `__qubox.bindings.roles` now populated from all aliases (not just
+     hardcoded qubit/readout/storage).
+   - `readout_acquire` auto-added when `"readout"` alias targets a readout
+     element with `rf_in`.
+
+5. **Notebook update (`post_cavity_experiment_context.ipynb`)**
+   - Cell 4: `set_roles(...)` → `set_aliases(...)`.
+
+6. **Documentation (`API_REFERENCE.md`)**
+   - Section 27.4 renamed to "Wiring & Alias Methods"; `set_roles()` docs
+     replaced with `set_aliases()` including alias→cqed_params mapping table.
+   - Validation table updated (checks renumbered, check 1 removed).
+
+**Files affected:**
+
+- `qubox_v2/core/hardware_definition.py`
+- `notebooks/post_cavity_experiment_context.ipynb`
+- `qubox_v2/docs/API_REFERENCE.md` — Section 27
+- `qubox_v2/docs/CHANGELOG.md` — This entry
+
+---
+
 ### 2026-02-26 — HardwareDefinition Device Builder (v2.3)
 
 **Classification: Moderate**
