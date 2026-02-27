@@ -1519,8 +1519,8 @@ class measureMacro:
         # Threshold + gain
         cls.reset_gain()
 
-        # Clear readout metrics
-        cls._ro_disc_params    = {k: None for k in cls._ro_disc_params}
+        # Clear readout metrics — restore non-None defaults where applicable
+        cls._ro_disc_params    = {k: ({} if k == "norm_params" else None) for k in cls._ro_disc_params}
         cls._ro_quality_params = {k: None for k in cls._ro_quality_params}
 
         # Clear drive frequency

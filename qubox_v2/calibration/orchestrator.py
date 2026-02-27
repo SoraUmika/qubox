@@ -142,7 +142,16 @@ class CalibrationOrchestrator:
         calibration_result = self.analyze(exp, artifact, **analyze_kwargs)
         patch = self.build_patch(calibration_result)
         dry_run = self.apply_patch(patch, dry_run=True)
-        apply_result = self.apply_patch(patch, dry_run=False) if apply else None
+        if apply and not calibration_result.passed:
+            _logger.warning(
+                "Skipping patch application: calibration_result.passed=False for kind=%r "
+                "(reason: %s). Dry-run preview still available.",
+                calibration_result.kind,
+                calibration_result.quality.get("failure_reason", "unknown"),
+            )
+            apply_result = None
+        else:
+            apply_result = self.apply_patch(patch, dry_run=False) if apply else None
 
         return {
             "artifact": artifact,
