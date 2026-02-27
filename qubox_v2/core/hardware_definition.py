@@ -14,7 +14,7 @@ Usage::
     hw = HardwareDefinition(controller="con1", octave="oct1")
     hw.add_readout("resonator", rf_out=1, rf_in=1, lo_frequency=8.8e9, ...)
     hw.add_control("qubit", rf_out=3, lo_frequency=6.2e9, ...)
-    hw.set_roles(qubit="qubit", readout="resonator", storage="storage")
+    hw.set_aliases(qubit="qubit", readout="resonator", storage="storage")
 
     # External devices (optional — generates devices.json)
     hw.set_instrument_server("10.0.0.1", 50183)
@@ -96,7 +96,7 @@ class HardwareDefinition:
         self._octave = octave
         self._elements: dict[str, _ElementDef] = {}
         self._external_los: dict[int, dict[str, str]] = {}
-        self._roles: dict[str, str] = {}
+        self._aliases: dict[str, str] = {}
         self._adc_offsets: dict[int, float] = {}
         self._devices: dict[str, _DeviceDef] = {}
         self._instrument_server: dict[str, Any] | None = None
@@ -229,27 +229,26 @@ class HardwareDefinition:
         self._external_los[rf_out] = {"device": device, "lo_port": lo_port}
         return self
 
-    def set_roles(
+    def set_aliases(
         self,
-        *,
-        qubit: str,
-        readout: str,
-        storage: str | None = None,
+        aliases: dict[str, str] | None = None,
+        **kwargs: str,
     ) -> "HardwareDefinition":
-        """Assign element names to experiment roles.
+        """Map human-friendly alias names to element names.
 
-        Parameters
-        ----------
-        qubit : str
-            Element name to use as the qubit drive channel.
-        readout : str
-            Element name to use as the readout channel.
-        storage : str, optional
-            Element name to use as the storage cavity channel.
+        Accepts a dict, keyword arguments, or both (merged, kwargs win).
+        Alias names are arbitrary.  Well-known names (``"qubit"``,
+        ``"readout"``, ``"storage"``) are mapped to legacy cqed_params
+        fields when generating the seed file.
+
+        Examples::
+
+            hw.set_aliases(qubit="transmon", readout="resonator")
+            hw.set_aliases({"qubit": "transmon", "storage": "cavity"})
         """
-        self._roles = {"qubit": qubit, "readout": readout}
-        if storage is not None:
-            self._roles["storage"] = storage
+        merged = dict(aliases) if aliases else {}
+        merged.update(kwargs)
+        self._aliases.update(merged)
         return self
 
     def set_adc_offsets(
@@ -369,21 +368,15 @@ class HardwareDefinition:
         """
         errors: list[str] = []
 
-        # 1. Required roles
-        if "qubit" not in self._roles:
-            errors.append("Role 'qubit' is required. Call set_roles().")
-        if "readout" not in self._roles:
-            errors.append("Role 'readout' is required. Call set_roles().")
-
-        # 2. Role elements must exist
-        for role, name in self._roles.items():
+        # 1. Alias elements must exist
+        for alias, name in self._aliases.items():
             if name and name not in self._elements:
                 errors.append(
-                    f"Role '{role}' references unknown element '{name}'."
+                    f"Alias '{alias}' references unknown element '{name}'."
                 )
 
-        # 3. Readout element must have rf_in
-        readout_name = self._roles.get("readout")
+        # 2. Readout alias target must have rf_in (if "readout" alias set)
+        readout_name = self._aliases.get("readout")
         if readout_name and readout_name in self._elements:
             el = self._elements[readout_name]
             if el.kind != "readout" or el.rf_in is None:
@@ -392,7 +385,7 @@ class HardwareDefinition:
                     "with add_readout() including rf_in."
                 )
 
-        # 4. RF output port conflicts
+        # 3. RF output port conflicts
         port_users: dict[int, list[str]] = {}
         for el in self._elements.values():
             port_users.setdefault(el.rf_out, []).append(el.name)
@@ -402,14 +395,14 @@ class HardwareDefinition:
                     f"RF output port {port} used by multiple elements: {users}."
                 )
 
-        # 5. RF output port range (OPX+ Octave: 1-5)
+        # 4. RF output port range (OPX+ Octave: 1-5)
         for el in self._elements.values():
             if not (1 <= el.rf_out <= 5):
                 errors.append(
                     f"Element '{el.name}': rf_out={el.rf_out} outside range 1-5."
                 )
 
-        # 6. IF frequency range (OPX+ limit: +/- 400 MHz)
+        # 5. IF frequency range (OPX+ limit: +/- 400 MHz)
         for el in self._elements.values():
             if_freq = self._compute_if(el)
             if abs(if_freq) > 400e6:
@@ -418,7 +411,7 @@ class HardwareDefinition:
                     "exceeds OPX+ limit of +/- 400 MHz."
                 )
 
-        # 7. External LO consistency
+        # 6. External LO consistency
         for rf_out, lo_info in self._external_los.items():
             found = False
             for el in self._elements.values():
@@ -435,7 +428,7 @@ class HardwareDefinition:
                     "no element uses that port."
                 )
 
-        # 8. LO frequency must be positive
+        # 7. LO frequency must be positive
         for el in self._elements.values():
             if el.lo_frequency <= 0:
                 errors.append(
@@ -443,7 +436,7 @@ class HardwareDefinition:
                     f"got {el.lo_frequency}."
                 )
 
-        # 9. Digital input port range
+        # 8. Digital input port range
         for el in self._elements.values():
             for di_name, (port, _delay, _buf) in el.digital_inputs.items():
                 if not (1 <= port <= 10):
@@ -452,7 +445,7 @@ class HardwareDefinition:
                         f"port={port} out of range 1-10."
                     )
 
-        # 10. External LO device cross-reference (warning, not error)
+        # 9. External LO device cross-reference (warning, not error)
         defined_devices = set(self._devices.keys())
         for rf_out, lo_info in self._external_los.items():
             dev_name = lo_info.get("device", "")
@@ -507,26 +500,32 @@ class HardwareDefinition:
         Only produces element names and initial frequencies.
         Physics parameters (chi, kappa, T1, T2, etc.) are intentionally
         omitted — they come from calibration experiments.
+
+        Well-known alias names are mapped to legacy cqed_params fields:
+        ``"qubit"`` → ``qb_el``/``qb_fq``, ``"readout"`` → ``ro_el``/``ro_fq``,
+        ``"storage"`` → ``st_el``/``st_fq``.  All aliases are also stored
+        under the ``__aliases`` key for forward-compatible readers.
         """
         seed: dict[str, Any] = {}
 
-        readout_name = self._roles.get("readout")
-        qubit_name = self._roles.get("qubit")
-        storage_name = self._roles.get("storage")
+        # Well-known alias → legacy cqed_params field
+        _ALIAS_TO_FIELD = {
+            "qubit":   ("qb_el", "qb_fq"),
+            "readout": ("ro_el", "ro_fq"),
+            "storage": ("st_el", "st_fq"),
+        }
+        for alias, (el_field, fq_field) in _ALIAS_TO_FIELD.items():
+            el_name = self._aliases.get(alias)
+            if el_name:
+                seed[el_field] = el_name
+                if el_name in self._elements:
+                    seed[fq_field] = self._element_rf_frequency(
+                        self._elements[el_name]
+                    )
 
-        seed["ro_el"] = readout_name
-        seed["qb_el"] = qubit_name
-        if storage_name:
-            seed["st_el"] = storage_name
-
-        if readout_name and readout_name in self._elements:
-            seed["ro_fq"] = self._element_rf_frequency(self._elements[readout_name])
-
-        if qubit_name and qubit_name in self._elements:
-            seed["qb_fq"] = self._element_rf_frequency(self._elements[qubit_name])
-
-        if storage_name and storage_name in self._elements:
-            seed["st_fq"] = self._element_rf_frequency(self._elements[storage_name])
+        # Store full alias map for forward-compatible readers
+        if self._aliases:
+            seed["__aliases"] = dict(self._aliases)
 
         return seed
 
@@ -759,22 +758,22 @@ class HardwareDefinition:
                     "weight_keys": [["cos", "sin"], ["minus_sin", "cos"]],
                 }
 
-        # --- Bindings: roles ---
-        readout_name = self._roles.get("readout")
-        roles: dict[str, str] = {
-            "qubit": self._roles["qubit"],
-            "readout_drive": readout_name,
-            "readout_acquire": f"{readout_name}_adc",
-        }
-        if "storage" in self._roles and self._roles["storage"]:
-            roles["storage"] = self._roles["storage"]
+        # --- Bindings: roles (derived from aliases) ---
+        roles: dict[str, str] = {}
+        for alias, el_name in self._aliases.items():
+            roles[alias] = el_name
+            # Auto-add readout_acquire when "readout" alias targets a readout element
+            if alias == "readout" and el_name in self._elements:
+                el = self._elements[el_name]
+                if el.kind == "readout" and el.rf_in is not None:
+                    roles["readout_acquire"] = f"{el_name}_adc"
 
-        # --- Bindings: extras (elements not assigned to a role) ---
-        role_names = set(self._roles.values())
+        # --- Bindings: extras (elements not referenced by any alias) ---
+        aliased_elements = set(self._aliases.values())
         extras = {
             el.name: el.name
             for el in self._elements.values()
-            if el.name not in role_names
+            if el.name not in aliased_elements
         }
 
         # --- Aliases: element name → canonical channel ID ---
@@ -827,6 +826,8 @@ class HardwareDefinition:
             f"octave={self._octave!r}",
             f"elements={el_names}",
         ]
+        if self._aliases:
+            parts.append(f"aliases={self._aliases}")
         if dev_names:
             parts.append(f"devices={dev_names}")
         return f"HardwareDefinition({', '.join(parts)})"
