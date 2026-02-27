@@ -95,6 +95,7 @@ class ElementFrequencies(BaseModel):
     lo_freq: float | None = None   # Hz — local oscillator frequency
     if_freq: float | None = None   # Hz — intermediate frequency (may be negative)
     rf_freq: float | None = None   # Hz — absolute RF drive frequency
+    resonator_freq: float | None = None  # Hz — calibrated resonator/readout frequency
     qubit_freq: float | None = None   # Hz — GE transition frequency (legacy / canonical GE slot)
     ef_freq: float | None = None      # Hz — EF transition frequency (canonical EF slot)
     anharmonicity: float | None = None
