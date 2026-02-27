@@ -95,7 +95,8 @@ class T2RamseyRule:
         params = result.params or {}
         patch = Patch(reason="T2RamseyRule", provenance={"kind": result.kind, "element": self.element})
         if "T2_star" in params:
-            patch.add("SetCalibration", path=f"coherence.{self.element}.T2_ramsey", value=params["T2_star"])
+            # T2_star from analysis is in nanoseconds; CoherenceParams.T2_ramsey is seconds
+            patch.add("SetCalibration", path=f"coherence.{self.element}.T2_ramsey", value=float(params["T2_star"]) * 1e-9)
         if "T2_star_us" in params:
             patch.add("SetCalibration", path=f"coherence.{self.element}.T2_star_us", value=params["T2_star_us"])
         if "qb_freq_corrected_Hz" in params:
@@ -116,7 +117,8 @@ class T2EchoRule:
         params = result.params or {}
         patch = Patch(reason="T2EchoRule", provenance={"kind": result.kind, "element": self.element})
         if "T2_echo" in params:
-            patch.add("SetCalibration", path=f"coherence.{self.element}.T2_echo", value=params["T2_echo"])
+            # T2_echo from analysis is in nanoseconds; CoherenceParams.T2_echo is seconds
+            patch.add("SetCalibration", path=f"coherence.{self.element}.T2_echo", value=float(params["T2_echo"]) * 1e-9)
         if "T2_echo_us" in params:
             patch.add("SetCalibration", path=f"coherence.{self.element}.T2_echo_us", value=params["T2_echo_us"])
         return patch if patch.updates else None

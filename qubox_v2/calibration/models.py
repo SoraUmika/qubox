@@ -97,6 +97,7 @@ class ElementFrequencies(BaseModel):
     rf_freq: float | None = None   # Hz — absolute RF drive frequency
     qubit_freq: float | None = None   # Hz — GE transition frequency (legacy / canonical GE slot)
     ef_freq: float | None = None      # Hz — EF transition frequency (canonical EF slot)
+    resonator_freq: float | None = None  # Hz — calibrated resonator frequency
     anharmonicity: float | None = None
     fock_freqs: list[float] | None = None
     chi: float | None = None       # dispersive shift (Hz)
