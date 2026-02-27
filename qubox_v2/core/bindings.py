@@ -15,7 +15,16 @@ Key types
 - ``ExperimentBindings``: named collection of bindings passed to experiments.
 - ``AliasMap``: ``dict[str, ChannelRef]`` — human-friendly names → ports.
 
-See also: ``docs/api_refactor_output_binding_report.md`` §2.
+Roleless experiment primitives (v2.1 API)
+-----------------------------------------
+- ``DriveTarget``: generic frozen control output (no role vocabulary).
+- ``ReadoutCal``: frozen calibration artifact snapshot.
+- ``ReadoutHandle``: ``ReadoutBinding`` + ``ReadoutCal`` + element + operation.
+- ``ElementFreq``: resolved frequency for one element.
+- ``FrequencyPlan``: pure, immutable frequency plan for one experiment run.
+
+See also: ``docs/api_refactor_output_binding_report.md`` §2,
+``docs/roleless_experiments_plan_v2.md``.
 """
 from __future__ import annotations
 
@@ -270,6 +279,346 @@ Example::
 
 
 # ---------------------------------------------------------------------------
+# Roleless Experiment Primitives (v2.1 API)
+# ---------------------------------------------------------------------------
+# These types implement the "Roleless Experiments v2" design plan.
+# They carry NO role vocabulary (no field named "qubit" or "storage").
+# Experiments type-check for DriveTarget and ReadoutHandle, never for
+# QubitSetup or CavitySetup.
+
+
+def _tuple_matrix(
+    m: Any,
+) -> tuple[tuple[float, ...], ...] | None:
+    """Convert a nested sequence to a tuple-of-tuples, or return None."""
+    if m is None:
+        return None
+    try:
+        return tuple(tuple(float(x) for x in row) for row in m)
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass(frozen=True)
+class DriveTarget:
+    """A single control output channel for driving.
+
+    Generic binding primitive with no role vocabulary -- the same type
+    for qubit, storage, pump, or any other control line.
+
+    Attributes
+    ----------
+    element : str
+        QM element name (ephemeral at runtime).
+    lo_freq : float
+        LO frequency in Hz.
+    rf_freq : float
+        Target RF frequency in Hz.
+    therm_clks : int
+        Thermalization wait in clock cycles (default 250 000).
+    """
+
+    element: str
+    lo_freq: float
+    rf_freq: float
+    therm_clks: int = 250_000
+
+    @property
+    def if_freq(self) -> float:
+        """Intermediate frequency in Hz (``rf_freq - lo_freq``)."""
+        return self.rf_freq - self.lo_freq
+
+    @classmethod
+    def from_output_binding(
+        cls,
+        binding: OutputBinding,
+        *,
+        element: str,
+        rf_freq: float | None = None,
+        therm_clks: int = 250_000,
+    ) -> "DriveTarget":
+        """Construct a DriveTarget from an existing OutputBinding.
+
+        Parameters
+        ----------
+        binding : OutputBinding
+            The physical channel binding.
+        element : str
+            Ephemeral QM element name.
+        rf_freq : float | None
+            If *None*, computed from ``lo + IF`` on the binding.
+        therm_clks : int
+            Thermalization wait (clock cycles).
+        """
+        lo = binding.lo_frequency or 0.0
+        rf = rf_freq if rf_freq is not None else (lo + binding.intermediate_frequency)
+        return cls(element=element, lo_freq=lo, rf_freq=rf, therm_clks=therm_clks)
+
+
+@dataclass(frozen=True)
+class ReadoutCal:
+    """Immutable snapshot of readout calibration state.
+
+    Contains all tunable parameters that change during calibration
+    (thresholds, weights, confusion matrices).  Physical wiring identity
+    is NOT here -- it lives in ``ReadoutBinding``.
+
+    Attributes
+    ----------
+    drive_frequency : float
+        RF drive frequency in Hz.
+    threshold : float | None
+        Discrimination threshold (set by ``ReadoutGEDiscrimination``).
+    rotation_angle : float | None
+        IQ rotation angle (set by ``ReadoutGEDiscrimination``).
+    confusion_matrix : tuple[tuple[float, ...], ...] | None
+        Readout confusion matrix (set by ``ReadoutButterflyMeasurement``).
+    fidelity : float | None
+        Readout assignment fidelity.
+    """
+
+    drive_frequency: float
+
+    # Demodulation
+    demod_method: str = "dual_demod.full"
+    weight_keys: tuple[str, ...] = ("cos", "sin", "minus_sin")
+    weight_length: int | None = None
+
+    # Discrimination (set by ReadoutGEDiscrimination)
+    threshold: float | None = None
+    rotation_angle: float | None = None
+
+    # Quality metrics (set by ReadoutButterflyMeasurement)
+    confusion_matrix: tuple[tuple[float, ...], ...] | None = None
+    fidelity: float | None = None
+
+    # Post-selection
+    post_select_threshold: float | None = None
+    post_select_max_retries: int = 3
+
+    @classmethod
+    def from_calibration_store(
+        cls,
+        store: Any,
+        channel_id: str,
+        *,
+        drive_freq: float,
+    ) -> "ReadoutCal":
+        """Construct from persisted calibration data.
+
+        Parameters
+        ----------
+        store : CalibrationStore
+            The calibration store instance.
+        channel_id : str
+            Physical channel ID (e.g. ``"oct1:RF_in:1"``) or alias.
+        drive_freq : float
+            RF drive frequency in Hz.
+        """
+        disc = store.get_discrimination(channel_id)
+        qual = store.get_readout_quality(channel_id)
+        return cls(
+            drive_frequency=drive_freq,
+            threshold=getattr(disc, "threshold", None) if disc else None,
+            rotation_angle=getattr(disc, "angle", None) if disc else None,
+            confusion_matrix=_tuple_matrix(
+                getattr(qual, "confusion_matrix", None) if qual else None
+            ),
+            fidelity=getattr(qual, "fidelity", None) if qual else None,
+        )
+
+    @classmethod
+    def from_readout_binding(cls, rb: "ReadoutBinding") -> "ReadoutCal":
+        """Extract calibration state from an existing ReadoutBinding."""
+        disc = rb.discrimination or {}
+        qual = rb.quality or {}
+        return cls(
+            drive_frequency=rb.drive_frequency or 0.0,
+            threshold=disc.get("threshold"),
+            rotation_angle=disc.get("angle"),
+            confusion_matrix=_tuple_matrix(qual.get("confusion_matrix")),
+            fidelity=qual.get("fidelity") or qual.get("F"),
+        )
+
+    def with_discrimination(
+        self,
+        *,
+        threshold: float,
+        rotation_angle: float,
+    ) -> "ReadoutCal":
+        """Return a new ReadoutCal with updated discrimination params."""
+        from dataclasses import replace as _replace
+        return _replace(self, threshold=threshold, rotation_angle=rotation_angle)
+
+
+@dataclass(frozen=True)
+class ReadoutHandle:
+    """Everything needed to measure one readout channel.
+
+    Combines physical identity (``ReadoutBinding``) with calibration
+    artifact reference (``ReadoutCal``).  Both are frozen/immutable.
+
+    Experiments type-check for ``ReadoutHandle``, never for
+    ``ReadoutBinding`` directly.
+
+    Attributes
+    ----------
+    binding : ReadoutBinding
+        Physical wiring (from ``core.bindings``).
+    cal : ReadoutCal
+        Calibration artifacts (thresholds, weights).
+    element : str
+        QM element name (ephemeral at runtime).
+    operation : str
+        Pulse operation (e.g. ``"readout"``).
+    """
+
+    binding: ReadoutBinding
+    cal: ReadoutCal
+    element: str
+    operation: str = "readout"
+
+    @property
+    def drive_frequency(self) -> float:
+        """RF drive frequency from the calibration snapshot."""
+        return self.cal.drive_frequency
+
+    @property
+    def physical_id(self) -> str:
+        """Canonical physical channel ID for the acquire input."""
+        return self.binding.physical_id
+
+
+@dataclass(frozen=True)
+class ElementFreq:
+    """Resolved frequency for one element.
+
+    Attributes
+    ----------
+    element : str
+        QM element name.
+    rf_freq : float
+        Target RF frequency in Hz.
+    lo_freq : float
+        LO frequency in Hz.
+    if_freq : float
+        Intermediate frequency in Hz (``rf_freq - lo_freq``).
+    source : str
+        Provenance tag: ``"explicit"``, ``"calibration"``, or
+        ``"sample_default"``.
+    """
+
+    element: str
+    rf_freq: float
+    lo_freq: float
+    if_freq: float
+    source: str
+
+    @classmethod
+    def from_drive_target(cls, dt: DriveTarget) -> "ElementFreq":
+        """Construct from a DriveTarget (explicit source)."""
+        return cls(
+            element=dt.element,
+            rf_freq=dt.rf_freq,
+            lo_freq=dt.lo_freq,
+            if_freq=dt.if_freq,
+            source="explicit",
+        )
+
+    @classmethod
+    def from_readout_handle(cls, rh: ReadoutHandle) -> "ElementFreq":
+        """Construct from a ReadoutHandle (explicit source)."""
+        lo = rh.binding.drive_out.lo_frequency or 0.0
+        rf = rh.cal.drive_frequency
+        return cls(
+            element=rh.element,
+            rf_freq=rf,
+            lo_freq=lo,
+            if_freq=rf - lo,
+            source="explicit",
+        )
+
+
+@dataclass(frozen=True)
+class FrequencyPlan:
+    """Pure, immutable frequency configuration for one experiment run.
+
+    Computed once at ``run()`` entry.  Applied atomically before program
+    execution.  Recorded in ``RunResult`` metadata for reproducibility.
+
+    No snapshot/restore needed — each experiment builds its own
+    ``FrequencyPlan`` from scratch.
+
+    Attributes
+    ----------
+    entries : tuple[ElementFreq, ...]
+        One entry per element whose frequency must be set.
+    """
+
+    entries: tuple[ElementFreq, ...]
+
+    def get(self, element: str) -> ElementFreq:
+        """Look up the frequency entry for *element*.
+
+        Raises ``KeyError`` if not found.
+        """
+        for e in self.entries:
+            if e.element == element:
+                return e
+        raise KeyError(f"No frequency entry for element '{element}'")
+
+    def to_metadata(self) -> dict[str, dict[str, Any]]:
+        """Serialize for ``RunResult`` provenance recording."""
+        return {
+            e.element: {
+                "rf_freq": e.rf_freq,
+                "lo_freq": e.lo_freq,
+                "if_freq": e.if_freq,
+                "source": e.source,
+            }
+            for e in self.entries
+        }
+
+    def apply(self, hw: Any) -> None:
+        """Set IF frequencies on QM hardware.  Called once, atomically.
+
+        Parameters
+        ----------
+        hw : HardwareController / QuaProgramManager
+            Must expose ``qm.set_intermediate_frequency(element, if_freq)``.
+        """
+        qm = getattr(hw, "qm", hw)
+        for e in self.entries:
+            qm.set_intermediate_frequency(e.element, int(e.if_freq))
+
+    @classmethod
+    def from_targets(
+        cls,
+        *,
+        drive: "DriveTarget | None" = None,
+        readout: "ReadoutHandle | None" = None,
+        storage: "DriveTarget | None" = None,
+        extras: "dict[str, DriveTarget] | None" = None,
+    ) -> "FrequencyPlan":
+        """Build a FrequencyPlan from roleless primitives.
+
+        Convenience factory that collects ``ElementFreq`` entries from
+        the supplied drive targets and readout handle.
+        """
+        entries: list[ElementFreq] = []
+        if drive is not None:
+            entries.append(ElementFreq.from_drive_target(drive))
+        if readout is not None:
+            entries.append(ElementFreq.from_readout_handle(readout))
+        if storage is not None:
+            entries.append(ElementFreq.from_drive_target(storage))
+        if extras:
+            for dt in extras.values():
+                entries.append(ElementFreq.from_drive_target(dt))
+        return cls(entries=tuple(entries))
+
+
+# ---------------------------------------------------------------------------
 # Adapter: hardware.json + cqed_params → ExperimentBindings
 # ---------------------------------------------------------------------------
 def _parse_element_rf_port(
@@ -284,6 +633,192 @@ def _parse_element_rf_port(
         device, port_num = port_spec
         return ChannelRef(str(device), "RF_out", int(port_num))
     return None
+
+
+def _parse_channel_ref(spec: Any, default_port_type: str = "RF_out") -> ChannelRef | None:
+    """Parse a channel ref from list/tuple, dict, or canonical-id string."""
+    if isinstance(spec, ChannelRef):
+        return spec
+
+    if isinstance(spec, str):
+        parts = spec.split(":")
+        if len(parts) == 3:
+            dev, ptype, pnum = parts
+            try:
+                return ChannelRef(str(dev), str(ptype), int(pnum))
+            except Exception:
+                return None
+        return None
+
+    if isinstance(spec, (list, tuple)):
+        if len(spec) == 3:
+            dev, ptype, pnum = spec
+            try:
+                return ChannelRef(str(dev), str(ptype), int(pnum))
+            except Exception:
+                return None
+        if len(spec) == 2:
+            dev, pnum = spec
+            try:
+                return ChannelRef(str(dev), default_port_type, int(pnum))
+            except Exception:
+                return None
+
+    if isinstance(spec, dict):
+        dev = spec.get("device")
+        ptype = spec.get("port_type", default_port_type)
+        pnum = spec.get("port_number")
+        if dev is None:
+            dev = spec.get("controller") or spec.get("octave")
+        if pnum is None:
+            pnum = spec.get("port") or spec.get("channel") or spec.get("rf_port")
+        try:
+            return ChannelRef(str(dev), str(ptype), int(pnum))
+        except Exception:
+            return None
+
+    return None
+
+
+def _build_output_binding_from_spec(spec: dict[str, Any]) -> OutputBinding | None:
+    """Build OutputBinding from __qubox.bindings.outputs spec."""
+    channel = _parse_channel_ref(spec.get("channel"), default_port_type="RF_out")
+    if channel is None:
+        return None
+
+    digital_inputs: dict[str, ChannelRef] = {}
+    for key, di_spec in (spec.get("digital_inputs") or {}).items():
+        di_ref = _parse_channel_ref(di_spec, default_port_type="digital_out")
+        if di_ref is not None:
+            digital_inputs[str(key)] = di_ref
+
+    return OutputBinding(
+        channel=channel,
+        intermediate_frequency=float(spec.get("intermediate_frequency", 0.0) or 0.0),
+        lo_frequency=(
+            None
+            if spec.get("lo_frequency") is None
+            else float(spec.get("lo_frequency"))
+        ),
+        gain=(None if spec.get("gain") is None else float(spec.get("gain"))),
+        digital_inputs=digital_inputs,
+        operations=dict(spec.get("operations") or {}),
+    )
+
+
+def _build_input_binding_from_spec(spec: dict[str, Any]) -> InputBinding | None:
+    """Build InputBinding from __qubox.bindings.inputs spec."""
+    channel = _parse_channel_ref(spec.get("channel"), default_port_type="RF_in")
+    if channel is None:
+        return None
+
+    weight_keys = spec.get("weight_keys")
+    if not isinstance(weight_keys, list):
+        weight_keys = [["cos", "sin"], ["minus_sin", "cos"]]
+
+    return InputBinding(
+        channel=channel,
+        lo_frequency=(
+            None
+            if spec.get("lo_frequency") is None
+            else float(spec.get("lo_frequency"))
+        ),
+        time_of_flight=int(spec.get("time_of_flight", 24) or 24),
+        smearing=int(spec.get("smearing", 0) or 0),
+        weight_keys=weight_keys,
+        weight_length=(
+            None
+            if spec.get("weight_length") is None
+            else int(spec.get("weight_length"))
+        ),
+    )
+
+
+def _bindings_from_qubox_extras(
+    hw: "HardwareConfig",
+    attr: "cQED_attributes",
+) -> ExperimentBindings | None:
+    """Build bindings from canonical __qubox.bindings data if present."""
+    from .errors import ConfigError
+
+    extras = hw.get_qubox_extras()
+    raw_bundle = getattr(extras, "bindings", None) or getattr(extras, "binding_bundle", None)
+    if not isinstance(raw_bundle, dict) or not raw_bundle:
+        return None
+
+    outputs_raw = raw_bundle.get("outputs") or {}
+    inputs_raw = raw_bundle.get("inputs") or {}
+    roles = raw_bundle.get("roles") or {}
+    extras_map = raw_bundle.get("extras") or {}
+
+    outputs: dict[str, OutputBinding] = {}
+    for name, spec in outputs_raw.items():
+        if not isinstance(spec, dict):
+            continue
+        b = _build_output_binding_from_spec(spec)
+        if b is not None:
+            outputs[str(name)] = b
+
+    inputs: dict[str, InputBinding] = {}
+    for name, spec in inputs_raw.items():
+        if not isinstance(spec, dict):
+            continue
+        b = _build_input_binding_from_spec(spec)
+        if b is not None:
+            inputs[str(name)] = b
+
+    qb_key = str(roles.get("qubit") or attr.qb_el or "qubit")
+    ro_drive_key = str(roles.get("readout_drive") or roles.get("readout") or attr.ro_el or "resonator")
+    ro_acq_key = str(roles.get("readout_acquire") or roles.get("acquire") or f"{ro_drive_key}_adc")
+    st_key = roles.get("storage") or attr.st_el
+
+    if qb_key not in outputs:
+        raise ConfigError(
+            f"__qubox.bindings missing qubit output '{qb_key}'. "
+            f"Available outputs: {sorted(outputs.keys())}"
+        )
+    if ro_drive_key not in outputs:
+        raise ConfigError(
+            f"__qubox.bindings missing readout drive '{ro_drive_key}'. "
+            f"Available outputs: {sorted(outputs.keys())}"
+        )
+    if ro_acq_key not in inputs:
+        raise ConfigError(
+            f"__qubox.bindings missing readout acquire '{ro_acq_key}'. "
+            f"Available inputs: {sorted(inputs.keys())}"
+        )
+
+    readout = ReadoutBinding(
+        drive_out=outputs[ro_drive_key],
+        acquire_in=inputs[ro_acq_key],
+        drive_frequency=float(attr.ro_fq) if attr.ro_fq is not None else None,
+    )
+
+    storage: OutputBinding | None = None
+    if st_key is not None:
+        st_name = str(st_key)
+        storage = outputs.get(st_name)
+
+    extras_bindings: dict[str, OutputBinding | ReadoutBinding] = {}
+    if isinstance(extras_map, dict):
+        for ext_name, out_key in extras_map.items():
+            out_binding = outputs.get(str(out_key))
+            if out_binding is not None:
+                extras_bindings[str(ext_name)] = out_binding
+
+    known_keys = {qb_key, ro_drive_key}
+    if st_key is not None:
+        known_keys.add(str(st_key))
+    for out_name, out_binding in outputs.items():
+        if out_name not in known_keys and out_name not in extras_bindings:
+            extras_bindings[out_name] = out_binding
+
+    return ExperimentBindings(
+        qubit=outputs[qb_key],
+        readout=readout,
+        storage=storage,
+        extras=extras_bindings,
+    )
 
 
 def _parse_element_digital_inputs(
@@ -403,6 +938,11 @@ def bindings_from_hardware_config(
     """
     from .errors import ConfigError
 
+    # Preferred v2.0.0 path: canonical __qubox.bindings data.
+    binding_bundle = _bindings_from_qubox_extras(hw, attr)
+    if binding_bundle is not None:
+        return binding_bundle
+
     elements = hw.elements
 
     # --- Qubit binding ---
@@ -478,6 +1018,30 @@ def build_alias_map(
     ``"resonator"``) to their physical ``ChannelRef``.
     """
     alias_map: AliasMap = {}
+
+    extras = hw.get_qubox_extras()
+    aliases_raw = getattr(extras, "aliases", None) or getattr(extras, "alias_map", None)
+    bindings_raw = getattr(extras, "bindings", None) or getattr(extras, "binding_bundle", None)
+
+    if isinstance(aliases_raw, dict) and aliases_raw:
+        outputs_raw = {}
+        if isinstance(bindings_raw, dict):
+            outputs_raw = bindings_raw.get("outputs") or {}
+
+        for alias, spec in aliases_raw.items():
+            ref = _parse_channel_ref(spec, default_port_type="RF_out")
+            if ref is None and isinstance(spec, str) and spec in outputs_raw:
+                out_spec = outputs_raw.get(spec)
+                if isinstance(out_spec, dict):
+                    out_binding = _build_output_binding_from_spec(out_spec)
+                    if out_binding is not None:
+                        ref = out_binding.channel
+            if ref is not None:
+                alias_map[str(alias)] = ref
+
+        if alias_map:
+            return alias_map
+
     elements = hw.elements
 
     for el_name, el_cfg in elements.items():

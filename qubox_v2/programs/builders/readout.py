@@ -7,7 +7,17 @@ from ..macros.sequence import sequenceMacros
 import numpy as np
 
 
-def iq_blobs(ro_el, qb_el,  r180, qb_therm_clks, n_runs):
+def iq_blobs(ro_el, qb_el, r180, qb_therm_clks, n_runs, *, bindings: "ExperimentBindings | None" = None):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        ro_el = ro_el or _names.get("readout", "__ro")
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    else:
+        if ro_el is None:
+            raise ValueError("ro_el is required when bindings are not provided")
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
     with program() as IQ_blobs_program:
         n = declare(int)
         I = declare(fixed)
@@ -42,7 +52,13 @@ def iq_blobs(ro_el, qb_el,  r180, qb_therm_clks, n_runs):
     return IQ_blobs_program
 
 
-def readout_ge_raw_trace(qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg):
+def readout_ge_raw_trace(qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
     with program() as readout_ge_raw_trace:
         n        = declare(int)
         k        = declare(int)
@@ -83,7 +99,7 @@ def readout_ge_raw_trace(qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg):
     return readout_ge_raw_trace
 
 def readout_ge_integrated_trace(qb_el, weights, num_div, div_clks, r180, ro_depl_clks, n_avg,
-                                 target_save_rate_khz=2000.0):
+                                 target_save_rate_khz=2000.0, *, bindings: "ExperimentBindings | None" = None):
     """
     Modified to dynamically calculate safety wait time to maintain target save rate.
 
@@ -97,6 +113,12 @@ def readout_ge_integrated_trace(qb_el, weights, num_div, div_clks, r180, ro_depl
         n_avg : number of averages
         target_save_rate_khz : target save rate in kHz (default=2.0, meaning 2000 saves/sec)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
     if not isinstance(weights, (list, tuple)):
         raise TypeError(
             "weights must be a list/tuple of four integration-weight labels for "
@@ -202,6 +224,7 @@ def readout_core_efficiency_calibration(
     *,
     qb_therm_clks: int,
     save_m0_state: bool = True,
+    bindings: "ExperimentBindings | None" = None,
 ):
     """
     Single-shot (no retry) calibration of BLOBS/THRESHOLD/etc *core* efficiencies.
@@ -221,6 +244,12 @@ def readout_core_efficiency_calibration(
       - acc_gcore_rate, acc_ecore_rate  (shape [2], averaged over shots)
       - (optional) m0_state (int 0/1) from measureMacro.measure(with_state=True)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
     with program() as prog:
         I0, Q0 = declare(fixed), declare(fixed)
         m0 = declare(bool)
@@ -328,6 +357,8 @@ def readout_butterfly_measurement(
     M0_MAX_TRIALS,
     n_shots,
     wait_between_shots=10000,
+    *,
+    bindings: "ExperimentBindings | None" = None,
 ):
     """
     Butterfly readout with *post-selection* on M0, but with a gapless M0->M1->M2 triplet.
@@ -340,6 +371,12 @@ def readout_butterfly_measurement(
         until accept or MAX_TRIALS reached
       - save the last triplet (accepted if accept==True, otherwise last failed attempt)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
 
     MAX_PREP_TRIALS = int(M0_MAX_TRIALS)
 
@@ -476,7 +513,17 @@ def readout_butterfly_measurement(
     return ro_butterfly_meas
 
 
-def readout_leakage_benchmarking(ro_el, qb_el, r180, control_bits, qb_therm_clks, num_sequences, n_avg):
+def readout_leakage_benchmarking(ro_el, qb_el, r180, control_bits, qb_therm_clks, num_sequences, n_avg, *, bindings: "ExperimentBindings | None" = None):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        ro_el = ro_el or _names.get("readout", "__ro")
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    else:
+        if ro_el is None:
+            raise ValueError("ro_el is required when bindings are not provided")
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
     bit_rows, num_bits = control_bits.shape
     num_bits += 1
     with program() as ro_leakage_bm:
@@ -527,7 +574,13 @@ def readout_leakage_benchmarking(ro_el, qb_el, r180, control_bits, qb_therm_clks
 
 
 def qubit_reset_benchmark(qb_el: str, random_bits, r180: str,
-                          qb_therm_clks: int, num_shots: int):
+                          qb_therm_clks: int, num_shots: int, *, bindings: "ExperimentBindings | None" = None):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
     bit_size = len(random_bits)
 
     ro_disc_params = getattr(measureMacro, "_ro_disc_params", None) or {}
@@ -602,7 +655,13 @@ def qubit_reset_benchmark(qb_el: str, random_bits, r180: str,
     return prog
 
 
-def active_qubit_reset_benchmark(qb_el: str, post_sel_policy, post_sel_kwargs, r180: str, qb_therm_clks, MAX_PREP_TRIALS, n_shots):
+def active_qubit_reset_benchmark(qb_el: str, post_sel_policy, post_sel_kwargs, r180: str, qb_therm_clks, MAX_PREP_TRIALS, n_shots, *, bindings: "ExperimentBindings | None" = None):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
     MAX_PREP_TRIALS = int(MAX_PREP_TRIALS)
 
     # Threshold used for the *correction* (the post-select policy can be different)

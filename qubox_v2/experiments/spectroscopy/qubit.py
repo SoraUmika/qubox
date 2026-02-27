@@ -10,7 +10,7 @@ from ..experiment_base import (
     ExperimentBase, create_if_frequencies,
     make_lo_segments, if_freqs_for_segment, merge_segment_outputs,
 )
-from ..result import AnalysisResult, FitResult
+from ..result import AnalysisResult, FitResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.fitting import fit_and_wrap, build_fit_legend
 from ...analysis.cQED_models import qubit_spec_model
@@ -34,6 +34,50 @@ _TRANSITION_FREQ_MAP: dict[str, tuple[str, str]] = {
 class QubitSpectroscopy(ExperimentBase):
     """Single-LO qubit spectroscopy scan over IF frequencies."""
 
+    def _build_impl(
+        self,
+        pulse: str,
+        rf_begin: float,
+        rf_end: float,
+        df: float,
+        qb_gain: float,
+        qb_len: int,
+        n_avg: int = 1000,
+        transition: str = "ge",
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        lo_qb = self.get_qubit_lo()
+        if_freqs = create_if_frequencies(attr.qb_el, rf_begin, rf_end, df, lo_freq=lo_qb)
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
+
+        prog = cQED_programs.qubit_spectroscopy(
+            pulse, if_freqs, qb_gain, qb_len,
+            attr.qb_therm_clks, n_avg,
+            qb_el=attr.qb_el,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
+                pp.proc_default,
+                pp.proc_attach("frequencies", lo_qb + if_freqs),
+            ),
+            experiment_name="QubitSpectroscopy",
+            params={
+                "pulse": pulse, "rf_begin": rf_begin, "rf_end": rf_end,
+                "df": df, "qb_gain": qb_gain, "qb_len": qb_len,
+                "n_avg": n_avg, "transition": transition,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.qubit_spectroscopy",
+            sweep_axes={"frequencies": lo_qb + if_freqs},
+        )
+
     def run(
         self,
         pulse: str,
@@ -45,23 +89,14 @@ class QubitSpectroscopy(ExperimentBase):
         n_avg: int = 1000,
         transition: str = "ge",
     ) -> RunResult:
-        attr = self.attr
-        lo_qb = self.hw.get_element_lo(attr.qb_el)
-        if_freqs = create_if_frequencies(attr.qb_el, rf_begin, rf_end, df, lo_freq=lo_qb)
-
-        self.set_standard_frequencies()
-
-        prog = cQED_programs.qubit_spectroscopy(
-            pulse, attr.qb_el, if_freqs, qb_gain, qb_len,
-            attr.qb_therm_clks, n_avg,
+        build = self.build_program(
+            pulse=pulse, rf_begin=rf_begin, rf_end=rf_end, df=df,
+            qb_gain=qb_gain, qb_len=qb_len, n_avg=n_avg,
+            transition=transition,
         )
-
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
-                pp.proc_default,
-                pp.proc_attach("frequencies", lo_qb + if_freqs),
-            ],
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         result.metadata = {**(result.metadata or {}), "transition": transition}
         self.save_output(result.output, "qubitSpectroscopy")
@@ -153,6 +188,12 @@ class QubitSpectroscopyCoarse(ExperimentBase):
     windows and stitches the results.
     """
 
+    def _build_impl(self, **kw):
+        raise NotImplementedError(
+            "QubitSpectroscopyCoarse uses a multi-LO segment loop and cannot "
+            "produce a single ProgramBuildResult. Use run() directly."
+        )
+
     def run(
         self,
         pulse: str,
@@ -175,8 +216,10 @@ class QubitSpectroscopyCoarse(ExperimentBase):
             ifs = if_freqs_for_segment(LO, rf_end, df)
 
             prog = cQED_programs.qubit_spectroscopy(
-                pulse, attr.qb_el, ifs, qb_gain, qb_len,
+                pulse, ifs, qb_gain, qb_len,
                 attr.qb_therm_clks, n_avg,
+                qb_el=attr.qb_el,
+                bindings=self._bindings_or_none,
             )
             rr = self.run_program(
                 prog, n_total=n_avg,
@@ -286,6 +329,52 @@ class QubitSpectroscopyEF(ExperimentBase):
     ``frequencies.<qb_el>.ef_freq`` via the ``"ef_freq"`` calibration kind.
     """
 
+    def _build_impl(
+        self,
+        pulse: str,
+        rf_begin: float,
+        rf_end: float,
+        df: float,
+        qb_gain: float,
+        qb_len: int,
+        n_avg: int = 1000,
+        ge_prep_pulse: str = "ge_x180",
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        lo_qb = self.get_qubit_lo()
+        if_freqs = create_if_frequencies(attr.qb_el, rf_begin, rf_end, df, lo_freq=lo_qb)
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
+        qb_if = int(qb_fq - lo_qb)
+
+        prog = cQED_programs.qubit_spectroscopy_ef(
+            pulse, if_freqs,
+            qb_if,
+            qb_gain, qb_len, ge_prep_pulse, attr.qb_therm_clks, n_avg,
+            qb_el=attr.qb_el,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
+                pp.proc_default,
+                pp.proc_attach("frequencies", lo_qb + if_freqs),
+            ),
+            experiment_name="QubitSpectroscopyEF",
+            params={
+                "pulse": pulse, "rf_begin": rf_begin, "rf_end": rf_end,
+                "df": df, "qb_gain": qb_gain, "qb_len": qb_len,
+                "n_avg": n_avg, "ge_prep_pulse": ge_prep_pulse,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.qubit_spectroscopy_ef",
+            sweep_axes={"frequencies": lo_qb + if_freqs},
+        )
+
     def run(
         self,
         pulse: str,
@@ -297,24 +386,14 @@ class QubitSpectroscopyEF(ExperimentBase):
         n_avg: int = 1000,
         ge_prep_pulse: str = "ge_x180",
     ) -> RunResult:
-        attr = self.attr
-        lo_qb = self.hw.get_element_lo(attr.qb_el)
-        if_freqs = create_if_frequencies(attr.qb_el, rf_begin, rf_end, df, lo_freq=lo_qb)
-
-        self.set_standard_frequencies()
-
-        prog = cQED_programs.qubit_spectroscopy_ef(
-            pulse, attr.qb_el, if_freqs,
-            self.hw.get_element_if(attr.qb_el),
-            qb_gain, qb_len, ge_prep_pulse, attr.qb_therm_clks, n_avg,
+        build = self.build_program(
+            pulse=pulse, rf_begin=rf_begin, rf_end=rf_end, df=df,
+            qb_gain=qb_gain, qb_len=qb_len, n_avg=n_avg,
+            ge_prep_pulse=ge_prep_pulse,
         )
-
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
-                pp.proc_default,
-                pp.proc_attach("frequencies", lo_qb + if_freqs),
-            ],
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         result.metadata = {
             **(result.metadata or {}),

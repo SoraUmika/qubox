@@ -28,6 +28,179 @@ Each entry must include:
 
 ## Entries
 
+### 2026-02-26 — QUA Program Build & Simulation Refactor (v2.2)
+
+**Classification: Major**
+
+Added first-class `build_program()` → `ProgramBuildResult` and `simulate()` →
+`SimulationResult` support to all 26 experiment classes, enabling program
+introspection and offline waveform simulation without touching hardware.
+
+**Summary:**
+
+1. **Phase 0 — Core infrastructure (`experiments/result.py`, `experiment_base.py`, `hardware/program_runner.py`)**
+   - `ProgramBuildResult` frozen dataclass (12 fields): captures QUA program,
+     resolved parameters, frequency assignments, processors, and provenance.
+   - `QuboxSimulationConfig` dataclass: centralises simulation parameters
+     (duration_ns, plot, controllers, compiler_options).
+   - `SimulationResult` dataclass: wraps simulated waveform samples +
+     full provenance chain back to `ProgramBuildResult`.
+   - Base class `build_program()` calls `_build_impl()` then applies
+     `resolved_frequencies` to hardware config.
+   - Base class `simulate()` calls `build_program()` then `runner.simulate()`.
+   - Pure frequency resolvers: `_resolve_readout_frequency()` (bindings →
+     measureMacro → attributes), `_resolve_qubit_frequency(detune=)`.
+   - `_serialize_bindings()` for JSON-safe provenance snapshots.
+
+2. **Phase 1 — Pilot experiments (4 classes)**
+   - PowerRabi, T1Relaxation, QubitSpectroscopy, ResonatorSpectroscopy
+     migrated to `_build_impl()` pattern. `run()` delegates to
+     `build_program()` + `run_program()`.
+
+3. **Phase 2 — Full migration (22 remaining classes)**
+   - **Spectroscopy**: ResonatorSpectroscopyX180, ReadoutTrace,
+     ResonatorPowerSpectroscopy, QubitSpectroscopyEF.
+   - **Time domain**: TemporalRabi, SequentialQubitRotations, T2Ramsey,
+     T2Echo, ResidualPhotonRamsey, TimeRabiChevron, PowerRabiChevron,
+     RamseyChevron.
+   - **Cavity/storage**: StorageSpectroscopy, NumSplittingSpectroscopy,
+     StorageRamsey, StorageChiRamsey, StoragePhaseEvolution.
+   - **Cavity/fock**: FockResolvedSpectroscopy, FockResolvedT1,
+     FockResolvedRamsey, FockResolvedPowerRabi.
+   - **Multi-program (NotImplementedError)**: QubitSpectroscopyCoarse,
+     ReadoutFrequencyOptimization, StorageSpectroscopyCoarse — these use
+     multi-LO segment loops and cannot produce a single ProgramBuildResult.
+
+4. **Key migration patterns applied across all classes:**
+   - `set_standard_frequencies()` replaced with pure resolvers.
+   - `attr.qb_fq`/`attr.ro_fq` direct references replaced with
+     `_resolve_qubit_frequency()` / `_resolve_readout_frequency()`.
+   - Processors stored as immutable tuples in ProgramBuildResult.
+   - measureMacro-dependent experiments use `_setup_measure_context()` +
+     `simulate()` override.
+   - Non-serializable params (callables, large arrays) excluded from `params`.
+
+5. **Documentation (API_REFERENCE.md)**
+   - Added Section 26 "Program Build & Simulation (v2.2)" covering design
+     principles, data types, base class methods, migration pattern,
+     measureMacro context pattern, multi-program experiments, usage examples,
+     and migration status table.
+
+**Files affected:**
+
+- `qubox_v2/experiments/result.py` — ProgramBuildResult, SimulationResult
+- `qubox_v2/experiments/experiment_base.py` — build_program(), _build_impl(),
+  simulate(), pure resolvers
+- `qubox_v2/hardware/program_runner.py` — QuboxSimulationConfig
+- `qubox_v2/experiments/time_domain/rabi.py`
+- `qubox_v2/experiments/time_domain/relaxation.py`
+- `qubox_v2/experiments/time_domain/coherence.py`
+- `qubox_v2/experiments/time_domain/chevron.py`
+- `qubox_v2/experiments/spectroscopy/qubit.py`
+- `qubox_v2/experiments/spectroscopy/resonator.py`
+- `qubox_v2/experiments/cavity/storage.py`
+- `qubox_v2/experiments/cavity/fock.py`
+- `qubox_v2/docs/API_REFERENCE.md` — Section 26
+- `qubox_v2/docs/CHANGELOG.md` — This entry
+
+---
+
+### 2026-02-26 — Roleless experiment primitives (v2.1 API)
+
+**Classification: Moderate**
+
+Introduced frozen, role-free types that decouple experiment code from the
+mutable `ExperimentBindings` role vocabulary.  Experiments type-check for
+generic `DriveTarget` and `ReadoutHandle` — never for "qubit" or "storage"
+specifically.  Added per-experiment frozen Config dataclasses and session
+factory methods.
+
+**Summary:**
+
+1. **Phase 0 frozen primitives** (`core/bindings.py`):
+   - `DriveTarget` — frozen control output (element, lo_freq, rf_freq, therm_clks).
+     `if_freq` property, `from_output_binding()` classmethod.
+   - `ReadoutCal` — frozen calibration artifact snapshot (drive_frequency,
+     threshold, rotation_angle, confusion_matrix, fidelity, weight_keys).
+     `from_calibration_store()`, `from_readout_binding()`, `with_discrimination()`.
+   - `ReadoutHandle` — frozen readout channel + ReadoutCal + element + operation.
+   - `ElementFreq` — resolved frequency per element with provenance `source` tag
+     ("explicit", "calibration", "sample_default").
+   - `FrequencyPlan` — immutable frequency plan applied atomically per run.
+     `from_targets()`, `apply(hw)`, `to_metadata()`.
+
+2. **`emit_measurement()`** (`programs/macros/measure.py`) — Pure function
+   replacement for `measureMacro.measure()`.  Takes a `ReadoutHandle`, builds
+   demod from `cal.weight_keys`, returns QUA variables.
+
+3. **Session factory methods** (`experiments/session.py`):
+   - `session.drive_target(alias)` — resolves alias to `DriveTarget` from
+     hardware config + calibration store.
+   - `session.readout_handle(alias)` — resolves alias to `ReadoutHandle`.
+   - Ergonomic shortcuts: `session.qubit()`, `session.storage()`, `session.readout()`.
+
+4. **Per-experiment Config dataclasses** (`experiments/configs.py`):
+   - `PowerRabiConfig`, `TemporalRabiConfig`, `T1RelaxationConfig`,
+     `T2RamseyConfig`, `T2EchoConfig`, `ResonatorSpectroscopyConfig`,
+     `QubitSpectroscopyConfig`, `StorageSpectroscopyConfig`.
+   - All frozen, composable via `dataclasses.replace()`.
+
+5. **Notebook update** — Added v2.1 API imports, explanation markdown cell,
+   and interactive demonstration cell to `post_cavity_experiment_context.ipynb`.
+
+6. **Documentation** — Added Section 25 to API_REFERENCE.md covering all v2.1
+   types, session factories, Config dataclasses, and migration guidance.
+
+**Files affected:**
+- `qubox_v2/core/bindings.py` — Added 5 frozen dataclasses
+- `qubox_v2/core/__init__.py` — Updated `__all__` exports
+- `qubox_v2/programs/macros/measure.py` — Added `emit_measurement()`
+- `qubox_v2/experiments/session.py` — Added factory methods
+- `qubox_v2/experiments/configs.py` — Created (8 Config dataclasses)
+- `notebooks/post_cavity_experiment_context.ipynb` — Added v2.1 cells
+- `qubox_v2/docs/API_REFERENCE.md` — Added Section 25
+- `qubox_v2/docs/CHANGELOG.md` — This entry
+
+---
+
+### 2026-02-26 — Complete builder bindings coverage + implementation audit
+
+**Classification: Moderate**
+
+Added `bindings: ExperimentBindings | None = None` parameter to all remaining
+program builder functions (18 functions across 4 files) and appended a
+comprehensive implementation status checklist to the refactor report.
+
+**Summary:**
+
+1. **Builder bindings coverage** — Added binding resolution pattern to:
+   - `readout.py`: `readout_ge_raw_trace`, `readout_ge_integrated_trace`,
+     `readout_core_efficiency_calibration`, `readout_butterfly_measurement`,
+     `readout_leakage_benchmarking`, `qubit_reset_benchmark`,
+     `active_qubit_reset_benchmark` (7 functions)
+   - `calibration.py`: `all_xy`, `randomized_benchmarking`,
+     `drag_calibration_YALE`, `drag_calibration_GOOGLE` (4 functions)
+   - `cavity.py`: `sel_r180_calibration0`, `fock_resolved_spectroscopy`,
+     `fock_resolved_T1_relaxation`, `fock_resolved_power_rabi`,
+     `fock_resolved_qb_ramsey`, `storage_wigner_tomography` (6 functions)
+   - `tomography.py`: `fock_resolved_state_tomography` (1 function)
+
+2. **Implementation status checklist** — Appended §10 to
+   `docs/api_refactor_output_binding_report.md` cross-referencing every
+   recommendation from §2–§6 against codebase state.  Covers 80+ checklist
+   items across binding model, measureMacro redesign, 12 ranked coupling
+   items, calibration schema, and migration phases.
+
+**Files affected:**
+- `qubox_v2/programs/builders/readout.py`
+- `qubox_v2/programs/builders/calibration.py`
+- `qubox_v2/programs/builders/cavity.py`
+- `qubox_v2/programs/builders/tomography.py`
+- `docs/api_refactor_output_binding_report.md`
+- `qubox_v2/docs/CHANGELOG.md` (this entry)
+
+---
+
 ### 2026-02-24 — Notebook Usability Refactor + Rotation Calibration Port
 
 **Classification: Moderate**
@@ -218,6 +391,46 @@ runtime frequency binding to calibrated state.
 **Files affected:**
 
 - `qubox_v2/experiments/time_domain/relaxation.py`
+
+---
+
+### 2026-02-26 — Additional Migration: samples/ + post_cavity notebook to binding-driven path
+
+**Classification: Major**
+
+Completed follow-up migration work after the v2.0.0 binding-driven redesign, covering sample configuration canonicalization and notebook-level API updates.
+
+**Summary:**
+
+1. **Binding-first sample config support**
+  - Extended `__qubox` hardware extras schema to include canonical binding payloads and aliases:
+    - `bindings`, `binding_bundle`, `aliases`, `alias_map`
+  - `bindings_from_hardware_config()` now prefers canonical `__qubox.bindings`, with legacy `elements` fallback.
+  - `build_alias_map()` now prefers canonical alias maps and resolves to physical `ChannelRef`s.
+
+2. **Representative sample migrated (`post_cavity_sample_A`)**
+  - Added canonical `__qubox.bindings` and `__qubox.aliases` to sample-level `hardware.json`.
+  - Preserved ergonomic user aliases (`qubit`, `resonator`) mapped to physical IDs.
+  - Migrated cooldown `calibration.json` from schema `4.0.0` to `5.0.0`:
+    - stable keys by physical channel ID
+    - `alias_index` for dual alias/physical lookup
+
+3. **Notebook migration (binding-driven setup bridge)**
+  - Updated `post_cavity_experiment_context.ipynb` setup/readout workflow toward `session.bindings` path.
+  - Added binding aliases and compatibility bridge variables to keep legacy element-op helper calls usable during transition.
+
+4. **Validation**
+  - Verified binding resolution from migrated sample config (`qubit`, `resonator`, readout acquire chain).
+  - Verified calibration dual lookup by alias and physical ID on migrated v5.0.0 calibration file.
+
+**Files affected:**
+- `qubox_v2/core/config.py`
+- `qubox_v2/core/bindings.py`
+- `samples/post_cavity_sample_A/config/hardware.json`
+- `samples/post_cavity_sample_A/cooldowns/cd_2025_02_22/config/calibration.json`
+- `notebooks/post_cavity_experiment_context.ipynb`
+- `docs/api_refactor_output_binding_report.md`
+- `qubox_v2/docs/CHANGELOG.md`
 - `qubox_v2/calibration/patch_rules.py`
 - `qubox_v2/calibration/store.py`
 - `qubox_v2/experiments/calibration/readout.py`

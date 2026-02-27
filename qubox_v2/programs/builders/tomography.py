@@ -11,9 +11,10 @@ def qubit_state_tomography(
     therm_clks,
     n_avg,
     *,
-    qb_el="qubit",
+    qb_el: str | None = None,
     x90="x90",
-    yn90="yn90"
+    yn90="yn90",
+    bindings: "ExperimentBindings | None" = None,
 ):
     """
     Return a QUA program that runs qubit state tomography for one or more
@@ -53,6 +54,13 @@ def qubit_state_tomography(
         state_x, state_y, state_z : shape (P,) averaged over n_avg
         I_axes_avg, Q_axes_avg    : shape (P, 3) averaged over n_avg
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
+
     # Normalise to a list
     if callable(state_prep):
         preps = [state_prep]
@@ -122,7 +130,7 @@ def qubit_state_tomography(
 
 
 def fock_resolved_state_tomography(qb_el, state_prep, qb_if, fock_ifs, sel_r180, rxp90,
-                                   rym90, st_therm_clks, tag_off_idle_clks, n_avg):
+                                   rym90, st_therm_clks, tag_off_idle_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
     """
     Performs Fock-resolved state tomography using sequenceMacros.
     Separates x, y, z measurements into different streams.
@@ -143,6 +151,12 @@ def fock_resolved_state_tomography(qb_el, state_prep, qb_if, fock_ifs, sel_r180,
     P preps:
         state_{x,y,z}_{on,off} : shape (N_fock, P)
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
     # Normalise to a list
     if callable(state_prep):
         preps = [state_prep]

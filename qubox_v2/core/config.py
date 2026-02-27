@@ -96,6 +96,12 @@ class QuboxExtras(BaseModel):
     """The __qubox section of hardware.json."""
     external_lo_map: Dict[str, Union[ExternalLOEntry, str]] = Field(default_factory=dict)
     octave_links: List[OctaveLink] = Field(default_factory=list)
+    bindings: Dict[str, Any] = Field(default_factory=dict)
+    aliases: Dict[str, Any] = Field(default_factory=dict)
+    binding_bundle: Dict[str, Any] = Field(default_factory=dict)
+    alias_map: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = {"extra": "allow"}
 
     @field_validator("external_lo_map", mode="before")
     @classmethod

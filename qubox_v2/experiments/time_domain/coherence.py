@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase, create_clks_array
 from ..config_builder import ConfigSettings
-from ..result import AnalysisResult, FitResult
+from ..result import AnalysisResult, FitResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.fitting import fit_and_wrap, build_fit_legend
 from ...analysis.cQED_models import T2_ramsey_model, T2_echo_model
@@ -25,6 +25,55 @@ class T2Ramsey(ExperimentBase):
     detuning to create oscillating fringes.
     """
 
+    def _build_impl(
+        self,
+        qb_detune: int,
+        delay_end: int,
+        dt: int,
+        delay_begin: int = 4,
+        r90: str = "x90",
+        n_avg: int = 1000,
+        *,
+        qb_detune_MHz: float | None = None,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+
+        if qb_detune_MHz is not None:
+            qb_detune = int(float(qb_detune_MHz) * 1e6)
+
+        if qb_detune > ConfigSettings.MAX_IF_BANDWIDTH:
+            raise ValueError("qb_detune exceeds maximum IF bandwidth")
+
+        delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency(detune=qb_detune)
+
+        prog = cQED_programs.T2_ramsey(
+            r90, delay_clks, attr.qb_therm_clks, n_avg,
+            qb_el=attr.qb_el,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
+                pp.proc_default,
+                pp.proc_attach("delays", delay_clks * 4),
+                pp.proc_attach("qb_detune", qb_detune),
+            ),
+            experiment_name="T2Ramsey",
+            params={
+                "qb_detune": qb_detune, "delay_end": delay_end, "dt": dt,
+                "delay_begin": delay_begin, "r90": r90, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.T2_ramsey",
+            sweep_axes={"delays": delay_clks * 4},
+        )
+
     def run(
         self,
         qb_detune: int,
@@ -36,30 +85,14 @@ class T2Ramsey(ExperimentBase):
         *,
         qb_detune_MHz: float | None = None,
     ) -> RunResult:
-        attr = self.attr
-
-        if qb_detune_MHz is not None:
-            qb_detune = int(float(qb_detune_MHz) * 1e6)
-
-        if qb_detune > ConfigSettings.MAX_IF_BANDWIDTH:
-            raise ValueError("qb_detune exceeds maximum IF bandwidth")
-
-        delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
-
-        qb_base_fq = self.get_qubit_frequency()
-        self.hw.set_element_fq(attr.qb_el, qb_base_fq + qb_detune)
-        self.hw.set_element_fq(attr.ro_el, measureMacro._drive_frequency)
-
-        prog = cQED_programs.T2_ramsey(
-            attr.qb_el, r90, delay_clks, attr.qb_therm_clks, n_avg,
+        build = self.build_program(
+            qb_detune=qb_detune, delay_end=delay_end, dt=dt,
+            delay_begin=delay_begin, r90=r90, n_avg=n_avg,
+            qb_detune_MHz=qb_detune_MHz,
         )
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
-                pp.proc_default,
-                pp.proc_attach("delays", delay_clks * 4),
-                pp.proc_attach("qb_detune", qb_detune),
-            ],
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "T2Ramsey")
         return result
@@ -203,6 +236,47 @@ class T2Echo(ExperimentBase):
     pi/2 - tau - pi - tau - pi/2 - measure.
     """
 
+    def _build_impl(
+        self,
+        delay_end: int,
+        dt: int,
+        delay_begin: int = 8,
+        r180: str = "x180",
+        r90: str = "x90",
+        n_avg: int = 1000,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        half_wait_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=8)
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
+
+        prog = cQED_programs.T2_echo(
+            r180, r90, half_wait_clks, attr.qb_therm_clks, n_avg,
+            qb_el=attr.qb_el,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
+                pp.proc_default,
+                pp.proc_attach("delays", half_wait_clks * 8),
+            ),
+            experiment_name="T2Echo",
+            params={
+                "delay_end": delay_end, "dt": dt,
+                "delay_begin": delay_begin, "r180": r180,
+                "r90": r90, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.T2_echo",
+            sweep_axes={"delays": half_wait_clks * 8},
+            run_program_kwargs={"axis": 0},
+        )
+
     def run(
         self,
         delay_end: int,
@@ -212,21 +286,14 @@ class T2Echo(ExperimentBase):
         r90: str = "x90",
         n_avg: int = 1000,
     ) -> RunResult:
-        attr = self.attr
-        half_wait_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=8)
-
-        self.set_standard_frequencies()
-
-        prog = cQED_programs.T2_echo(
-            attr.qb_el, r180, r90, half_wait_clks, attr.qb_therm_clks, n_avg,
+        build = self.build_program(
+            delay_end=delay_end, dt=dt, delay_begin=delay_begin,
+            r180=r180, r90=r90, n_avg=n_avg,
         )
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
-                pp.proc_default,
-                pp.proc_attach("delays", half_wait_clks * 8),
-            ],
-            axis=0,
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
+            **build.run_program_kwargs,
         )
         self.save_output(result.output, "T2Echo")
         return result
@@ -337,7 +404,7 @@ class ResidualPhotonRamsey(ExperimentBase):
     interspersed.
     """
 
-    def run(
+    def _build_impl(
         self,
         t_R_begin: int,
         t_R_end: int,
@@ -353,7 +420,7 @@ class ResidualPhotonRamsey(ExperimentBase):
         measure_ro_op: str = "readout_long",
         n_avg: int = 1000,
         **kw,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
         if "t_relax" in kw:
             t_relax_ns = int(kw.pop("t_relax"))
@@ -380,20 +447,67 @@ class ResidualPhotonRamsey(ExperimentBase):
         t_buffer_clks = int(round(t_buffer_ns / 4.0))
         delay_clks = create_clks_array(t_R_begin, t_R_end, dt, time_per_clk=4)
 
-        self.set_standard_frequencies(qb_fq=self.get_qubit_frequency() + qb_detuning)
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency(detune=qb_detuning)
 
         prog = cQED_programs.residual_photon_ramsey(
-            attr.qb_el, test_ro_op, delay_clks,
+            test_ro_op, delay_clks,
             t_relax_clks, t_buffer_clks,
             prep_e, test_ro_amp,
             r90, r180, attr.qb_therm_clks, n_avg,
+            qb_el=attr.qb_el,
+            bindings=self._bindings_or_none,
         )
-        result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
                 pp.proc_default,
                 pp.proc_attach("delays", delay_clks * 4),
-            ],
+            ),
+            experiment_name="ResidualPhotonRamsey",
+            params={
+                "t_R_begin": t_R_begin, "t_R_end": t_R_end, "dt": dt,
+                "test_ro_op": test_ro_op, "qb_detuning": qb_detuning,
+                "t_relax_ns": t_relax_ns, "t_buffer_ns": t_buffer_ns,
+                "r90": r90, "r180": r180, "prep_e": prep_e,
+                "test_ro_amp": test_ro_amp, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.residual_photon_ramsey",
+            sweep_axes={"delays": delay_clks * 4},
+        )
+
+    def run(
+        self,
+        t_R_begin: int,
+        t_R_end: int,
+        dt: int,
+        test_ro_op: str,
+        qb_detuning: int = 0,
+        t_relax_ns: int = 40,
+        t_buffer_ns: int = 400,
+        r90: str = "x90",
+        r180: str = "x180",
+        prep_e: bool = False,
+        test_ro_amp: float = 1.0,
+        measure_ro_op: str = "readout_long",
+        n_avg: int = 1000,
+        **kw,
+    ) -> RunResult:
+        build = self.build_program(
+            t_R_begin=t_R_begin, t_R_end=t_R_end, dt=dt,
+            test_ro_op=test_ro_op, qb_detuning=qb_detuning,
+            t_relax_ns=t_relax_ns, t_buffer_ns=t_buffer_ns,
+            r90=r90, r180=r180, prep_e=prep_e,
+            test_ro_amp=test_ro_amp, measure_ro_op=measure_ro_op,
+            n_avg=n_avg, **kw,
+        )
+        result = self.run_program(
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "residualPhotonRamsey")
         return result

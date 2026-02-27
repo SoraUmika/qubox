@@ -79,6 +79,40 @@ _DEFAULT_PLOT_PARAMS: Dict[str, Any] = {
 }
 
 
+@dataclass
+class QuboxSimulationConfig:
+    """qubox-specific wrapper around QM's ``SimulationConfig``.
+
+    Provides sensible defaults and centralises the ns → clock-cycle
+    conversion that is scattered in legacy code.
+    """
+
+    duration_ns: int = 4000
+    """Simulation duration in **nanoseconds**."""
+
+    plot: bool = True
+    """Whether to auto-plot simulated waveforms."""
+
+    plot_params: Dict[str, Any] | None = None
+    """Override keys from ``_DEFAULT_PLOT_PARAMS``."""
+
+    controllers: tuple[str, ...] = ("con1",)
+    """Controller names to include in plots."""
+
+    t_begin: float | None = None
+    """Plot time window start (in ``time_unit``)."""
+
+    t_end: float | None = None
+    """Plot time window end (in ``time_unit``)."""
+
+    compiler_options: Any = None
+    """Forwarded to ``qmm.simulate()``."""
+
+    def to_qm_sim_config(self) -> SimulationConfig:
+        """Convert to QM SDK ``SimulationConfig`` (clock cycles = ns // 4)."""
+        return SimulationConfig(duration=int(self.duration_ns // 4))
+
+
 def _prog_flag(prog, name: str, default=None):
     return getattr(prog, name, default)
 

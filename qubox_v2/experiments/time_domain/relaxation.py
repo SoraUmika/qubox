@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase, create_clks_array
-from ..result import AnalysisResult, FitResult
+from ..result import AnalysisResult, FitResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.fitting import fit_and_wrap
 from ...analysis.cQED_models import T1_relaxation_model
@@ -21,6 +21,45 @@ class T1Relaxation(ExperimentBase):
     Applies a pi-pulse then waits a variable delay before readout.
     """
 
+    def _build_impl(
+        self,
+        delay_end: int,
+        dt: int,
+        delay_begin: int = 4,
+        r180: str = "x180",
+        n_avg: int = 1000,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
+
+        prog = cQED_programs.T1_relaxation(
+            r180, delay_clks, attr.qb_therm_clks, n_avg,
+            qb_el=attr.qb_el,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
+                pp.proc_default,
+                pp.proc_attach("delays", delay_clks * 4),
+            ),
+            experiment_name="T1Relaxation",
+            params={
+                "delay_end": delay_end, "dt": dt,
+                "delay_begin": delay_begin, "r180": r180,
+                "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.T1_relaxation",
+            sweep_axes={"delays": delay_clks * 4},
+        )
+
     def run(
         self,
         delay_end: int,
@@ -29,20 +68,13 @@ class T1Relaxation(ExperimentBase):
         r180: str = "x180",
         n_avg: int = 1000,
     ) -> RunResult:
-        attr = self.attr
-        delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
-
-        self.set_standard_frequencies()
-
-        prog = cQED_programs.T1_relaxation(
-            attr.qb_el, r180, delay_clks, attr.qb_therm_clks, n_avg,
+        build = self.build_program(
+            delay_end=delay_end, dt=dt, delay_begin=delay_begin,
+            r180=r180, n_avg=n_avg,
         )
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
-                pp.proc_default,
-                pp.proc_attach("delays", delay_clks * 4),
-            ],
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "T1Relaxation")
         return result

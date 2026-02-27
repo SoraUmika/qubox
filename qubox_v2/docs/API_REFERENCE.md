@@ -78,6 +78,8 @@
 22. [Macro State Ownership & Persistence Boundaries](#22-macro-state-ownership--persistence-boundaries)
 23. [Writing Custom Experiments](#23-writing-custom-experiments)
 24. [Binding-Driven API](#24-binding-driven-api)
+25. [Roleless Experiment Primitives (v2.1)](#25-roleless-experiment-primitives-v21)
+26. [Program Build & Simulation (v2.2)](#26-program-build--simulation-v22)
 
 **Appendices:**
 
@@ -4255,6 +4257,566 @@ Convenience method to derive bindings directly from physics attributes:
 attr = session.attributes
 bindings = attr.to_bindings(session.config_engine.hardware)
 ```
+
+---
+
+## 25. Roleless Experiment Primitives (v2.1)
+
+> **Module**: `qubox_v2.core.bindings`, `qubox_v2.experiments.session`,
+> `qubox_v2.experiments.configs`, `qubox_v2.programs.macros.measure`
+
+The v2.1 API introduces **frozen, role-free types** that decouple experiment
+code from the mutable `ExperimentBindings` role vocabulary.  Experiments
+type-check for generic `DriveTarget` and `ReadoutHandle` — never
+for "qubit" or "storage" specifically.
+
+### 25.1 Design Principles
+
+1. **No role vocabulary** — `DriveTarget` describes any control output
+   (qubit, storage, pump) with the same type.
+2. **Frozen/immutable** — all dataclasses use `@dataclass(frozen=True)`.
+   No snapshot/restore lifecycle needed.
+3. **Pure functions** — `emit_measurement()` replaces `measureMacro.measure()`
+   with no class-level state.
+4. **Typed configs** — per-experiment `*Config` dataclasses capture physics
+   parameters as immutable snapshots.
+
+### 25.2 `DriveTarget`
+
+**Module**: `qubox_v2.core.bindings`
+
+Frozen dataclass for a single control output channel.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `element` | `str` | — | QM element name (ephemeral at runtime) |
+| `lo_freq` | `float` | — | LO frequency in Hz |
+| `rf_freq` | `float` | — | Target RF frequency in Hz |
+| `therm_clks` | `int` | `250_000` | Thermalization wait in clock cycles |
+
+**Properties:**
+
+| Name | Returns | Description |
+|------|---------|-------------|
+| `if_freq` | `float` | `rf_freq - lo_freq` |
+
+**Class methods:**
+
+```python
+@classmethod
+def from_output_binding(
+    cls,
+    binding: OutputBinding,
+    *,
+    element: str,
+    rf_freq: float | None = None,
+    therm_clks: int | None = None,
+) -> DriveTarget:
+    """Construct from an OutputBinding."""
+```
+
+### 25.3 `ReadoutCal`
+
+**Module**: `qubox_v2.core.bindings`
+
+Frozen calibration artifact snapshot.  Contains all tunable parameters from
+readout calibration (thresholds, weights, confusion matrices).  Physical
+wiring identity lives in `ReadoutBinding`, not here.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `drive_frequency` | `float` | — | RF drive frequency in Hz |
+| `demod_method` | `str` | `"dual_demod.full"` | Demodulation method |
+| `weight_keys` | `tuple[str, ...]` | `("cos", "sin", "minus_sin")` | Integration weight keys |
+| `threshold` | `float \| None` | `None` | Discrimination threshold |
+| `rotation_angle` | `float \| None` | `None` | IQ rotation angle |
+| `confusion_matrix` | `tuple[tuple[float,...],...]  \| None` | `None` | Readout confusion matrix |
+| `fidelity` | `float \| None` | `None` | Readout assignment fidelity |
+
+**Class methods:**
+
+```python
+@classmethod
+def from_calibration_store(
+    cls, store, physical_id: str, *, drive_freq: float,
+) -> ReadoutCal:
+    """Build from CalibrationStore using physical channel ID."""
+
+@classmethod
+def from_readout_binding(
+    cls, rb: ReadoutBinding, *, drive_freq: float | None = None,
+) -> ReadoutCal:
+    """Build from a ReadoutBinding with sensible defaults."""
+```
+
+**Instance methods:**
+
+```python
+def with_discrimination(
+    self, *, threshold: float, rotation_angle: float,
+) -> ReadoutCal:
+    """Return a copy with updated discrimination parameters."""
+```
+
+### 25.4 `ReadoutHandle`
+
+**Module**: `qubox_v2.core.bindings`
+
+Frozen dataclass combining physical identity (`ReadoutBinding`) with
+calibration artifacts (`ReadoutCal`).  Experiments type-check for this type.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `binding` | `ReadoutBinding` | — | Physical wiring |
+| `cal` | `ReadoutCal` | — | Calibration artifacts |
+| `element` | `str` | — | QM element name |
+| `operation` | `str` | `"readout"` | Pulse operation |
+
+### 25.5 `ElementFreq`
+
+**Module**: `qubox_v2.core.bindings`
+
+Frozen dataclass for the resolved frequency of one element.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `element` | `str` | QM element name |
+| `rf_freq` | `float` | Target RF frequency in Hz |
+| `lo_freq` | `float` | LO frequency in Hz |
+| `if_freq` | `float` | Intermediate frequency in Hz |
+| `source` | `str` | Provenance tag: `"explicit"`, `"calibration"`, or `"sample_default"` |
+
+**Class methods:**
+
+```python
+@classmethod
+def from_drive_target(cls, dt: DriveTarget) -> ElementFreq:
+    """Construct from a DriveTarget (source='explicit')."""
+
+@classmethod
+def from_readout_handle(cls, rh: ReadoutHandle) -> ElementFreq:
+    """Construct from a ReadoutHandle (source='explicit')."""
+```
+
+### 25.6 `FrequencyPlan`
+
+**Module**: `qubox_v2.core.bindings`
+
+Immutable frequency configuration for one experiment run.  Computed once at
+`run()` entry, applied atomically before program execution, and recorded in
+`RunResult` metadata for reproducibility.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entries` | `tuple[ElementFreq, ...]` | One entry per element |
+
+**Instance methods:**
+
+```python
+def get(self, element: str) -> ElementFreq:
+    """Look up the frequency entry for *element*. Raises KeyError."""
+
+def to_metadata(self) -> dict[str, dict[str, Any]]:
+    """Serialize for RunResult provenance recording."""
+
+def apply(self, hw) -> None:
+    """Set IF frequencies on QM hardware.  Called once, atomically."""
+```
+
+**Class methods:**
+
+```python
+@classmethod
+def from_targets(
+    cls,
+    *,
+    drive: DriveTarget | None = None,
+    readout: ReadoutHandle | None = None,
+    storage: DriveTarget | None = None,
+    extras: dict[str, DriveTarget] | None = None,
+) -> FrequencyPlan:
+    """Build a FrequencyPlan from roleless primitives."""
+```
+
+### 25.7 `emit_measurement()`
+
+**Module**: `qubox_v2.programs.macros.measure`
+
+Pure function replacement for `measureMacro.measure()`.  Takes a
+`ReadoutHandle`, builds demod statements from `cal.weight_keys`, returns
+QUA variables.
+
+```python
+def emit_measurement(
+    readout: ReadoutHandle,
+    *,
+    targets: list | None = None,
+    state: Any | None = None,
+    gain: float | None = None,
+    timestamp_stream: Any | None = None,
+    adc_stream: Any | None = None,
+) -> tuple:
+    """Emit a QUA measure() statement using a ReadoutHandle.
+
+    Returns (I, Q) when state is None; (I, Q, state) otherwise.
+    """
+```
+
+**Key differences from `measureMacro.measure()`:**
+
+| Aspect | `measureMacro.measure()` | `emit_measurement()` |
+|--------|--------------------------|----------------------|
+| State | Class-level singleton | Pure function |
+| Configuration | Mutable `_ro_disc_params` | Immutable `ReadoutHandle.cal` |
+| Lifecycle | snapshot/restore needed | No lifecycle |
+| Weights | Resolved at call time | From `cal.weight_keys` |
+
+### 25.8 Session Factory Methods
+
+**Module**: `qubox_v2.experiments.session.SessionManager`
+
+Ergonomic methods that resolve hardware aliases into v2.1 primitives.
+
+```python
+def drive_target(
+    self, alias: str, *, rf_freq: float | None = None,
+    therm_clks: int | None = None,
+) -> DriveTarget:
+    """Resolve alias to a DriveTarget from hardware config + calibration."""
+
+def readout_handle(
+    self, alias: str = "resonator", operation: str = "readout",
+) -> ReadoutHandle:
+    """Resolve alias to a ReadoutHandle from hardware config + calibration."""
+
+# Ergonomic shortcuts
+def qubit(self, alias="qubit", **kw) -> DriveTarget: ...
+def storage(self, alias="storage", **kw) -> DriveTarget: ...
+def readout(self, alias="resonator", **kw) -> ReadoutHandle: ...
+```
+
+**Resolution order for `drive_target()`:**
+
+1. RF frequency: `rf_freq` kwarg > calibration store > `attr.<alias>_fq`
+2. LO frequency: from `OutputBinding.lo_frequency`
+3. Thermalization: `therm_clks` kwarg > `attr.<alias>_therm_clks` > 250,000
+
+### 25.9 Per-Experiment Config Dataclasses
+
+**Module**: `qubox_v2.experiments.configs`
+
+All are frozen dataclasses with sensible defaults.  Compose with
+`dataclasses.replace()` for parameter sweeps.
+
+#### Time-domain configs
+
+| Config | Key Fields |
+|--------|------------|
+| `PowerRabiConfig` | `op`, `max_gain`, `dg`, `n_avg`, `length`, `truncate_clks` |
+| `TemporalRabiConfig` | `pulse`, `pulse_len_begin`, `pulse_len_end`, `dt`, `pulse_gain`, `n_avg` |
+| `T1RelaxationConfig` | `delay_end`, `dt`, `n_avg`, `clock_period_ns`, `derive_therm_clks` |
+| `T2RamseyConfig` | `qb_detune`, `delay_end`, `dt`, `n_avg`, `apply_frequency_correction`, `freq_correction_sign` |
+| `T2EchoConfig` | `delay_end`, `dt`, `n_avg` |
+
+#### Spectroscopy configs
+
+| Config | Key Fields |
+|--------|------------|
+| `ResonatorSpectroscopyConfig` | `rf_begin`, `rf_end`, `df`, `n_avg`, `readout_op` |
+| `QubitSpectroscopyConfig` | `pulse`, `rf_begin`, `rf_end`, `df`, `qb_gain`, `qb_len`, `n_avg` |
+| `StorageSpectroscopyConfig` | `disp`, `rf_begin`, `rf_end`, `df`, `storage_therm_time`, `sel_r180`, `n_avg` |
+
+**Usage pattern:**
+
+```python
+from qubox_v2.experiments.configs import PowerRabiConfig
+from dataclasses import replace
+
+cfg = PowerRabiConfig(max_gain=0.4, n_avg=2000)
+result = rabi.run(cfg, drive=qb, readout=ro)
+
+# Parameter sweep via replace
+for gain in [0.1, 0.2, 0.3]:
+    result = rabi.run(replace(cfg, max_gain=gain), drive=qb, readout=ro)
+```
+
+### 25.10 Migration from v2.0 Bindings
+
+| v2.0 (role-based) | v2.1 (roleless) |
+|--------------------|-----------------|
+| `bindings = session.bindings` | `qb = session.qubit()` |
+| `qb_binding = bindings.qubit` | `qb = session.drive_target("qubit")` |
+| `ro_binding = bindings.readout` | `ro = session.readout_handle()` |
+| `measureMacro.measure(...)` | `emit_measurement(ro, ...)` |
+| `session.hw.set_intermediate_frequency(...)` | `FrequencyPlan.from_targets(...).apply(hw)` |
+| `run(gain=0.4, n_avg=2000, ...)` | `run(PowerRabiConfig(max_gain=0.4, n_avg=2000), ...)` |
+
+The v2.0 binding API remains fully supported.  v2.1 types are additive —
+no existing code needs to change.
+
+---
+
+## 26. Program Build & Simulation (v2.2)
+
+> **Modules**: `qubox_v2.experiments.result`, `qubox_v2.experiments.experiment_base`,
+> `qubox_v2.hardware.program_runner`
+
+The v2.2 API adds first-class `build_program()` → `ProgramBuildResult` and
+`simulate()` → `SimulationResult` support to all experiment classes, enabling
+program introspection and offline waveform simulation without touching
+hardware.
+
+### 26.1 Design Principles
+
+1. **Program-as-artifact** — `build_program()` returns an immutable
+   `ProgramBuildResult` snapshot containing the QUA program, resolved
+   parameters, frequency assignments, and provenance metadata.
+2. **`run()` unchanged externally** — existing experiment `run()` calls
+   continue to work identically.  Internally, `run()` delegates to
+   `build_program()` then `run_program()`.
+3. **`_build_impl()` is the subclass override point** — subclasses override
+   `_build_impl(**params)` to return `ProgramBuildResult`.  The base class
+   `build_program()` calls `_build_impl()` then applies
+   `resolved_frequencies` to the hardware config.
+4. **Pure resolvers** — `_resolve_readout_frequency()` and
+   `_resolve_qubit_frequency(detune=)` compute frequencies without side
+   effects, replacing the legacy `set_standard_frequencies()` + attribute
+   pattern.
+
+### 26.2 `ProgramBuildResult`
+
+**Module**: `qubox_v2.experiments.result`
+**Type**: `@dataclass(frozen=True)`
+
+```python
+@dataclass(frozen=True)
+class ProgramBuildResult:
+    # Core payload
+    program: Any                          # QUA program object
+    n_total: int                          # Shot count
+    processors: tuple[Callable, ...] = () # Post-processing pipeline
+
+    # Provenance
+    experiment_name: str = ""
+    params: dict[str, Any] = {}           # Resolved build parameters
+    resolved_frequencies: dict[str, float] = {}  # {element: freq_hz}
+    bindings_snapshot: dict[str, Any] | None = None
+
+    # Optional metadata
+    builder_function: str | None = None   # e.g. "cQED_programs.power_rabi"
+    sweep_axes: dict[str, Any] | None = None
+    measure_macro_state: dict[str, Any] | None = None
+    timestamp: str = ""                   # ISO-8601
+    run_program_kwargs: dict[str, Any] = {}  # Extra kwargs for run_program()
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `program` | QUA program | The compiled QUA program object |
+| `n_total` | `int` | Total shot count for progress reporting |
+| `processors` | `tuple[Callable, ...]` | Post-processing pipeline (immutable tuple) |
+| `experiment_name` | `str` | Class name for artifact tagging |
+| `params` | `dict` | Frozen copy of resolved build parameters |
+| `resolved_frequencies` | `dict[str, float]` | Element → frequency (Hz) to apply before execution |
+| `bindings_snapshot` | `dict \| None` | JSON-safe serialization of active bindings |
+| `builder_function` | `str \| None` | Program factory function name |
+| `sweep_axes` | `dict \| None` | Swept parameter arrays for provenance |
+| `measure_macro_state` | `dict \| None` | measureMacro config snapshot at build time |
+| `timestamp` | `str` | ISO-8601 build timestamp |
+| `run_program_kwargs` | `dict` | Extra kwargs forwarded to `run_program()` |
+
+### 26.3 `QuboxSimulationConfig`
+
+**Module**: `qubox_v2.hardware.program_runner`
+**Type**: `@dataclass`
+
+```python
+@dataclass
+class QuboxSimulationConfig:
+    duration_ns: int = 4000
+    plot: bool = True
+    plot_params: dict[str, Any] | None = None
+    controllers: tuple[str, ...] = ("con1",)
+    t_begin: float | None = None
+    t_end: float | None = None
+    compiler_options: Any = None
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `duration_ns` | `int` | `4000` | Simulation duration in nanoseconds |
+| `plot` | `bool` | `True` | Auto-plot simulated waveforms |
+| `plot_params` | `dict \| None` | `None` | Override default plot parameters |
+| `controllers` | `tuple[str, ...]` | `("con1",)` | Controller names in plots |
+| `t_begin` | `float \| None` | `None` | Plot time window start |
+| `t_end` | `float \| None` | `None` | Plot time window end |
+| `compiler_options` | `Any` | `None` | Forwarded to QM simulator |
+
+### 26.4 `SimulationResult`
+
+**Module**: `qubox_v2.experiments.result`
+**Type**: `@dataclass`
+
+```python
+@dataclass
+class SimulationResult:
+    samples: Any                    # SimulatorSamples
+    build: ProgramBuildResult       # Full build provenance
+    config_snapshot: dict = {}      # QM config at sim time
+    sim_config: Any = None          # QuboxSimulationConfig used
+    duration_ns: int = 4000
+
+    def analog_channels(self) -> dict[str, np.ndarray]:
+        """Flatten all analog channels into {controller:name → array}."""
+```
+
+### 26.5 Base Class Methods
+
+**Module**: `qubox_v2.experiments.experiment_base.ExperimentBase`
+
+| Method | Signature | Return | Description |
+|--------|-----------|--------|-------------|
+| `build_program` | `(**params) -> ProgramBuildResult` | `ProgramBuildResult` | Calls `_build_impl()`, applies resolved frequencies |
+| `_build_impl` | `(**params) -> ProgramBuildResult` | `ProgramBuildResult` | **Subclass override point** — returns program + metadata without side effects |
+| `simulate` | `(sim_config=None, **params) -> SimulationResult` | `SimulationResult` | Calls `build_program()` then `runner.simulate()` |
+| `_resolve_readout_frequency` | `() -> float` | `float` | Pure resolver: bindings → measureMacro → attributes |
+| `_resolve_qubit_frequency` | `(detune=0.0) -> float` | `float` | Pure resolver: `get_qubit_frequency() + detune` |
+| `_serialize_bindings` | `() -> dict \| None` | `dict \| None` | JSON-safe snapshot of active bindings |
+
+### 26.6 Subclass Migration Pattern
+
+Every experiment `run()` is refactored to delegate to `build_program()`:
+
+```python
+class PowerRabi(ExperimentBase):
+
+    def _build_impl(self, max_gain=0.5, dg=0.01, op="ref_r180",
+                    n_avg=1000, **kw) -> ProgramBuildResult:
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
+        # ... build QUA program ...
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(pp.proc_default, pp.proc_magnitude, ...),
+            experiment_name="PowerRabi",
+            params={"max_gain": max_gain, "dg": dg, "op": op, "n_avg": n_avg},
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.power_rabi",
+        )
+
+    def run(self, max_gain=0.5, dg=0.01, op="ref_r180",
+            n_avg=1000, **kw) -> RunResult:
+        build = self.build_program(
+            max_gain=max_gain, dg=dg, op=op, n_avg=n_avg, **kw,
+        )
+        result = self.run_program(
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
+        )
+        self.save_output(result.output, "powerRabi")
+        return result
+```
+
+**Key rules:**
+
+- `_build_impl()` must not call `run_program()` or `set_standard_frequencies()`.
+- Resolved frequencies go into `resolved_frequencies`; the base class applies them.
+- Processors are stored as immutable tuples; converted to lists in `run()`.
+- Non-serializable objects (callables, large arrays) are excluded from `params`.
+
+### 26.7 measureMacro Context Pattern
+
+Experiments that configure `measureMacro` (readout-based spectroscopy) add
+a `_setup_measure_context()` helper and wrap both `build_program()` and
+`simulate()`:
+
+```python
+class ResonatorSpectroscopy(ExperimentBase):
+
+    def _setup_measure_context(self, readout_op: str):
+        ro_info = self.pulse_mgr.get_pulseOp_by_element_op(
+            self.attr.ro_el, readout_op,
+        )
+        weight_len = int(ro_info.length) if ro_info.length else None
+        return measureMacro.using_defaults(
+            pulse_op=ro_info, active_op=readout_op, weight_len=weight_len,
+        )
+
+    def run(self, readout_op, **kw) -> RunResult:
+        with self._setup_measure_context(readout_op):
+            build = self.build_program(readout_op=readout_op, **kw)
+            result = self.run_program(build.program, ...)
+        return result
+
+    def simulate(self, sim_config=None, **params):
+        readout_op = params.get("readout_op")
+        with self._setup_measure_context(readout_op):
+            return super().simulate(sim_config, **params)
+```
+
+### 26.8 Multi-Program Experiments
+
+Three experiments iterate over multiple LO segments and cannot produce a
+single `ProgramBuildResult`.  They override `_build_impl()` with an explicit
+`NotImplementedError`:
+
+| Experiment | Module | Reason |
+|------------|--------|--------|
+| `QubitSpectroscopyCoarse` | `spectroscopy/qubit.py` | Multi-LO segment loop |
+| `ReadoutFrequencyOptimization` | `spectroscopy/resonator.py` | Multi-frequency discrimination loop |
+| `StorageSpectroscopyCoarse` | `cavity/storage.py` | Multi-LO segment loop |
+
+These experiments must be used via `run()` directly.
+
+### 26.9 Usage Examples
+
+**Build a program without executing it:**
+
+```python
+rabi = PowerRabi(session)
+build = rabi.build_program(max_gain=0.5, dg=0.01, op="ref_r180", n_avg=1000)
+
+# Inspect the build
+print(f"Experiment: {build.experiment_name}")
+print(f"Params: {build.params}")
+print(f"Resolved frequencies: {build.resolved_frequencies}")
+print(f"Builder: {build.builder_function}")
+print(f"N_total: {build.n_total}")
+print(f"Processors: {len(build.processors)}")
+```
+
+**Simulate without hardware:**
+
+```python
+from qubox_v2.hardware.program_runner import QuboxSimulationConfig
+
+sim_cfg = QuboxSimulationConfig(duration_ns=10000, plot=True)
+sim = rabi.simulate(sim_cfg, max_gain=0.5, dg=0.01, op="ref_r180", n_avg=100)
+
+# Inspect simulated waveforms
+channels = sim.analog_channels()
+for name, arr in channels.items():
+    print(f"{name}: {arr.shape}")
+```
+
+**Run normally (unchanged):**
+
+```python
+result = rabi.run(max_gain=0.5, dg=0.01, op="ref_r180", n_avg=5000)
+```
+
+### 26.10 Migration Status
+
+All 26 experiment classes are migrated:
+
+| Category | Experiments | Status |
+|----------|-------------|--------|
+| Spectroscopy | ResonatorSpectroscopy, ResonatorSpectroscopyX180, ReadoutTrace, ResonatorPowerSpectroscopy, QubitSpectroscopy, QubitSpectroscopyEF | `_build_impl()` |
+| Time Domain | PowerRabi, TemporalRabi, SequentialQubitRotations, T1Relaxation, T2Ramsey, T2Echo, ResidualPhotonRamsey, TimeRabiChevron, PowerRabiChevron, RamseyChevron | `_build_impl()` |
+| Cavity | StorageSpectroscopy, NumSplittingSpectroscopy, StorageRamsey, StorageChiRamsey, StoragePhaseEvolution, FockResolvedSpectroscopy, FockResolvedT1, FockResolvedRamsey, FockResolvedPowerRabi | `_build_impl()` |
+| Multi-program | QubitSpectroscopyCoarse, ReadoutFrequencyOptimization, StorageSpectroscopyCoarse | `NotImplementedError` |
 
 ---
 

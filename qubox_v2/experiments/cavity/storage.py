@@ -11,7 +11,7 @@ from ..experiment_base import (
     ExperimentBase, create_if_frequencies, create_clks_array,
     make_lo_segments, if_freqs_for_segment, merge_segment_outputs,
 )
-from ..result import AnalysisResult, FitResult
+from ..result import AnalysisResult, FitResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.fitting import fit_and_wrap, build_fit_legend
 from ...analysis.cQED_models import (
@@ -29,6 +29,48 @@ logger = logging.getLogger(__name__)
 class StorageSpectroscopy(ExperimentBase):
     """Storage resonator frequency sweep with selective qubit rotation."""
 
+    def _build_impl(
+        self,
+        disp: str,
+        rf_begin: float,
+        rf_end: float,
+        df: float,
+        storage_therm_time: int,
+        sel_r180: str = "sel_x180",
+        n_avg: int = 1000,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        lo_freq = self.hw.get_element_lo(attr.st_el)
+        if_freqs = create_if_frequencies(attr.st_el, rf_begin, rf_end, df, lo_freq)
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
+
+        prog = cQED_programs.storage_spectroscopy(
+            attr.qb_el, attr.st_el, disp, sel_r180,
+            if_freqs, storage_therm_time, n_avg,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
+                pp.proc_default,
+                pp.proc_attach("frequencies", lo_freq + if_freqs),
+            ),
+            experiment_name="StorageSpectroscopy",
+            params={
+                "disp": disp, "rf_begin": rf_begin, "rf_end": rf_end,
+                "df": df, "storage_therm_time": storage_therm_time,
+                "sel_r180": sel_r180, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.storage_spectroscopy",
+            sweep_axes={"frequencies": lo_freq + if_freqs},
+        )
+
     def run(
         self,
         disp: str,
@@ -39,22 +81,14 @@ class StorageSpectroscopy(ExperimentBase):
         sel_r180: str = "sel_x180",
         n_avg: int = 1000,
     ) -> RunResult:
-        attr = self.attr
-        lo_freq = self.hw.get_element_lo(attr.st_el)
-        if_freqs = create_if_frequencies(attr.st_el, rf_begin, rf_end, df, lo_freq)
-
-        self.set_standard_frequencies()
-
-        prog = cQED_programs.storage_spectroscopy(
-            attr.qb_el, attr.st_el, disp, sel_r180,
-            if_freqs, storage_therm_time, n_avg,
+        build = self.build_program(
+            disp=disp, rf_begin=rf_begin, rf_end=rf_end, df=df,
+            storage_therm_time=storage_therm_time,
+            sel_r180=sel_r180, n_avg=n_avg,
         )
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
-                pp.proc_default,
-                pp.proc_attach("frequencies", lo_freq + if_freqs),
-            ],
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "storageSpectroscopy")
         return result
@@ -144,6 +178,12 @@ class StorageSpectroscopy(ExperimentBase):
 class StorageSpectroscopyCoarse(ExperimentBase):
     """Multi-LO storage spectroscopy for wide frequency sweeps."""
 
+    def _build_impl(self, **kw):
+        raise NotImplementedError(
+            "StorageSpectroscopyCoarse uses a multi-LO segment loop and cannot "
+            "produce a single ProgramBuildResult. Use run() directly."
+        )
+
     def run(
         self,
         rf_begin: float,
@@ -165,6 +205,7 @@ class StorageSpectroscopyCoarse(ExperimentBase):
             prog = cQED_programs.storage_spectroscopy(
                 attr.qb_el, attr.st_el, "const_alpha", "sel_x180",
                 ifs, storage_therm_time, n_avg,
+                bindings=self._bindings_or_none,
             )
             rr = self.run_program(
                 prog, n_total=n_avg,
@@ -272,7 +313,7 @@ class NumSplittingSpectroscopy(ExperimentBase):
     frequencies to resolve photon-number-dependent shifts.
     """
 
-    def run(
+    def _build_impl(
         self,
         rf_centers: list[float] | np.ndarray,
         rf_spans: list[float] | np.ndarray,
@@ -282,10 +323,12 @@ class NumSplittingSpectroscopy(ExperimentBase):
         n_avg: int = 1000,
         *,
         allow_default_state_prep: bool = False,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
-        self.set_standard_frequencies()
         st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
 
         # Default no-op prep is deprecated; require explicit notebook-provided state_prep.
         if state_prep is None:
@@ -300,7 +343,7 @@ class NumSplittingSpectroscopy(ExperimentBase):
                 wait(1)
 
         # Build IF frequency list from RF centers/spans/df relative to qubit LO
-        lo_freq = self.hw.get_element_lo(attr.qb_el)
+        lo_freq = self.get_qubit_lo()
         if_list: list[int] = []
         rf_list: list[float] = []
         for center, span in zip(rf_centers, rf_spans):
@@ -314,13 +357,46 @@ class NumSplittingSpectroscopy(ExperimentBase):
             state_prep, attr.qb_el, attr.st_el,
             sel_r180, if_frequencies,
             st_therm_clks, n_avg,
+            bindings=self._bindings_or_none,
         )
-        result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
                 pp.proc_default,
                 pp.proc_attach("frequencies", np.array(rf_list)),
-            ],
+            ),
+            experiment_name="NumSplittingSpectroscopy",
+            params={
+                "rf_centers": list(rf_centers), "rf_spans": list(rf_spans),
+                "df": df, "sel_r180": sel_r180, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.num_splitting_spectroscopy",
+            sweep_axes={"frequencies": np.array(rf_list)},
+        )
+
+    def run(
+        self,
+        rf_centers: list[float] | np.ndarray,
+        rf_spans: list[float] | np.ndarray,
+        df: float,
+        sel_r180: str = "sel_x180",
+        state_prep: Any = None,
+        n_avg: int = 1000,
+        *,
+        allow_default_state_prep: bool = False,
+    ) -> RunResult:
+        build = self.build_program(
+            rf_centers=rf_centers, rf_spans=rf_spans, df=df,
+            sel_r180=sel_r180, state_prep=state_prep, n_avg=n_avg,
+            allow_default_state_prep=allow_default_state_prep,
+        )
+        result = self.run_program(
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "numSplittingSpectroscopy")
         return result
@@ -371,6 +447,46 @@ class NumSplittingSpectroscopy(ExperimentBase):
 class StorageRamsey(ExperimentBase):
     """Storage resonator decoherence via Ramsey interferometry."""
 
+    def _build_impl(
+        self,
+        delay_ticks: np.ndarray | list[int],
+        st_detune: int = 0,
+        disp_pulse: str = "const_alpha",
+        sel_r180: str = "sel_x180",
+        n_avg: int = 200,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
+
+        prog = cQED_programs.storage_ramsey(
+            attr.ro_el, attr.qb_el, attr.st_el,
+            disp_pulse, sel_r180,
+            np.asarray(delay_ticks, dtype=int),
+            st_therm_clks, n_avg,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
+                pp.proc_default,
+                pp.proc_attach("delays", np.asarray(delay_ticks) * 4),
+            ),
+            experiment_name="StorageRamsey",
+            params={
+                "st_detune": st_detune, "disp_pulse": disp_pulse,
+                "sel_r180": sel_r180, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.storage_ramsey",
+            sweep_axes={"delays": np.asarray(delay_ticks) * 4},
+        )
+
     def run(
         self,
         delay_ticks: np.ndarray | list[int],
@@ -379,22 +495,13 @@ class StorageRamsey(ExperimentBase):
         sel_r180: str = "sel_x180",
         n_avg: int = 200,
     ) -> RunResult:
-        attr = self.attr
-        self.set_standard_frequencies()
-        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
-
-        prog = cQED_programs.storage_ramsey(
-            attr.ro_el, attr.qb_el, attr.st_el,
-            disp_pulse, sel_r180,
-            np.asarray(delay_ticks, dtype=int),
-            st_therm_clks, n_avg,
+        build = self.build_program(
+            delay_ticks=delay_ticks, st_detune=st_detune,
+            disp_pulse=disp_pulse, sel_r180=sel_r180, n_avg=n_avg,
         )
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
-                pp.proc_default,
-                pp.proc_attach("delays", np.asarray(delay_ticks) * 4),
-            ],
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "storageRamsey")
         return result
@@ -459,17 +566,19 @@ class StorageChiRamsey(ExperimentBase):
     Ramsey around a single Fock frequency.
     """
 
-    def run(
+    def _build_impl(
         self,
         fock_fq: float,
         delay_ticks: np.ndarray | list[int],
         disp_pulse: str = "const_alpha",
         x90_pulse: str = "x90",
         n_avg: int = 200,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
-        self.set_standard_frequencies()
         st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
 
         # Guard: measureMacro must be configured before running chi Ramsey
         from ...programs.macros.measure import measureMacro
@@ -484,13 +593,42 @@ class StorageChiRamsey(ExperimentBase):
             disp_pulse, x90_pulse,
             np.asarray(delay_ticks, dtype=int),
             st_therm_clks, n_avg,
+            bindings=self._bindings_or_none,
         )
-        result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
                 pp.proc_default,
                 pp.proc_attach("delays", np.asarray(delay_ticks) * 4),
-            ],
+            ),
+            experiment_name="StorageChiRamsey",
+            params={
+                "fock_fq": fock_fq, "disp_pulse": disp_pulse,
+                "x90_pulse": x90_pulse, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.storage_chi_ramsey",
+            sweep_axes={"delays": np.asarray(delay_ticks) * 4},
+        )
+
+    def run(
+        self,
+        fock_fq: float,
+        delay_ticks: np.ndarray | list[int],
+        disp_pulse: str = "const_alpha",
+        x90_pulse: str = "x90",
+        n_avg: int = 200,
+    ) -> RunResult:
+        build = self.build_program(
+            fock_fq=fock_fq, delay_ticks=delay_ticks,
+            disp_pulse=disp_pulse, x90_pulse=x90_pulse, n_avg=n_avg,
+        )
+        result = self.run_program(
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "storageChiRamsey")
         return result
@@ -577,6 +715,54 @@ class StorageChiRamsey(ExperimentBase):
 class StoragePhaseEvolution(ExperimentBase):
     """Storage state phase evolution tracking with SNAP gates."""
 
+    def _build_impl(
+        self,
+        fock_probe_fqs: list[float] | np.ndarray,
+        snap_list: list,
+        delay_clks: np.ndarray | list[int],
+        disp_alpha_pulse: str = "disp_alpha",
+        disp_eps_pulse: str = "disp_epsilon",
+        sel_r180_pulse: str = "sel_x180",
+        n_avg: int = 200,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
+
+        # Convert absolute Fock probe frequencies to IFs relative to qubit LO
+        lo_freq = self.get_qubit_lo()
+        fock_probe_ifs = np.array([int(fq - lo_freq) for fq in fock_probe_fqs], dtype=int)
+        fock0_if = int(qb_fq - lo_freq)
+
+        prog = cQED_programs.phase_evolution_prog(
+            attr.ro_el, attr.qb_el, attr.st_el,
+            disp_alpha_pulse, disp_eps_pulse,
+            sel_r180_pulse,
+            fock0_if, fock_probe_ifs,
+            np.asarray(delay_clks, dtype=int),
+            snap_list,
+            st_therm_clks, n_avg,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(pp.proc_default,),
+            experiment_name="StoragePhaseEvolution",
+            params={
+                "disp_alpha_pulse": disp_alpha_pulse,
+                "disp_eps_pulse": disp_eps_pulse,
+                "sel_r180_pulse": sel_r180_pulse, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.phase_evolution_prog",
+            sweep_axes={},
+        )
+
     def run(
         self,
         fock_probe_fqs: list[float] | np.ndarray,
@@ -587,27 +773,15 @@ class StoragePhaseEvolution(ExperimentBase):
         sel_r180_pulse: str = "sel_x180",
         n_avg: int = 200,
     ) -> RunResult:
-        attr = self.attr
-        self.set_standard_frequencies()
-        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
-
-        # Convert absolute Fock probe frequencies to IFs relative to qubit LO
-        lo_freq = self.hw.get_element_lo(attr.qb_el)
-        fock_probe_ifs = np.array([int(fq - lo_freq) for fq in fock_probe_fqs], dtype=int)
-        fock0_if = int(attr.qb_fq - lo_freq)
-
-        prog = cQED_programs.phase_evolution_prog(
-            attr.ro_el, attr.qb_el, attr.st_el,
-            disp_alpha_pulse, disp_eps_pulse,
-            sel_r180_pulse,
-            fock0_if, fock_probe_ifs,
-            np.asarray(delay_clks, dtype=int),
-            snap_list,
-            st_therm_clks, n_avg,
+        build = self.build_program(
+            fock_probe_fqs=fock_probe_fqs, snap_list=snap_list,
+            delay_clks=delay_clks, disp_alpha_pulse=disp_alpha_pulse,
+            disp_eps_pulse=disp_eps_pulse, sel_r180_pulse=sel_r180_pulse,
+            n_avg=n_avg,
         )
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[pp.proc_default],
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "storagePhaseEvolution")
         return result

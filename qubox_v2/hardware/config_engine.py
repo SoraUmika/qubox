@@ -145,6 +145,19 @@ class ConfigEngine:
         from ..core.experiment_context import ExperimentContext
         return ExperimentContext.compute_wiring_rev(self.hardware_path)
 
+    @property
+    def hardware(self) -> "HardwareConfig":
+        """Return a typed ``HardwareConfig`` from the loaded layers.
+
+        Merges ``hardware_base`` and ``hardware_extras`` and parses
+        them through the Pydantic model.  Used by the binding system
+        to derive ``ExperimentBindings``.
+        """
+        from ..core.config import HardwareConfig
+        require(self.hardware_base is not None, "No hardware loaded.", ConfigError)
+        merged = {**self.hardware_base, **self.hardware_extras}
+        return HardwareConfig.from_dict(merged)
+
     def save_hardware(self, path: str | Path | None = None) -> None:
         require(self.hardware_base is not None, "No hardware loaded to save.", ConfigError)
         dst = Path(path) if path else (self.hardware_path or Path("hardware.json"))

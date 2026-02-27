@@ -240,6 +240,14 @@ class ExperimentBase:
             "with hardware.json and cqed_params.json."
         )
 
+    @property
+    def _bindings_or_none(self):
+        """Return ExperimentBindings if available, else None."""
+        try:
+            return self.bindings
+        except (RuntimeError, AttributeError):
+            return None
+
     # ------------------------------------------------------------------
     # Common helpers
     # ------------------------------------------------------------------
@@ -275,9 +283,20 @@ class ExperimentBase:
         return float(resolved if resolved is not None else fallback)
 
     def set_standard_frequencies(self, *, qb_fq: float | None = None) -> None:
-        """Set readout and qubit element frequencies to calibrated values."""
-        mm = self.measure_macro
-        ro_fq = getattr(mm, "_drive_frequency", None)
+        """Set readout and qubit element frequencies to calibrated values.
+
+        Resolution order for readout frequency:
+          1. ``bindings.readout.drive_frequency`` (binding-driven path)
+          2. ``measureMacro._drive_frequency`` (singleton compat)
+          3. ``attr.ro_fq`` (attributes fallback)
+        """
+        ro_fq = None
+        b = self._bindings_or_none
+        if b is not None and b.readout is not None:
+            ro_fq = getattr(b.readout, "drive_frequency", None)
+        if not isinstance(ro_fq, (int, float, np.floating)) or not np.isfinite(ro_fq):
+            mm = self.measure_macro
+            ro_fq = getattr(mm, "_drive_frequency", None)
         if not isinstance(ro_fq, (int, float, np.floating)) or not np.isfinite(ro_fq):
             ro_fq = self.attr.ro_fq
         self.hw.set_element_fq(self.attr.ro_el, float(ro_fq))
@@ -285,10 +304,66 @@ class ExperimentBase:
         self.hw.set_element_fq(self.attr.qb_el, target_qb_fq)
 
     def get_readout_lo(self) -> float:
+        """Return readout LO frequency, preferring bindings when available."""
+        b = self._bindings_or_none
+        if b is not None and b.readout is not None:
+            lo = getattr(b.readout.drive_out, "lo_frequency", None)
+            if lo is not None:
+                return float(lo)
         return self.hw.get_element_lo(self.attr.ro_el)
 
     def get_qubit_lo(self) -> float:
+        """Return qubit LO frequency, preferring bindings when available."""
+        b = self._bindings_or_none
+        if b is not None and b.qubit is not None:
+            lo = getattr(b.qubit, "lo_frequency", None)
+            if lo is not None:
+                return float(lo)
         return self.hw.get_element_lo(self.attr.qb_el)
+
+    # ------------------------------------------------------------------
+    # Pure frequency resolvers (no side-effects)
+    # ------------------------------------------------------------------
+    def _resolve_readout_frequency(self) -> float:
+        """Resolve readout frequency: bindings → measureMacro → attributes.
+
+        Unlike ``set_standard_frequencies`` this method does **not** apply
+        the frequency — it only returns the resolved value.
+        """
+        b = self._bindings_or_none
+        if b is not None and b.readout is not None:
+            ro_fq = getattr(b.readout, "drive_frequency", None)
+            if isinstance(ro_fq, (int, float, np.floating)) and np.isfinite(ro_fq):
+                return float(ro_fq)
+        mm = self.measure_macro
+        ro_fq = getattr(mm, "_drive_frequency", None)
+        if isinstance(ro_fq, (int, float, np.floating)) and np.isfinite(ro_fq):
+            return float(ro_fq)
+        return float(self.attr.ro_fq)
+
+    def _resolve_qubit_frequency(self, detune: float = 0.0) -> float:
+        """Resolve qubit frequency with optional detuning (no side-effects).
+
+        Parameters
+        ----------
+        detune : float
+            Additive detuning in Hz (default 0).
+        """
+        return self.get_qubit_frequency() + detune
+
+    def _serialize_bindings(self) -> dict[str, Any] | None:
+        """Serialise current bindings state for provenance logging."""
+        b = self._bindings_or_none
+        if b is None:
+            return None
+        try:
+            return sanitize_mapping_for_json({
+                "qubit": str(b.qubit) if b.qubit else None,
+                "readout": str(b.readout) if b.readout else None,
+                "storage": str(b.storage) if b.storage else None,
+            })
+        except Exception:
+            return None
 
     def burn_pulses(self, include_volatile: bool = True) -> None:
         """Push registered pulses into QM config via context."""
@@ -386,9 +461,91 @@ class ExperimentBase:
     # ------------------------------------------------------------------
     # Default protocol methods (override in subclasses)
     # ------------------------------------------------------------------
-    def build_program(self, **params: Any) -> Any:
+    def build_program(self, **params: Any) -> "ProgramBuildResult":
+        """Build the QUA program without executing it.
+
+        Calls the subclass ``_build_impl()`` to construct the program and
+        resolve parameters, then applies the resolved frequencies to the
+        hardware config so that both ``run()`` and ``simulate()`` see the
+        correct IF values.
+
+        Returns
+        -------
+        ProgramBuildResult
+            Frozen snapshot with QUA program, processors, and provenance.
+        """
+        build = self._build_impl(**params)
+        # Apply resolved frequencies to hardware so the QM config is
+        # correct for both execution and simulation.
+        for element, freq in build.resolved_frequencies.items():
+            self.hw.set_element_fq(element, float(freq))
+        return build
+
+    def _build_impl(self, **params: Any) -> "ProgramBuildResult":
+        """Subclass override point for ``build_program()``.
+
+        Must return a ``ProgramBuildResult`` containing the QUA program and
+        all resolved metadata.  Must **not** call ``run_program()`` or
+        ``set_standard_frequencies()`` — frequency values go into
+        ``resolved_frequencies``; the base class applies them.
+        """
         raise NotImplementedError(
-            f"{self.name}.build_program() not implemented"
+            f"{self.name}._build_impl() not implemented. "
+            "Migrate the build portion of run() to _build_impl()."
+        )
+
+    def simulate(
+        self,
+        sim_config: Any = None,
+        **params: Any,
+    ) -> "SimulationResult":
+        """Build the QUA program, then simulate it.
+
+        Parameters
+        ----------
+        sim_config : QuboxSimulationConfig, optional
+            Simulation parameters.  If ``None``, uses defaults
+            (4000 ns, plot=True).
+        **params
+            Forwarded to ``build_program()``.  Must match the subclass
+            ``_build_impl()`` signature (same kwargs as ``run()``).
+
+        Returns
+        -------
+        SimulationResult
+            Simulated waveform samples plus full provenance chain.
+        """
+        from ..hardware.program_runner import QuboxSimulationConfig
+        from .result import SimulationResult
+
+        if sim_config is None:
+            sim_config = QuboxSimulationConfig()
+
+        build = self.build_program(**params)
+
+        runner = getattr(self._ctx, "runner", None)
+        if runner is None:
+            raise RuntimeError(
+                "No ProgramRunner available.  Call session.open() first."
+            )
+
+        sim_samples = runner.simulate(
+            build.program,
+            duration=sim_config.duration_ns,
+            plot=sim_config.plot,
+            plot_params=sim_config.plot_params,
+            controllers=sim_config.controllers,
+            t_begin=sim_config.t_begin,
+            t_end=sim_config.t_end,
+            compiler_options=sim_config.compiler_options,
+        )
+
+        return SimulationResult(
+            samples=sim_samples,
+            build=build,
+            config_snapshot=runner.config.build_qm_config(),
+            sim_config=sim_config,
+            duration_ns=sim_config.duration_ns,
         )
 
     def run(self, **params: Any) -> RunResult:

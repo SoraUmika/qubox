@@ -91,6 +91,7 @@ class SessionManager:
         cooldown_id: str | None = None,
         registry_base: str | Path | None = None,
         strict_context: bool = True,
+        hardware: Any = None,
         **kwargs: Any,
     ) -> None:
         # --- Context resolution ---
@@ -138,6 +139,10 @@ class SessionManager:
         self.experiment_path.mkdir(parents=True, exist_ok=True)
 
         _logger.info("SessionManager initialising at %s", self.experiment_path)
+
+        # --- 0. Process HardwareDefinition (notebook-first setup) ---
+        if hardware is not None:
+            self._apply_hardware_definition(hardware)
 
         # --- 1. Configuration engine ---
         self.config_engine = ConfigEngine(
@@ -270,6 +275,202 @@ class SessionManager:
         alias_map = build_alias_map(self.config_engine.hardware, self.attributes)
         for alias, channel_ref in alias_map.items():
             self.calibration.register_alias(alias, channel_ref.canonical_id)
+
+    # ------------------------------------------------------------------
+    # Roleless experiment factories (v2.1 API)
+    # ------------------------------------------------------------------
+    # These methods produce *generic* DriveTarget / ReadoutHandle instances
+    # that carry no role vocabulary.  They are ergonomic shortcuts; the
+    # underlying primitives remain role-free.
+
+    def drive_target(
+        self,
+        alias: str,
+        *,
+        rf_freq: float | None = None,
+        therm_clks: int | None = None,
+    ) -> "DriveTarget":
+        """Construct a :class:`DriveTarget` from a named alias.
+
+        Resolves element name, LO frequency, and RF frequency from the
+        hardware config and calibration store.
+
+        Parameters
+        ----------
+        alias : str
+            Human-friendly name (e.g. ``"qubit"``, ``"storage"``).
+        rf_freq : float | None
+            Explicit RF frequency override.  If *None*, resolved from
+            calibration store or sample attributes.
+        therm_clks : int | None
+            Thermalization wait override.  If *None*, resolved from
+            ``attr.<alias>_therm_clks`` or default 250 000.
+        """
+        from ..core.bindings import DriveTarget
+
+        b = self.bindings
+        # Resolve the OutputBinding for this alias
+        if alias in ("qubit", "qb") or alias == getattr(self.attributes, "qb_el", None):
+            ob = b.qubit
+            element = self.attributes.qb_el or alias
+            default_therm = getattr(self.attributes, "qb_therm_clks", 250_000) or 250_000
+            cal_field = "qubit_freq"
+        elif alias in ("storage", "st") or alias == getattr(self.attributes, "st_el", None):
+            ob = b.storage
+            if ob is None:
+                raise ValueError(f"No storage binding available for alias '{alias}'.")
+            element = self.attributes.st_el or alias
+            default_therm = getattr(self.attributes, "st_therm_clks", 500_000) or 500_000
+            cal_field = "storage_freq"
+        elif alias in b.extras:
+            ob = b.extras[alias]
+            element = alias
+            default_therm = 250_000
+            cal_field = None
+        else:
+            raise ValueError(
+                f"Unknown alias '{alias}'. Known: qubit, storage, "
+                f"{', '.join(b.extras.keys()) if b.extras else '(no extras)'}."
+            )
+
+        # Resolve RF frequency
+        if rf_freq is None and cal_field is not None:
+            from ..experiments.experiment_base import ExperimentBase
+            # Try calibration store first
+            cal = getattr(self, "calibration", None)
+            if cal is not None:
+                try:
+                    freq_entry = cal.get_frequencies(element)
+                    if freq_entry is not None:
+                        v = getattr(freq_entry, cal_field, None)
+                        if v is not None and v != 0.0:
+                            rf_freq = float(v)
+                except Exception:
+                    pass
+            # Fallback to sample attributes
+            if rf_freq is None:
+                attr_field = {"qubit_freq": "qb_fq", "storage_freq": "st_fq"}.get(cal_field)
+                if attr_field:
+                    v = getattr(self.attributes, attr_field, None)
+                    if v is not None:
+                        rf_freq = float(v)
+
+        therm = therm_clks if therm_clks is not None else int(default_therm)
+
+        return DriveTarget.from_output_binding(
+            ob, element=element, rf_freq=rf_freq, therm_clks=therm,
+        )
+
+    def readout_handle(
+        self,
+        alias: str = "resonator",
+        operation: str = "readout",
+    ) -> "ReadoutHandle":
+        """Construct a :class:`ReadoutHandle` from a named alias.
+
+        Resolves physical binding from hardware config and calibration
+        artifacts from ``CalibrationStore``.
+
+        Parameters
+        ----------
+        alias : str
+            Human-friendly name (default ``"resonator"``).
+        operation : str
+            Pulse operation (default ``"readout"``).
+        """
+        from ..core.bindings import ReadoutHandle, ReadoutCal
+
+        b = self.bindings
+        rb = b.readout  # ReadoutBinding
+        element = getattr(self.attributes, "ro_el", None) or alias
+
+        # Build ReadoutCal from CalibrationStore (always fresh)
+        drive_freq = rb.drive_frequency
+        if not isinstance(drive_freq, (int, float)) or drive_freq == 0.0:
+            drive_freq = float(getattr(self.attributes, "ro_fq", 0.0) or 0.0)
+
+        cal = ReadoutCal.from_calibration_store(
+            self.calibration,
+            rb.physical_id,
+            drive_freq=drive_freq,
+        )
+
+        return ReadoutHandle(
+            binding=rb, cal=cal, element=element, operation=operation,
+        )
+
+    # Ergonomic shortcuts for common patterns
+    def qubit(self, alias: str = "qubit", **kw) -> "DriveTarget":
+        """Shortcut for ``drive_target("qubit")``.
+
+        Returns a :class:`DriveTarget` — a generic type with no role
+        vocabulary.
+        """
+        return self.drive_target(alias, **kw)
+
+    def storage(self, alias: str = "storage", **kw) -> "DriveTarget":
+        """Shortcut for ``drive_target("storage")``.
+
+        Returns a :class:`DriveTarget` — a generic type with no role
+        vocabulary.
+        """
+        return self.drive_target(alias, **kw)
+
+    def readout(self, alias: str = "resonator", **kw) -> "ReadoutHandle":
+        """Shortcut for ``readout_handle("resonator")``.
+
+        Returns a :class:`ReadoutHandle` — a generic type with no role
+        vocabulary.
+        """
+        return self.readout_handle(alias, **kw)
+
+    def _apply_hardware_definition(self, hw_def: Any) -> None:
+        """Generate hardware.json and seed cqed_params.json from a HardwareDefinition.
+
+        Called before ``ConfigEngine`` creation when the user passes a
+        ``HardwareDefinition`` object to the session constructor.
+
+        When the ``HardwareDefinition`` is provided it *always* regenerates
+        hardware.json (the user explicitly wants to set/update the wiring).
+        cqed_params.json is seeded with element names and initial frequencies
+        but existing physics parameters are preserved.
+        """
+        from ..core.hardware_definition import HardwareDefinition
+
+        if not isinstance(hw_def, HardwareDefinition):
+            raise ConfigError(
+                f"'hardware' must be a HardwareDefinition instance, got {type(hw_def).__name__}."
+            )
+
+        # Validate
+        errors = hw_def.validate()
+        if errors:
+            raise ConfigError(
+                "HardwareDefinition validation failed:\n"
+                + "\n".join(f"  - {e}" for e in errors)
+            )
+
+        # Determine target paths.
+        # hardware.json is a sample-level file (shared across cooldowns).
+        if self._sample_config_dir is not None:
+            hw_path = self._sample_config_dir / "hardware.json"
+            cqed_path = self._sample_config_dir / "cqed_params.json"
+        else:
+            hw_path = self.experiment_path / "config" / "hardware.json"
+            cqed_path = self.experiment_path / "config" / "cqed_params.json"
+
+        # Warn if overwriting an existing hardware.json
+        if hw_path.exists():
+            _logger.info(
+                "Overwriting existing hardware.json from HardwareDefinition: %s",
+                hw_path,
+            )
+
+        # Generate and write hardware.json
+        hw_def.save_hardware(hw_path)
+
+        # Seed cqed_params.json (merge with existing to preserve physics params)
+        hw_def.save_cqed_params(cqed_path, merge_existing=True)
 
     @classmethod
     def from_sample(
@@ -686,6 +887,45 @@ class SessionManager:
                 _logger.info("Synced measureMacro from CalibrationStore (element=%s)", ro_el)
             except Exception as exc:
                 _logger.warning("Failed to sync measureMacro from CalibrationStore: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Ad-hoc program simulation
+    # ------------------------------------------------------------------
+    def simulate_program(
+        self,
+        program: Any,
+        sim_config: Any = None,
+    ) -> Any:
+        """Simulate an ad-hoc QUA program not tied to an experiment class.
+
+        Parameters
+        ----------
+        program
+            A QUA program object (``qm.qua._Program``).
+        sim_config : QuboxSimulationConfig, optional
+            Simulation parameters.  If ``None``, uses defaults
+            (4000 ns, plot=True).
+
+        Returns
+        -------
+        SimulatorSamples
+            Relabelled simulator samples with element-named channels.
+        """
+        from ..hardware.program_runner import QuboxSimulationConfig
+
+        if sim_config is None:
+            sim_config = QuboxSimulationConfig()
+
+        return self.runner.simulate(
+            program,
+            duration=sim_config.duration_ns,
+            plot=sim_config.plot,
+            plot_params=sim_config.plot_params,
+            controllers=sim_config.controllers,
+            t_begin=sim_config.t_begin,
+            t_end=sim_config.t_end,
+            compiler_options=sim_config.compiler_options,
+        )
 
     # ------------------------------------------------------------------
     # Teardown

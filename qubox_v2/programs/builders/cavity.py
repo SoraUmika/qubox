@@ -12,7 +12,17 @@ if TYPE_CHECKING:
     from ...experiments.gates_legacy import Gate
 
 
-def storage_spectroscopy(qb_el, st_el, disp, sel_r180, if_frequencies, st_therm_clks, n_avg):
+def storage_spectroscopy(qb_el, st_el, disp, sel_r180, if_frequencies, st_therm_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+        st_el = st_el or _names.get("storage", "__st")
+    else:
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
+        if st_el is None:
+            raise ValueError("st_el is required when bindings are not provided")
     with program() as storage_spec:
         n = declare(int)
         f = declare(int)
@@ -41,7 +51,17 @@ def storage_spectroscopy(qb_el, st_el, disp, sel_r180, if_frequencies, st_therm_
             n_st.save("iteration")
     return storage_spec
 
-def num_splitting_spectroscopy(state_prep, qb_el, st_el, sel_r180, if_frequencies, st_therm_clks, n_avg):
+def num_splitting_spectroscopy(state_prep, qb_el, st_el, sel_r180, if_frequencies, st_therm_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+        st_el = st_el or _names.get("storage", "__st")
+    else:
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
+        if st_el is None:
+            raise ValueError("st_el is required when bindings are not provided")
     with program() as num_splitting_spectroscopy_program:
         n = declare(int)
         f = declare(int)
@@ -69,6 +89,7 @@ def sel_r180_calibration0(
     n_avg: int = 2000,
     fock_ifs=None,             # optional sweep list; if None -> [qb_if]
     x180_pulse: str = "x180",  # unconditional qubit pi to prep |e>
+    bindings: "ExperimentBindings | None" = None,
 ):
     """
     Calibrate sel_r180 flip probabilities with no M0.
@@ -82,6 +103,12 @@ def sel_r180_calibration0(
       - I_e/Q_e : after sel starting from e          (estimates e->g via 1-Pe)
       - f_if, iteration
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
     if fock_ifs is None:
         fock_ifs = [int(qb_if)]
     fock_ifs = np.array(fock_ifs, dtype=int).tolist()
@@ -175,6 +202,7 @@ def fock_resolved_spectroscopy(
     sel_r180_transfer_calibration: bool = False,
     qb_therm_clks: int | None = None,
     r180: str = "x180",
+    bindings: "ExperimentBindings | None" = None,
 ):
     """
     SIGNAL+NULL (per n and per f):
@@ -185,6 +213,12 @@ def fock_resolved_spectroscopy(
       prep |e> -> M0 -> sel_r180@qb_if -> M1 -> relax
     CAL streams buffered as (n_avg, 2) (shots x prep).
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
     fock_ifs = np.array(fock_ifs, dtype=int)
     L = int(len(fock_ifs))
     if qb_therm_clks is None:
@@ -369,8 +403,20 @@ def fock_resolved_T1_relaxation(
     fock_disps, fock_ifs,
     sel_r180,
     delay_clks, st_therm_clks,
-    n_avg
+    n_avg,
+    *,
+    bindings: "ExperimentBindings | None" = None,
 ):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+        st_el = st_el or _names.get("storage", "__st")
+    else:
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
+        if st_el is None:
+            raise ValueError("st_el is required when bindings are not provided")
     fock_ifs = np.array(fock_ifs, dtype=int)
 
     with program() as prog:
@@ -415,7 +461,17 @@ def fock_resolved_T1_relaxation(
     return prog
 
 
-def fock_resolved_power_rabi(qb_el, st_el, gains, disp_n_list, fock_ifs, sel_qb_pulse, st_therm_clks, n_avg):
+def fock_resolved_power_rabi(qb_el, st_el, gains, disp_n_list, fock_ifs, sel_qb_pulse, st_therm_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+        st_el = st_el or _names.get("storage", "__st")
+    else:
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
+        if st_el is None:
+            raise ValueError("st_el is required when bindings are not provided")
     fock_ifs = np.array(fock_ifs, dtype=int)
     with program() as prog:
         n = declare(int)
@@ -447,7 +503,17 @@ def fock_resolved_power_rabi(qb_el, st_el, gains, disp_n_list, fock_ifs, sel_qb_
             n_st.save("iteration")
     return prog
 
-def fock_resolved_qb_ramsey(qb_el, st_el, fock_ifs, detunings, disps, sel_r90, delay_clks, st_therm_clk, n_avg):
+def fock_resolved_qb_ramsey(qb_el, st_el, fock_ifs, detunings, disps, sel_r90, delay_clks, st_therm_clk, n_avg, *, bindings: "ExperimentBindings | None" = None):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+        st_el = st_el or _names.get("storage", "__st")
+    else:
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
+        if st_el is None:
+            raise ValueError("st_el is required when bindings are not provided")
     with program() as fock_resolved_qb_ramsey:
         delay_clk = declare(int)
         n = declare(int)
@@ -483,8 +549,23 @@ def storage_wigner_tomography(
         x90_pulse,              # fast pi_val/2 on the qubit
         parity_wait_clks,       # â‰ƒ pi_val/chi_val, in clock ticks
         st_therm_clks,          # storage cooldown
-        n_avg                   # number of repeats
+        n_avg,                  # number of repeats
+        *,
+        bindings: "ExperimentBindings | None" = None,
 ):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        st_el = st_el or _names.get("storage", "__st")
+        qb_el = qb_el or _names.get("qubit", "__qb")
+        ro_el = ro_el or _names.get("readout", "__ro")
+    else:
+        if st_el is None:
+            raise ValueError("st_el is required when bindings are not provided")
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
+        if ro_el is None:
+            raise ValueError("ro_el is required when bindings are not provided")
     m00_list, m01_list, m10_list, m11_list = [], [], [], []
     for p in p_vals:
         for x in x_vals:
@@ -544,7 +625,21 @@ def phase_evolution_prog(ro_el, qb_el, st_el,
                          fock_probe_ifs,
                          delay_clks,
                          snap_list,
-                         st_therm_clks, n_avg):
+                         st_therm_clks, n_avg,
+                         *, bindings: "ExperimentBindings | None" = None):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        ro_el = ro_el or _names.get("readout", "__ro")
+        qb_el = qb_el or _names.get("qubit", "__qb")
+        st_el = st_el or _names.get("storage", "__st")
+    else:
+        if ro_el is None:
+            raise ValueError("ro_el is required when bindings are not provided")
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
+        if st_el is None:
+            raise ValueError("st_el is required when bindings are not provided")
 
     fock_probe_ifs = np.array(fock_probe_ifs, dtype=int)
     fock_dim = len(fock_probe_ifs)
@@ -600,8 +695,22 @@ def storage_chi_ramsey(
     x90_pulse,            # pi_val/2 pulse on the qubit
     delay_ticks,          # list/ndarray of waiting\u2010time values (in clock ticks)
     st_therm_clks,        # cooldown for storage (in clock ticks)
-    n_avg                 # number of averages
+    n_avg,                # number of averages
+    *, bindings: "ExperimentBindings | None" = None,
 ):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        ro_el = ro_el or _names.get("readout", "__ro")
+        qb_el = qb_el or _names.get("qubit", "__qb")
+        st_el = st_el or _names.get("storage", "__st")
+    else:
+        if ro_el is None:
+            raise ValueError("ro_el is required when bindings are not provided")
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
+        if st_el is None:
+            raise ValueError("st_el is required when bindings are not provided")
     with program() as prog:
         rep = declare(int)
         tau   = declare(int)
@@ -642,8 +751,22 @@ def storage_ramsey(
     sel_r180,            # pi_val/2 pulse on the qubit
     delay_ticks,          # list/ndarray of waiting\u2010time values (in clock ticks)
     st_therm_clks,        # cooldown for storage (in clock ticks)
-    n_avg                 # number of averages
+    n_avg,                # number of averages
+    *, bindings: "ExperimentBindings | None" = None,
 ):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        ro_el = ro_el or _names.get("readout", "__ro")
+        qb_el = qb_el or _names.get("qubit", "__qb")
+        st_el = st_el or _names.get("storage", "__st")
+    else:
+        if ro_el is None:
+            raise ValueError("ro_el is required when bindings are not provided")
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
+        if st_el is None:
+            raise ValueError("st_el is required when bindings are not provided")
     with program() as prog:
         rep = declare(int)
         tau   = declare(int)

@@ -2036,6 +2036,101 @@ def measure_with_binding(
     return tuple(target_vars)
 
 
+# ---------------------------------------------------------------------------
+# emit_measurement() — canonical ReadoutHandle-based measurement (v2.1 API)
+# ---------------------------------------------------------------------------
+def emit_measurement(
+    readout: "ReadoutHandle",
+    *,
+    targets: list | None = None,
+    state: "Any | None" = None,
+    gain: float | None = None,
+    timestamp_stream: "Any | None" = None,
+    adc_stream: "Any | None" = None,
+) -> tuple:
+    """Emit a QUA ``measure()`` statement using a ``ReadoutHandle``.
 
+    This is the canonical replacement for ``measureMacro.measure()``.
+    It is a **pure function** -- it reads from the ``ReadoutHandle`` and
+    emits QUA statements.  It has no class-level state.
 
+    Parameters
+    ----------
+    readout : ReadoutHandle
+        Immutable readout channel configuration (from ``core.bindings``).
+    targets : list, optional
+        ``[I, Q]`` pre-declared QUA fixed variables to receive demodulated
+        results.  If *None*, fresh variables are declared internally.
+    state : QUA variable, optional
+        Boolean variable for state discrimination.  If *None* and the
+        ``ReadoutCal`` has a threshold, no discrimination is performed.
+    gain : float, optional
+        Override readout gain for this measurement.
+    timestamp_stream, adc_stream
+        QUA stream handles passed through to ``measure()``.
+
+    Returns
+    -------
+    tuple
+        ``(I, Q)`` when ``state`` is *None*; ``(I, Q, state)`` otherwise.
+    """
+    from ...core.bindings import ReadoutHandle as _RH
+
+    if not isinstance(readout, _RH):
+        raise TypeError(
+            f"emit_measurement: expected ReadoutHandle, got {type(readout).__name__}"
+        )
+
+    element = readout.element
+    op = readout.operation
+    cal = readout.cal
+
+    # Declare targets if not provided
+    if targets is None:
+        targets = [declare(fixed), declare(fixed)]
+
+    # Build demod output tuple from ReadoutCal weight keys
+    weight_keys = cal.weight_keys  # ("cos", "sin", "minus_sin")
+    outputs = []
+    if len(weight_keys) >= 2:
+        # Standard dual_demod.full with cos/sin pair
+        outputs.append(dual_demod.full(weight_keys[0], weight_keys[1], targets[0]))
+    if len(weight_keys) >= 3 and len(targets) >= 2:
+        # Second demod output (minus_sin/cos pair)
+        outputs.append(dual_demod.full(weight_keys[2], weight_keys[0], targets[1]))
+
+    # Build pulse handle with optional gain
+    pulse = op if gain is None else op * amp(gain)
+
+    measure(
+        pulse,
+        element,
+        None,
+        *outputs,
+        timestamp_stream=timestamp_stream,
+        adc_stream=adc_stream,
+    )
+    align()
+
+    # State discrimination
+    if state is not None and cal.threshold is not None:
+        I_var = targets[0]
+        if cal.rotation_angle is not None:
+            # Apply IQ rotation before thresholding
+            Q_var = targets[1] if len(targets) > 1 else None
+            if Q_var is not None:
+                I_rot = declare(fixed)
+                assign(
+                    I_rot,
+                    Math.cos2pi(cal.rotation_angle / (2.0 * 3.141592653589793)) * I_var
+                    - Math.sin2pi(cal.rotation_angle / (2.0 * 3.141592653589793)) * Q_var,
+                )
+                assign(state, I_rot > cal.threshold)
+            else:
+                assign(state, I_var > cal.threshold)
+        else:
+            assign(state, I_var > cal.threshold)
+        return (*targets, state)
+
+    return tuple(targets)
 

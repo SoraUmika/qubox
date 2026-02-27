@@ -5,7 +5,7 @@ from ..macros.measure import measureMacro
 from ..macros.sequence import sequenceMacros
 import numpy as np
 
-def readout_trace(ro_therm_clks, n_avg):
+def readout_trace(ro_therm_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
     """
     Acquire and average raw ADC traces for a given readout resonator element.
     Parameters:
@@ -62,8 +62,8 @@ def resonator_spectroscopy(
         _names = ConfigBuilder.ephemeral_names(bindings)
         if ro_el is None:
             ro_el = _names.get("readout", "__ro")
-    else:
-        ro_el = ro_el or "resonator"
+    elif ro_el is None:
+        raise ValueError("ro_el is required when bindings are not provided")
 
     if depletion_clks is None:
         depletion_clks = depletion_len
@@ -101,6 +101,7 @@ def resonator_power_spectroscopy(
     n_avg: int = 1,
     *,
     depletion_len=None,
+    bindings: "ExperimentBindings | None" = None,
 ):
     """
     Perform a 2D sweep of readout IF and readout gain to map out resonator response versus power.
@@ -163,8 +164,8 @@ def qubit_spectroscopy(sat_pulse, if_frequencies, qb_gain, qb_len, qb_therm_clks
         _names = ConfigBuilder.ephemeral_names(bindings)
         if qb_el is None:
             qb_el = _names.get("qubit", "__qb")
-    else:
-        qb_el = qb_el or "qubit"
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
 
     with program() as qubit_spec:
         n = declare(int)
@@ -213,8 +214,8 @@ def qubit_spectroscopy_ef(sat_pulse, if_frequencies, qb_ge_if, qb_gain, qb_len, 
         _names = ConfigBuilder.ephemeral_names(bindings)
         if qb_el is None:
             qb_el = _names.get("qubit", "__qb")
-    else:
-        qb_el = qb_el or "qubit"
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
 
     with program() as qubit_spec:
         n = declare(int)
@@ -260,8 +261,8 @@ def resonator_spectroscopy_x180(if_frequencies, r180, qb_therm_clks, n_avg, *, q
         _names = ConfigBuilder.ephemeral_names(bindings)
         if qb_el is None:
             qb_el = _names.get("qubit", "__qb")
-    else:
-        qb_el = qb_el or "qubit"
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
 
     with program() as pulsed_ro_program:
         ro_if = declare(int)

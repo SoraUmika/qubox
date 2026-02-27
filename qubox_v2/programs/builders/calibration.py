@@ -6,7 +6,13 @@ from ..macros.measure import measureMacro
 from ..macros.sequence import sequenceMacros
 import numpy as np
 
-def sequential_qb_rotations(qb_el,  rotations:list[str], apply_avg, qb_therm_clks, n_shots):
+def sequential_qb_rotations(qb_el, rotations:list[str], apply_avg, qb_therm_clks, n_shots, *, bindings: "ExperimentBindings | None" = None):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
     with program() as seq_rot_prog:
         n = declare(int)
         I = declare(fixed)
@@ -39,7 +45,13 @@ def sequential_qb_rotations(qb_el,  rotations:list[str], apply_avg, qb_therm_clk
             n_st.save("iteration")
     return seq_rot_prog
 
-def all_xy(qb_el, allxy_rotation_sequences, qb_therm_clks, n_avg):
+def all_xy(qb_el, allxy_rotation_sequences, qb_therm_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
     with program() as all_xy:
         n = declare(int)
         state = declare(bool)
@@ -81,7 +93,14 @@ def randomized_benchmarking(
     interleave_op: str | None = None,
     interleave_clks: int | None = None,
     interleave_sentinel: int | None = None,   # <-- CHANGED: None => auto (max_id+1)
+    bindings: "ExperimentBindings | None" = None,
 ):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
     if primitive_clks <= 0:
         raise ValueError("primitive_clks must be > 0")
     if guard_clks < 0:
@@ -165,7 +184,15 @@ def drag_calibration_YALE(
     x180, x90, y180, y90,    # your pulse handles
     qb_therm_clks: int,
     n_avg: int = 200,
+    *,
+    bindings: "ExperimentBindings | None" = None,
 ):
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
     with program() as drag:
         n = declare(int)
         a = declare(fixed)
@@ -217,6 +244,8 @@ def drag_calibration_GOOGLE(
     x180,          # your calibrated pi pulse handle
     qb_therm_clks: int,
     n_avg: int = 200,
+    *,
+    bindings: "ExperimentBindings | None" = None,
 ):
     """
     Google-style DRAG calibration:
@@ -226,6 +255,12 @@ def drag_calibration_GOOGLE(
       - Measure I/Q + state
     The correct alpha is the one that keeps the qubit closest to |g> even after many repetitions.
     """
+    if bindings is not None:
+        from ...core.bindings import ConfigBuilder
+        _names = ConfigBuilder.ephemeral_names(bindings)
+        qb_el = qb_el or _names.get("qubit", "__qb")
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
 
     ro_el = measureMacro.active_element()
 

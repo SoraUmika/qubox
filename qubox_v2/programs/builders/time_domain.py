@@ -24,8 +24,8 @@ def temporal_rabi(pulse, pulse_clks, pulse_gain, qb_therm_clks, n_avg, *, qb_el:
         _names = ConfigBuilder.ephemeral_names(bindings)
         if qb_el is None:
             qb_el = _names.get("qubit", "__qb")
-    else:
-        qb_el = qb_el or "qubit"
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
 
     with program() as rabi_prog:
         pulse_clk = declare(int)
@@ -69,8 +69,8 @@ def power_rabi(qb_clock_len:int, gains, qb_therm_clks, pulse, truncate_clks, n_a
         _names = ConfigBuilder.ephemeral_names(bindings)
         if qb_el is None:
             qb_el = _names.get("qubit", "__qb")
-    else:
-        qb_el = qb_el or "qubit"
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
 
     with program() as power_rabi_prog:
         g = declare(fixed)
@@ -118,8 +118,10 @@ def time_rabi_chevron(pulse, pulse_gain, qb_if, dfs, duration_clks, qb_therm_clk
         if ro_el is None:
             ro_el = _names.get("readout", "__ro")
     else:
-        qb_el = qb_el or "qubit"
-        ro_el = ro_el or "resonator"
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
+        if ro_el is None:
+            raise ValueError("ro_el is required when bindings are not provided")
 
     with program() as time_rabi_chevron_program:
         n = declare(int)
@@ -172,8 +174,10 @@ def power_rabi_chevron(pulse, pulse_duration, qb_if, dfs, amplitudes, qb_therm_c
         if ro_el is None:
             ro_el = _names.get("readout", "__ro")
     else:
-        qb_el = qb_el or "qubit"
-        ro_el = ro_el or "resonator"
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
+        if ro_el is None:
+            raise ValueError("ro_el is required when bindings are not provided")
 
     with program() as rabi_chevron_prog:
         n = declare(int)
@@ -223,8 +227,10 @@ def ramsey_chevron(r90, qb_if, dfs, delay_clks, qb_therm_clks, n_avg:int=1, *, r
         if ro_el is None:
             ro_el = _names.get("readout", "__ro")
     else:
-        qb_el = qb_el or "qubit"
-        ro_el = ro_el or "resonator"
+        if qb_el is None:
+            raise ValueError("qb_el is required when bindings are not provided")
+        if ro_el is None:
+            raise ValueError("ro_el is required when bindings are not provided")
 
     with program() as ramsey_chevron_prog:
         n = declare(int)
@@ -275,8 +281,8 @@ def T1_relaxation(r180, wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | 
         _names = ConfigBuilder.ephemeral_names(bindings)
         if qb_el is None:
             qb_el = _names.get("qubit", "__qb")
-    else:
-        qb_el = qb_el or "qubit"
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
 
     with program() as T1_prog:
         cycles_to_wait = declare(int)
@@ -319,8 +325,8 @@ def T2_ramsey(r90, wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | None 
         _names = ConfigBuilder.ephemeral_names(bindings)
         if qb_el is None:
             qb_el = _names.get("qubit", "__qb")
-    else:
-        qb_el = qb_el or "qubit"
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
 
     with program() as T2_ramsey_prog:
         delay_clk = declare(int)
@@ -365,8 +371,8 @@ def T2_echo(r180, r90,
         _names = ConfigBuilder.ephemeral_names(bindings)
         if qb_el is None:
             qb_el = _names.get("qubit", "__qb")
-    else:
-        qb_el = qb_el or "qubit"
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
 
     with program() as T2_echo_prog:
         delay_clk = declare(int)
@@ -407,8 +413,8 @@ def ac_stark_shift(
         _names = ConfigBuilder.ephemeral_names(bindings)
         if qb_el is None:
             qb_el = _names.get("qubit", "__qb")
-    else:
-        qb_el = qb_el or "qubit"
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
 
     with program() as ac_stark_prog:
         n      = declare(int)
@@ -455,8 +461,8 @@ def residual_photon_ramsey(test_ro_op, t_R_clks, t_relax_clk, t_buffer_clk, prep
         _names = ConfigBuilder.ephemeral_names(bindings)
         if qb_el is None:
             qb_el = _names.get("qubit", "__qb")
-    else:
-        qb_el = qb_el or "qubit"
+    elif qb_el is None:
+        raise ValueError("qb_el is required when bindings are not provided")
 
     with program() as residual_photon_ramsey_prog:
         t_R_clk = declare(int)

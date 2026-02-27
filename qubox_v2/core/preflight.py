@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 # Elements that every qubox setup should have
-_BASELINE_ELEMENTS = ("qubit",)
+_BASELINE_ELEMENTS = ()  # v2.0.0: no hardcoded element requirements; validated via bindings
 # Operations every element should have at minimum
 _BASELINE_OPS = ("const",)
 

@@ -222,6 +222,144 @@
         "device": "octave_external_lo4",
         "lo_port": "LO4"
       }
+    },
+    "bindings": {
+      "outputs": {
+        "resonator": {
+          "channel": [
+            "oct1",
+            "RF_out",
+            1
+          ],
+          "intermediate_frequency": -50000000.0,
+          "lo_frequency": 8800000000.0,
+          "gain": -10,
+          "digital_inputs": {
+            "switch": [
+              "con1",
+              "digital_out",
+              1
+            ],
+            "pump": [
+              "con1",
+              "digital_out",
+              2
+            ]
+          },
+          "operations": {}
+        },
+        "resonator2": {
+          "channel": [
+            "oct1",
+            "RF_out",
+            2
+          ],
+          "intermediate_frequency": -50000000.0,
+          "lo_frequency": 3500000000.0,
+          "gain": 0,
+          "digital_inputs": {
+            "switch": [
+              "con1",
+              "digital_out",
+              2
+            ]
+          },
+          "operations": {}
+        },
+        "qubit": {
+          "channel": [
+            "oct1",
+            "RF_out",
+            3
+          ],
+          "intermediate_frequency": -50000000.0,
+          "lo_frequency": 6200000000.0,
+          "gain": 0,
+          "digital_inputs": {
+            "switch": [
+              "con1",
+              "digital_out",
+              3
+            ]
+          },
+          "operations": {}
+        },
+        "qubit2": {
+          "channel": [
+            "oct1",
+            "RF_out",
+            4
+          ],
+          "intermediate_frequency": -50000000.0,
+          "lo_frequency": 7000000000.0,
+          "gain": 0,
+          "digital_inputs": {
+            "switch": [
+              "con1",
+              "digital_out",
+              2
+            ]
+          },
+          "operations": {}
+        },
+        "storage": {
+          "channel": [
+            "oct1",
+            "RF_out",
+            5
+          ],
+          "intermediate_frequency": -50000000.0,
+          "lo_frequency": 5400000000.0,
+          "gain": 0,
+          "digital_inputs": {
+            "switch": [
+              "con1",
+              "digital_out",
+              5
+            ]
+          },
+          "operations": {}
+        }
+      },
+      "inputs": {
+        "resonator_adc": {
+          "channel": [
+            "oct1",
+            "RF_in",
+            1
+          ],
+          "lo_frequency": 8800000000.0,
+          "time_of_flight": 280,
+          "smearing": 0,
+          "weight_keys": [
+            [
+              "cos",
+              "sin"
+            ],
+            [
+              "minus_sin",
+              "cos"
+            ]
+          ]
+        }
+      },
+      "roles": {
+        "qubit": "qubit",
+        "readout_drive": "resonator",
+        "readout_acquire": "resonator_adc",
+        "storage": "storage"
+      },
+      "extras": {
+        "qubit2": "qubit2",
+        "resonator2": "resonator2"
+      }
+    },
+    "aliases": {
+      "qubit": "oct1:RF_out:3",
+      "resonator": "oct1:RF_out:1",
+      "storage": "oct1:RF_out:5",
+      "qubit2": "oct1:RF_out:4",
+      "resonator2": "oct1:RF_out:2"
     }
   },
   "octave_links": [

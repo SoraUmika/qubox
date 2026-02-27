@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase, create_clks_array
-from ..result import AnalysisResult, FitResult
+from ..result import AnalysisResult, FitResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.fitting import fit_and_wrap, build_fit_legend
 from ...analysis.cQED_models import (
@@ -31,7 +31,7 @@ class FockResolvedSpectroscopy(ExperimentBase):
     selective pi-pulses and double post-selection.
     """
 
-    def run(
+    def _build_impl(
         self,
         probe_fqs: list[float] | np.ndarray,
         *,
@@ -40,10 +40,12 @@ class FockResolvedSpectroscopy(ExperimentBase):
         calibrate_ref_r180_S: bool = True,
         n_avg: int = 100,
         allow_default_state_prep: bool = False,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
-        self.set_standard_frequencies()
         st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
 
         if state_prep is None:
             if not allow_default_state_prep:
@@ -57,22 +59,55 @@ class FockResolvedSpectroscopy(ExperimentBase):
                 wait(1)
 
         # Convert absolute RF probe frequencies to IFs relative to qubit LO
-        lo_freq = self.hw.get_element_lo(attr.qb_el)
+        lo_freq = self.get_qubit_lo()
         fock_ifs = np.array([int(fq - lo_freq) for fq in probe_fqs], dtype=int)
-        qb_if = int(attr.qb_fq - lo_freq)
+        qb_if = int(qb_fq - lo_freq)
 
         prog = cQED_programs.fock_resolved_spectroscopy(
             attr.qb_el, state_prep,
             qb_if, fock_ifs,
             sel_r180, st_therm_clks, n_avg,
             sel_r180_transfer_calibration=calibrate_ref_r180_S,
+            bindings=self._bindings_or_none,
         )
-        result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
                 lambda out: pp.proc_default(out, targets=[("I_sel", "Q_sel", "")]),
                 pp.proc_attach("frequencies", np.array(probe_fqs, dtype=float)),
-            ],
+            ),
+            experiment_name="FockResolvedSpectroscopy",
+            params={
+                "sel_r180": sel_r180,
+                "calibrate_ref_r180_S": calibrate_ref_r180_S,
+                "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.fock_resolved_spectroscopy",
+            sweep_axes={"frequencies": np.array(probe_fqs, dtype=float)},
+        )
+
+    def run(
+        self,
+        probe_fqs: list[float] | np.ndarray,
+        *,
+        state_prep: Any = None,
+        sel_r180: str = "sel_x180",
+        calibrate_ref_r180_S: bool = True,
+        n_avg: int = 100,
+        allow_default_state_prep: bool = False,
+    ) -> RunResult:
+        build = self.build_program(
+            probe_fqs=probe_fqs, state_prep=state_prep,
+            sel_r180=sel_r180, calibrate_ref_r180_S=calibrate_ref_r180_S,
+            n_avg=n_avg, allow_default_state_prep=allow_default_state_prep,
+        )
+        result = self.run_program(
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "fockResolvedSpectroscopy")
         return result
@@ -158,7 +193,7 @@ class FockResolvedSpectroscopy(ExperimentBase):
 class FockResolvedT1(ExperimentBase):
     """T1 relaxation measurement in individual Fock manifolds."""
 
-    def run(
+    def _build_impl(
         self,
         fock_fqs: list[float] | np.ndarray | None = None,
         fock_disps: list[str] | None = None,
@@ -167,7 +202,7 @@ class FockResolvedT1(ExperimentBase):
         delay_begin: int = 4,
         sel_r180: str = "sel_x180",
         n_avg: int = 1000,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
         st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
 
@@ -195,10 +230,11 @@ class FockResolvedT1(ExperimentBase):
 
         delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
 
-        self.set_standard_frequencies()
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
 
         # Convert absolute Fock frequencies to IFs relative to qubit LO
-        lo_freq = self.hw.get_element_lo(attr.qb_el)
+        lo_freq = self.get_qubit_lo()
         fock_ifs = np.array([int(fq - lo_freq) for fq in fock_fqs], dtype=int)
 
         prog = cQED_programs.fock_resolved_T1_relaxation(
@@ -206,13 +242,45 @@ class FockResolvedT1(ExperimentBase):
             fock_disps, fock_ifs,
             sel_r180, delay_clks,
             st_therm_clks, n_avg,
+            bindings=self._bindings_or_none,
         )
-        result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
                 pp.proc_default,
                 pp.proc_attach("delays", delay_clks * 4),
-            ],
+            ),
+            experiment_name="FockResolvedT1",
+            params={
+                "delay_end": delay_end, "dt": dt, "delay_begin": delay_begin,
+                "sel_r180": sel_r180, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.fock_resolved_T1_relaxation",
+            sweep_axes={"delays": delay_clks * 4},
+        )
+
+    def run(
+        self,
+        fock_fqs: list[float] | np.ndarray | None = None,
+        fock_disps: list[str] | None = None,
+        delay_end: int = 40000,
+        dt: int = 200,
+        delay_begin: int = 4,
+        sel_r180: str = "sel_x180",
+        n_avg: int = 1000,
+    ) -> RunResult:
+        build = self.build_program(
+            fock_fqs=fock_fqs, fock_disps=fock_disps,
+            delay_end=delay_end, dt=dt, delay_begin=delay_begin,
+            sel_r180=sel_r180, n_avg=n_avg,
+        )
+        result = self.run_program(
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "fockResolvedT1")
         return result
@@ -326,7 +394,7 @@ class FockResolvedRamsey(ExperimentBase):
     per manifold; detuning sweep.
     """
 
-    def run(
+    def _build_impl(
         self,
         fock_fqs: list[float] | np.ndarray | None = None,
         detunings: list[float] | np.ndarray | None = None,
@@ -336,7 +404,7 @@ class FockResolvedRamsey(ExperimentBase):
         delay_begin: int = 4,
         sel_r90: str = "sel_x90",
         n_avg: int = 1000,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
         st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
 
@@ -367,10 +435,11 @@ class FockResolvedRamsey(ExperimentBase):
 
         delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
 
-        self.set_standard_frequencies()
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
 
         # Convert absolute Fock frequencies to IFs relative to qubit LO
-        lo_freq = self.hw.get_element_lo(attr.qb_el)
+        lo_freq = self.get_qubit_lo()
         fock_ifs = np.array([int(fq - lo_freq) for fq in fock_fqs], dtype=int)
 
         prog = cQED_programs.fock_resolved_qb_ramsey(
@@ -378,13 +447,46 @@ class FockResolvedRamsey(ExperimentBase):
             fock_ifs, np.asarray(detunings),
             disps, sel_r90, delay_clks,
             st_therm_clks, n_avg,
+            bindings=self._bindings_or_none,
         )
-        result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
                 pp.proc_default,
                 pp.proc_attach("delays", delay_clks * 4),
-            ],
+            ),
+            experiment_name="FockResolvedRamsey",
+            params={
+                "delay_end": delay_end, "dt": dt, "delay_begin": delay_begin,
+                "sel_r90": sel_r90, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.fock_resolved_qb_ramsey",
+            sweep_axes={"delays": delay_clks * 4},
+        )
+
+    def run(
+        self,
+        fock_fqs: list[float] | np.ndarray | None = None,
+        detunings: list[float] | np.ndarray | None = None,
+        disps: list[str] | None = None,
+        delay_end: int = 40000,
+        dt: int = 100,
+        delay_begin: int = 4,
+        sel_r90: str = "sel_x90",
+        n_avg: int = 1000,
+    ) -> RunResult:
+        build = self.build_program(
+            fock_fqs=fock_fqs, detunings=detunings, disps=disps,
+            delay_end=delay_end, dt=dt, delay_begin=delay_begin,
+            sel_r90=sel_r90, n_avg=n_avg,
+        )
+        result = self.run_program(
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "fockResolvedRamsey")
         return result
@@ -500,17 +602,19 @@ class FockResolvedPowerRabi(ExperimentBase):
     Sweeps gain across Fock-number-resolved qubit transitions.
     """
 
-    def run(
+    def _build_impl(
         self,
         fock_fqs: list[float] | np.ndarray | None = None,
         gains: list[float] | np.ndarray | None = None,
         sel_qb_pulse: str = "sel_x180",
         disp_n_list: list[str] | None = None,
         n_avg: int = 1000,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
-        self.set_standard_frequencies()
         st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
 
         if fock_fqs is None:
             if attr.fock_fqs is None:
@@ -538,7 +642,7 @@ class FockResolvedPowerRabi(ExperimentBase):
             )
 
         # Convert absolute Fock frequencies to IFs relative to qubit LO
-        lo_freq = self.hw.get_element_lo(attr.qb_el)
+        lo_freq = self.get_qubit_lo()
         fock_ifs = np.array([int(fq - lo_freq) for fq in fock_fqs], dtype=int)
 
         prog = cQED_programs.fock_resolved_power_rabi(
@@ -546,13 +650,42 @@ class FockResolvedPowerRabi(ExperimentBase):
             np.asarray(gains), disp_n_list,
             fock_ifs, sel_qb_pulse,
             st_therm_clks, n_avg,
+            bindings=self._bindings_or_none,
         )
-        result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
                 pp.proc_default,
                 pp.proc_attach("gains", np.asarray(gains)),
-            ],
+            ),
+            experiment_name="FockResolvedPowerRabi",
+            params={
+                "sel_qb_pulse": sel_qb_pulse, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.fock_resolved_power_rabi",
+            sweep_axes={"gains": np.asarray(gains)},
+        )
+
+    def run(
+        self,
+        fock_fqs: list[float] | np.ndarray | None = None,
+        gains: list[float] | np.ndarray | None = None,
+        sel_qb_pulse: str = "sel_x180",
+        disp_n_list: list[str] | None = None,
+        n_avg: int = 1000,
+    ) -> RunResult:
+        build = self.build_program(
+            fock_fqs=fock_fqs, gains=gains,
+            sel_qb_pulse=sel_qb_pulse, disp_n_list=disp_n_list,
+            n_avg=n_avg,
+        )
+        result = self.run_program(
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "fockResolvedPowerRabi")
         return result

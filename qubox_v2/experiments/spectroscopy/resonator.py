@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from ..experiment_base import (
     ExperimentBase, create_if_frequencies, create_clks_array,
 )
-from ..result import AnalysisResult, FitResult
+from ..result import AnalysisResult, FitResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.analysis_tools import two_state_discriminator
 from ...analysis.fitting import fit_and_wrap, generalized_fit, build_fit_legend
@@ -26,6 +26,57 @@ class ResonatorSpectroscopy(ExperimentBase):
     resonator resonance.
     """
 
+    def _setup_measure_context(self, readout_op: str):
+        """Return measureMacro context manager for readout-based experiments."""
+        attr = self.attr
+        ro_info = self.pulse_mgr.get_pulseOp_by_element_op(attr.ro_el, readout_op)
+        if ro_info is None:
+            raise ValueError(
+                f"No PulseOp for element={attr.ro_el!r}, op={readout_op!r}."
+            )
+        weight_len = int(ro_info.length) if ro_info.length is not None else None
+        return measureMacro.using_defaults(
+            pulse_op=ro_info, active_op=readout_op, weight_len=weight_len,
+        )
+
+    def _build_impl(
+        self,
+        readout_op: str,
+        rf_begin: float = 8605e6,
+        rf_end: float = 8620e6,
+        df: float = 50e3,
+        n_avg: int = 1000,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        lo_freq = self.get_readout_lo()
+        if_freqs = create_if_frequencies(attr.ro_el, rf_begin, rf_end, df, lo_freq)
+
+        prog = cQED_programs.resonator_spectroscopy(
+            if_freqs, attr.ro_therm_clks, n_avg,
+            ro_el=attr.ro_el,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
+                pp.proc_default, pp.proc_magnitude,
+                pp.proc_attach("frequencies", lo_freq + if_freqs),
+            ),
+            experiment_name="ResonatorSpectroscopy",
+            params={
+                "readout_op": readout_op, "rf_begin": rf_begin,
+                "rf_end": rf_end, "df": df, "n_avg": n_avg,
+            },
+            resolved_frequencies={},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.resonator_spectroscopy",
+            sweep_axes={"frequencies": lo_freq + if_freqs},
+            measure_macro_state={"readout_op": readout_op},
+            run_program_kwargs={"axis": 0},
+        )
+
     def run(
         self,
         readout_op: str,
@@ -34,30 +85,25 @@ class ResonatorSpectroscopy(ExperimentBase):
         df: float = 50e3,
         n_avg: int = 1000,
     ) -> RunResult:
-        attr = self.attr
-        lo_freq = self.hw.get_element_lo(attr.ro_el)
-        if_freqs = create_if_frequencies(attr.ro_el, rf_begin, rf_end, df, lo_freq)
-
-        ro_info = self.pulse_mgr.get_pulseOp_by_element_op(attr.ro_el, readout_op)
-        if ro_info is None:
-            raise ValueError(
-                f"No PulseOp for element={attr.ro_el!r}, op={readout_op!r}."
-            )
-
-        mm = measureMacro
-        weight_len = int(ro_info.length) if ro_info.length is not None else None
-        with mm.using_defaults(pulse_op=ro_info, active_op=readout_op, weight_len=weight_len):
-            prog = cQED_programs.resonator_spectroscopy(
-                attr.ro_el, if_freqs, attr.ro_therm_clks, n_avg,
+        with self._setup_measure_context(readout_op):
+            build = self.build_program(
+                readout_op=readout_op, rf_begin=rf_begin,
+                rf_end=rf_end, df=df, n_avg=n_avg,
             )
             return self.run_program(
-                prog, n_total=n_avg,
-                processors=[
-                    pp.proc_default, pp.proc_magnitude,
-                    pp.proc_attach("frequencies", lo_freq + if_freqs),
-                ],
-                axis=0,
+                build.program, n_total=build.n_total,
+                processors=list(build.processors),
+                **build.run_program_kwargs,
             )
+
+    def simulate(self, sim_config=None, **params):
+        readout_op = params.get("readout_op")
+        if readout_op is None:
+            raise TypeError(
+                "simulate() missing required keyword argument: 'readout_op'"
+            )
+        with self._setup_measure_context(readout_op):
+            return super().simulate(sim_config, **params)
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
         freqs = result.output.extract("frequencies")
@@ -144,6 +190,61 @@ class ResonatorSpectroscopy(ExperimentBase):
 class ResonatorPowerSpectroscopy(ExperimentBase):
     """Resonator frequency × readout gain 2-D sweep."""
 
+    def _setup_measure_context(self, readout_op: str):
+        """Return measureMacro context manager for readout-based experiments."""
+        attr = self.attr
+        ro_info = self.pulse_mgr.get_pulseOp_by_element_op(attr.ro_el, readout_op)
+        if ro_info is None:
+            raise ValueError(
+                f"No PulseOp for element={attr.ro_el!r}, op={readout_op!r}."
+            )
+        weight_len = int(ro_info.length) if ro_info.length is not None else None
+        return measureMacro.using_defaults(
+            pulse_op=ro_info, active_op=readout_op, weight_len=weight_len,
+        )
+
+    def _build_impl(
+        self,
+        readout_op: str,
+        rf_begin: float,
+        rf_end: float,
+        df: float,
+        g_min: float = 1e-3,
+        g_max: float = 0.5,
+        N_a: int = 50,
+        n_avg: int = 1000,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        lo_freq = self.get_readout_lo()
+        if_freqs = create_if_frequencies(attr.ro_el, rf_begin, rf_end, df, lo_freq)
+        gains = np.geomspace(g_min, g_max, N_a)
+
+        prog = cQED_programs.resonator_power_spectroscopy(
+            if_freqs, gains, attr.ro_therm_clks, n_avg,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
+                pp.proc_default,
+                pp.proc_attach("frequencies", lo_freq + if_freqs),
+                pp.proc_attach("gains", gains),
+            ),
+            experiment_name="ResonatorPowerSpectroscopy",
+            params={
+                "readout_op": readout_op, "rf_begin": rf_begin,
+                "rf_end": rf_end, "df": df,
+                "g_min": g_min, "g_max": g_max, "N_a": N_a, "n_avg": n_avg,
+            },
+            resolved_frequencies={},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.resonator_power_spectroscopy",
+            sweep_axes={"frequencies": lo_freq + if_freqs, "gains": gains},
+            measure_macro_state={"readout_op": readout_op},
+        )
+
     def run(
         self,
         readout_op: str,
@@ -155,33 +256,27 @@ class ResonatorPowerSpectroscopy(ExperimentBase):
         N_a: int = 50,
         n_avg: int = 1000,
     ) -> RunResult:
-        attr = self.attr
-        lo_freq = self.hw.get_element_lo(attr.ro_el)
-        if_freqs = create_if_frequencies(attr.ro_el, rf_begin, rf_end, df, lo_freq)
-        gains = np.geomspace(g_min, g_max, N_a)
-
-        ro_info = self.pulse_mgr.get_pulseOp_by_element_op(attr.ro_el, readout_op)
-        if ro_info is None:
-            raise ValueError(
-                f"No PulseOp for element={attr.ro_el!r}, op={readout_op!r}."
-            )
-
-        mm = measureMacro
-        weight_len = int(ro_info.length) if ro_info.length is not None else None
-        with mm.using_defaults(pulse_op=ro_info, active_op=readout_op, weight_len=weight_len):
-            prog = cQED_programs.resonator_power_spectroscopy(
-                if_freqs, gains, attr.ro_therm_clks, n_avg,
+        with self._setup_measure_context(readout_op):
+            build = self.build_program(
+                readout_op=readout_op, rf_begin=rf_begin,
+                rf_end=rf_end, df=df,
+                g_min=g_min, g_max=g_max, N_a=N_a, n_avg=n_avg,
             )
             result = self.run_program(
-                prog, n_total=n_avg,
-                processors=[
-                    pp.proc_default,
-                    pp.proc_attach("frequencies", lo_freq + if_freqs),
-                    pp.proc_attach("gains", gains),
-                ],
+                build.program, n_total=build.n_total,
+                processors=list(build.processors),
             )
         self.save_output(result.output, "cavityPowerSpectroscopy")
         return result
+
+    def simulate(self, sim_config=None, **params):
+        readout_op = params.get("readout_op")
+        if readout_op is None:
+            raise TypeError(
+                "simulate() missing required keyword argument: 'readout_op'"
+            )
+        with self._setup_measure_context(readout_op):
+            return super().simulate(sim_config, **params)
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
         freqs = result.output.extract("frequencies")
@@ -233,6 +328,46 @@ class ResonatorPowerSpectroscopy(ExperimentBase):
 class ResonatorSpectroscopyX180(ExperimentBase):
     """Resonator spectroscopy with qubit pi-pulse excitation."""
 
+    def _build_impl(
+        self,
+        rf_begin: float,
+        rf_end: float,
+        df: float,
+        r180: str = "x180",
+        n_avg: int = 1000,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        lo_freq = self.get_readout_lo()
+        if_freqs = create_if_frequencies(attr.ro_el, rf_begin, rf_end, df, lo_freq)
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
+
+        prog = cQED_programs.resonator_spectroscopy_x180(
+            if_freqs, r180,
+            attr.ro_therm_clks, n_avg,
+            qb_el=attr.qb_el,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
+                pp.proc_default, pp.proc_magnitude,
+                pp.proc_attach("frequencies", lo_freq + if_freqs),
+            ),
+            experiment_name="ResonatorSpectroscopyX180",
+            params={
+                "rf_begin": rf_begin, "rf_end": rf_end,
+                "df": df, "r180": r180, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.resonator_spectroscopy_x180",
+            sweep_axes={"frequencies": lo_freq + if_freqs},
+        )
+
     def run(
         self,
         rf_begin: float,
@@ -241,22 +376,13 @@ class ResonatorSpectroscopyX180(ExperimentBase):
         r180: str = "x180",
         n_avg: int = 1000,
     ) -> RunResult:
-        attr = self.attr
-        lo_freq = self.hw.get_element_lo(attr.ro_el)
-        if_freqs = create_if_frequencies(attr.ro_el, rf_begin, rf_end, df, lo_freq)
-
-        self.set_standard_frequencies()
-
-        prog = cQED_programs.resonator_spectroscopy_x180(
-            attr.qb_el, if_freqs, r180,
-            attr.ro_therm_clks, n_avg,
+        build = self.build_program(
+            rf_begin=rf_begin, rf_end=rf_end, df=df,
+            r180=r180, n_avg=n_avg,
         )
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
-                pp.proc_default, pp.proc_magnitude,
-                pp.proc_attach("frequencies", lo_freq + if_freqs),
-            ],
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "resonatorX180")
         return result
@@ -359,21 +485,46 @@ class ResonatorSpectroscopyX180(ExperimentBase):
 class ReadoutTrace(ExperimentBase):
     """Raw ADC readout trace capture."""
 
+    def _build_impl(
+        self,
+        drive_frequency: float,
+        ro_therm_clks: int = 10000,
+        n_avg: int = 1000,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+
+        prog = cQED_programs.readout_trace(
+            ro_therm_clks, n_avg,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(pp.bare_proc,),
+            experiment_name="ReadoutTrace",
+            params={
+                "drive_frequency": drive_frequency,
+                "ro_therm_clks": ro_therm_clks, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: drive_frequency},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.readout_trace",
+        )
+
     def run(
         self,
         drive_frequency: float,
         ro_therm_clks: int = 10000,
         n_avg: int = 1000,
     ) -> RunResult:
-        attr = self.attr
-        self.hw.set_element_fq(attr.ro_el, drive_frequency)
-
-        prog = cQED_programs.readout_trace(
-            ro_therm_clks, n_avg,
+        build = self.build_program(
+            drive_frequency=drive_frequency,
+            ro_therm_clks=ro_therm_clks, n_avg=n_avg,
         )
         return self.run_program(
-            prog, n_total=n_avg,
-            processors=[pp.bare_proc],
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
@@ -414,6 +565,13 @@ class ReadoutTrace(ExperimentBase):
 class ReadoutFrequencyOptimization(ExperimentBase):
     """Sweep readout frequency to maximize g/e discrimination fidelity."""
 
+    def _build_impl(self, **kw):
+        raise NotImplementedError(
+            "ReadoutFrequencyOptimization uses a multi-program loop over "
+            "readout frequencies and cannot produce a single ProgramBuildResult. "
+            "Use run() directly."
+        )
+
     def run(
         self,
         rf_begin: float,
@@ -424,7 +582,7 @@ class ReadoutFrequencyOptimization(ExperimentBase):
         n_runs: int = 1000,
     ) -> RunResult:
         attr = self.attr
-        lo_freq = self.hw.get_element_lo(attr.ro_el)
+        lo_freq = self.get_readout_lo()
         if_freqs = create_if_frequencies(attr.ro_el, rf_begin, rf_end, df, lo_freq)
 
         self.set_standard_frequencies()
@@ -436,6 +594,7 @@ class ReadoutFrequencyOptimization(ExperimentBase):
             self.hw.set_element_fq(attr.ro_el, lo_freq + float(if_fq))
             prog = cQED_programs.iq_blobs(
                 attr.ro_el, attr.qb_el, r180, attr.qb_therm_clks, n_runs,
+                bindings=self._bindings_or_none,
             )
             result = self.run_program(
                 prog, n_total=n_runs,

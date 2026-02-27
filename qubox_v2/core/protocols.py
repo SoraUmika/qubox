@@ -80,14 +80,16 @@ class Experiment(Protocol):
     Contract for a single experiment type.
 
     Each experiment knows how to:
-    1. Build its QUA program
+    1. Build its QUA program (returning a ``ProgramBuildResult``)
     2. Run it (via a ProgramRunner)
-    3. Post-process results
+    3. Simulate it (via a ProgramRunner)
+    4. Post-process results
     """
 
     @property
     def name(self) -> str: ...
 
     def build_program(self, **params: Any) -> Any: ...
+    def simulate(self, sim_config: Any = None, **params: Any) -> Any: ...
     def run(self, **params: Any) -> Any: ...
     def process(self, raw_output: Any, **params: Any) -> Any: ...

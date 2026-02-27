@@ -1,7 +1,7 @@
 {
-  "version": "4.0.0",
+  "version": "5.0.0",
   "discrimination": {
-    "resonator": {
+    "oct1:RF_in:1": {
       "threshold": -1.4637299338181552e-05,
       "angle": 1.2460767431473088,
       "mu_g": [
@@ -23,7 +23,7 @@
     }
   },
   "readout_quality": {
-    "resonator": {
+    "oct1:RF_in:1": {
       "F": 0.72926,
       "Q": 0.9772965192358021,
       "V": 0.45852000000000004,
@@ -47,16 +47,16 @@
     }
   },
   "frequencies": {
-    "resonator": {
+    "oct1:RF_out:1": {
       "lo_freq": 8800000000.0,
       "if_freq": -231980828.47366428
     },
-    "qubit": {
+    "oct1:RF_out:3": {
       "qubit_freq": 6150357642.635154
     }
   },
   "coherence": {
-    "qubit": {
+    "oct1:RF_out:3": {
       "T1": 7.519415707317908e-06,
       "T1_us": 7.519415707317909,
       "T2_ramsey": 8.866906530927518e-06,
@@ -68,7 +68,7 @@
   "pulse_calibrations": {
     "ge_ref_r180": {
       "pulse_name": "ge_ref_r180",
-      "element": "qubit",
+      "element": "oct1:RF_out:3",
       "transition": "ge",
       "amplitude": 0.09614269205403701,
       "length": 16,
@@ -77,10 +77,16 @@
     },
     "ge_sel_ref_r180": {
       "pulse_name": "ge_sel_ref_r180",
-      "element": "qubit",
+      "element": "oct1:RF_out:3",
       "transition": "ge",
       "amplitude": 1.0306391115882725
     }
+  },
+  "alias_index": {
+    "resonator": "oct1:RF_in:1",
+    "readout": "oct1:RF_in:1",
+    "qubit": "oct1:RF_out:3",
+    "storage": "oct1:RF_out:5"
   },
   "fit_history": {},
   "pulse_train_results": {},

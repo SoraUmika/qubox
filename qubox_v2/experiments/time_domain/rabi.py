@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase, create_clks_array
-from ..result import AnalysisResult, FitResult
+from ..result import AnalysisResult, FitResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.fitting import fit_and_wrap, build_fit_legend
 from ...analysis.cQED_models import power_rabi_model, temporal_rabi_model
@@ -20,6 +20,46 @@ from ...pulses.manager import MAX_AMPLITUDE
 class TemporalRabi(ExperimentBase):
     """Qubit Rabi oscillations vs pulse duration."""
 
+    def _build_impl(
+        self,
+        pulse: str,
+        pulse_len_begin: int,
+        pulse_len_end: int,
+        dt: int = 4,
+        pulse_gain: float = 1.0,
+        n_avg: int = 1000,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        pulse_clks = create_clks_array(pulse_len_begin, pulse_len_end, dt, time_per_clk=4)
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
+
+        prog = cQED_programs.temporal_rabi(
+            pulse, pulse_clks, pulse_gain, attr.qb_therm_clks, n_avg,
+            qb_el=attr.qb_el,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
+                pp.proc_default,
+                pp.proc_attach("pulse_durations", pulse_clks * 4),
+            ),
+            experiment_name="TemporalRabi",
+            params={
+                "pulse": pulse, "pulse_len_begin": pulse_len_begin,
+                "pulse_len_end": pulse_len_end, "dt": dt,
+                "pulse_gain": pulse_gain, "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.temporal_rabi",
+            sweep_axes={"pulse_durations": pulse_clks * 4},
+        )
+
     def run(
         self,
         pulse: str,
@@ -29,20 +69,14 @@ class TemporalRabi(ExperimentBase):
         pulse_gain: float = 1.0,
         n_avg: int = 1000,
     ) -> RunResult:
-        attr = self.attr
-        pulse_clks = create_clks_array(pulse_len_begin, pulse_len_end, dt, time_per_clk=4)
-
-        self.set_standard_frequencies()
-
-        prog = cQED_programs.temporal_rabi(
-            attr.qb_el, pulse, pulse_clks, pulse_gain, attr.qb_therm_clks, n_avg,
+        build = self.build_program(
+            pulse=pulse, pulse_len_begin=pulse_len_begin,
+            pulse_len_end=pulse_len_end, dt=dt,
+            pulse_gain=pulse_gain, n_avg=n_avg,
         )
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
-                pp.proc_default,
-                pp.proc_attach("pulse_durations", pulse_clks * 4),
-            ],
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self._run_params = {"op": pulse}
         self.save_output(result.output, "temporalRabi")
@@ -133,7 +167,7 @@ class TemporalRabi(ExperimentBase):
 class PowerRabi(ExperimentBase):
     """Qubit Rabi oscillations vs amplitude/gain."""
 
-    def run(
+    def _build_impl(
         self,
         max_gain: float,
         dg: float = 1e-3,
@@ -141,7 +175,7 @@ class PowerRabi(ExperimentBase):
         length: int | None = None,
         truncate_clks: int | None = None,
         n_avg: int = 1000,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
         gains = np.arange(-max_gain, max_gain + 1e-12, dg, dtype=float)
 
@@ -158,18 +192,51 @@ class PowerRabi(ExperimentBase):
             )
 
         pulse_clock_len = round(length / 4)
-        self.set_standard_frequencies()
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
 
         prog = cQED_programs.power_rabi(
-            attr.qb_el, pulse_clock_len, gains, attr.qb_therm_clks,
+            pulse_clock_len, gains, attr.qb_therm_clks,
             op, truncate_clks, n_avg,
+            qb_el=attr.qb_el,
+            bindings=self._bindings_or_none,
         )
-        result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
                 pp.proc_default,
                 pp.proc_attach("gains", gains),
-            ],
+            ),
+            experiment_name="PowerRabi",
+            params={
+                "max_gain": max_gain, "dg": dg, "op": op,
+                "length": length, "truncate_clks": truncate_clks,
+                "n_avg": n_avg,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.power_rabi",
+            sweep_axes={"gains": gains},
+        )
+
+    def run(
+        self,
+        max_gain: float,
+        dg: float = 1e-3,
+        op: str = "ge_ref_r180",
+        length: int | None = None,
+        truncate_clks: int | None = None,
+        n_avg: int = 1000,
+    ) -> RunResult:
+        build = self.build_program(
+            max_gain=max_gain, dg=dg, op=op,
+            length=length, truncate_clks=truncate_clks, n_avg=n_avg,
+        )
+        result = self.run_program(
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self._run_params = {"op": op}
         self.save_output(result.output, "powerRabi")
@@ -283,26 +350,53 @@ class PowerRabi(ExperimentBase):
 class SequentialQubitRotations(ExperimentBase):
     """Apply a sequence of qubit rotation gates and measure."""
 
+    def _build_impl(
+        self,
+        rotations: list[str] | None = None,
+        apply_avg: bool = False,
+        n_shots: int = 1000,
+    ) -> ProgramBuildResult:
+        if rotations is None:
+            rotations = ["x180"]
+        attr = self.attr
+
+        ro_fq = self._resolve_readout_frequency()
+        qb_fq = self._resolve_qubit_frequency()
+
+        prog = cQED_programs.sequential_qb_rotations(
+            attr.qb_el, rotations, apply_avg, attr.qb_therm_clks, n_shots,
+            bindings=self._bindings_or_none,
+        )
+
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_shots,
+            processors=(
+                pp.proc_default,
+                pp.proc_attach("rotations", rotations),
+            ),
+            experiment_name="SequentialQubitRotations",
+            params={
+                "rotations": rotations, "apply_avg": apply_avg,
+                "n_shots": n_shots,
+            },
+            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.sequential_qb_rotations",
+        )
+
     def run(
         self,
         rotations: list[str] | None = None,
         apply_avg: bool = False,
         n_shots: int = 1000,
     ) -> RunResult:
-        if rotations is None:
-            rotations = ["x180"]
-        attr = self.attr
-        self.set_standard_frequencies()
-
-        prog = cQED_programs.sequential_qb_rotations(
-            attr.qb_el, rotations, apply_avg, attr.qb_therm_clks, n_shots,
+        build = self.build_program(
+            rotations=rotations, apply_avg=apply_avg, n_shots=n_shots,
         )
         return self.run_program(
-            prog, n_total=n_shots,
-            processors=[
-                pp.proc_default,
-                pp.proc_attach("rotations", rotations),
-            ],
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
