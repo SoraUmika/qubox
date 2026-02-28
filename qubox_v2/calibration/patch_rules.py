@@ -231,6 +231,8 @@ class WeightRegistrationRule:
         "SetCalibration",
         "SetPulseParam",
         "SetMeasureWeights",
+        "SetMeasureDiscrimination",
+        "SetMeasureQuality",
         "PersistMeasureConfig",
         "TriggerPulseRecompile",
     )

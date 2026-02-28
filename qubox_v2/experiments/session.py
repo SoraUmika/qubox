@@ -207,6 +207,7 @@ class SessionManager:
         self._runtime_settings = self._load_runtime_settings()
         self.allow_inline_mutations = False
         self.orchestrator = CalibrationOrchestrator(self)
+        self.calibration_orchestrator = self.orchestrator
         self._opened = False
 
         _logger.info("SessionManager ready.")
@@ -844,8 +845,12 @@ class SessionManager:
             if demod == "dual_demod.full":
                 measureMacro.set_demodulator(dual_demod.full)
 
-        if threshold is not None and hasattr(measureMacro, "_ro_disc_params"):
-            measureMacro._ro_disc_params["threshold"] = float(threshold)
+        if threshold is not None:
+            from ..calibration.contracts import Patch
+
+            patch = Patch(reason="override_readout_operation_threshold")
+            patch.add("SetMeasureDiscrimination", threshold=float(threshold))
+            self.orchestrator.apply_patch(patch, dry_run=False)
 
         if apply_to_attributes:
             self.attributes.ro_el = element
