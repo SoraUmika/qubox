@@ -448,3 +448,40 @@ def test_measure_macro_reset_restores_norm_params():
         f"norm_params should be {{}} after reset(), got {np_val!r}"
     )
 
+
+# ---------------------------------------------------------------------------
+# Fix 5: CRIT-02 — Safe threshold access in program builders
+# ---------------------------------------------------------------------------
+
+def test_readout_builder_uses_safe_threshold_access():
+    """CRIT-02: readout.py must not use bare ['threshold'] subscript."""
+    readout_path = _ROOT / "programs" / "builders" / "readout.py"
+    content = readout_path.read_text()
+    assert '_ro_disc_params["threshold"]' not in content, (
+        "readout.py still uses bare _ro_disc_params[\"threshold\"] — "
+        "replace with .get('threshold') or 0.0 to prevent None being passed to QUA operations."
+    )
+
+
+def test_simulation_builder_uses_safe_threshold_access():
+    """CRIT-02: simulation.py must not use bare ['threshold'] subscript."""
+    sim_path = _ROOT / "programs" / "builders" / "simulation.py"
+    content = sim_path.read_text()
+    assert '_ro_disc_params["threshold"]' not in content, (
+        "simulation.py still uses bare _ro_disc_params[\"threshold\"] — "
+        "replace with .get('threshold') or 0.0 to prevent None being passed to QUA operations."
+    )
+
+
+def test_measure_macro_threshold_none_safe_default():
+    """CRIT-02: .get("threshold") or 0.0 must return 0.0 when threshold is None (the default)."""
+    measureMacro = _try_import_measure_macro()
+    if measureMacro is None:
+        pytest.skip("measureMacro not importable without hardware SDK")
+
+    measureMacro._apply_defaults()  # ensure threshold is None (the default)
+    thr = measureMacro._ro_disc_params.get("threshold") or 0.0
+    assert thr == pytest.approx(0.0), (
+        f"Expected 0.0 for uncalibrated threshold, got {thr!r}"
+    )
+

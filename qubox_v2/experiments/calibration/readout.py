@@ -702,17 +702,9 @@ class ReadoutGEDiscrimination(ExperimentBase):
                     if strict_defs_refresh_error:
                         metadata["strict_mode_rotated_defs_refresh_error"] = strict_defs_refresh_error
                     if self._run_params.get("update_measure_macro", False):
-                        try:
-                            self._apply_rotated_measure_macro(metrics)
-                            _logger.info(
-                                "Strict mode: runtime measureMacro switched to rotated labels "
-                                "(hardware weight build/burn deferred to orchestrator patch)"
-                            )
-                        except Exception as exc:
-                            _logger.warning(
-                                "Strict mode: failed to switch runtime measureMacro to rotated labels: %s",
-                                exc,
-                            )
+                        _logger.info(
+                            "Strict mode: runtime measureMacro mutation skipped; applying rotated labels is deferred to orchestrator patch"
+                        )
                     _logger.info("Strict mode: rotated weight/macro updates emitted as patch intent")
             else:
                 _logger.info(
@@ -722,10 +714,17 @@ class ReadoutGEDiscrimination(ExperimentBase):
                 )
 
             if self._run_params.get("update_measure_macro", False):
-                disc_sig = self._apply_discrimination_measure_macro(metrics)
-                if disc_sig:
-                    metrics["readout_state_signature"] = disc_sig
-                    metadata["readout_state_signature"] = disc_sig
+                allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
+                if allow_inline:
+                    disc_sig = self._apply_discrimination_measure_macro(metrics)
+                    if disc_sig:
+                        metrics["readout_state_signature"] = disc_sig
+                        metadata["readout_state_signature"] = disc_sig
+                else:
+                    metadata.setdefault("diagnostics", "")
+                    metadata["diagnostics"] = (
+                        (metadata["diagnostics"] + " | ") if metadata["diagnostics"] else ""
+                    ) + "Strict mode: discrimination runtime mutation deferred to orchestrator patch"
 
         # Auto-update post-selection config (legacy parity: auto_update_postsel)
         if hasattr(self, "_run_params") and self._run_params.get("auto_update_postsel", False):
@@ -1048,12 +1047,19 @@ class ReadoutGEDiscrimination(ExperimentBase):
         Uses the ``PersistMeasureConfig`` patch operation rather than
         writing ``measureConfig.json`` directly from experiment code.
         """
-        if hasattr(self, "_ctx") and hasattr(self._ctx, "calibration_orchestrator"):
+        orchestrator = None
+        if hasattr(self, "_ctx"):
+            orchestrator = getattr(
+                self._ctx,
+                "orchestrator",
+                getattr(self._ctx, "calibration_orchestrator", None),
+            )
+        if orchestrator is not None:
             try:
                 from ...calibration.contracts import Patch
                 patch = Patch(reason="persist_measure_macro_state")
                 patch.add("PersistMeasureConfig")
-                self._ctx.calibration_orchestrator.apply_patch(patch)
+                orchestrator.apply_patch(patch)
                 _logger.info("Persisted measureMacro state via orchestrator patch")
             except Exception as exc:
                 _logger.warning("Failed to persist measureMacro via orchestrator: %s — falling back to direct save", exc)
@@ -2807,11 +2813,16 @@ class CalibrateReadoutFull(ExperimentBase):
 
             if cfg.save_measure_config:
                 try:
-                    if hasattr(self._ctx, "calibration_orchestrator"):
+                    orchestrator = getattr(
+                        self._ctx,
+                        "orchestrator",
+                        getattr(self._ctx, "calibration_orchestrator", None),
+                    )
+                    if orchestrator is not None:
                         from ...calibration.contracts import Patch
                         patch = Patch(reason="CalibrateReadoutFull_persist_final")
                         patch.add("PersistMeasureConfig")
-                        self._ctx.calibration_orchestrator.apply_patch(patch)
+                        orchestrator.apply_patch(patch)
                     else:
                         exp_path = Path(getattr(self._ctx, "experiment_path", "."))
                         dst = exp_path / "config" / "measureConfig.json"

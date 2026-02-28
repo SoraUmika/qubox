@@ -849,7 +849,7 @@ class HardwareController:
         sa_device_name: str,
     ) -> None:
         base = self._cal_db_dir or Path(".")
-        art_dir = base / "artifacts" / "calibration_runs"
+        art_dir = base / "artifacts" / "runtime" / "calibration_runs"
         art_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         path = art_dir / f"auto_mixer_sa_validation_{ts}.json"

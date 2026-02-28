@@ -83,8 +83,7 @@ class ExperimentRunner:
 
         # ---- 1. Configuration engine ----
         self.config_engine = ConfigEngine(
-            hardware_json=self._resolve_hardware_json(),
-            pulse_json=self._resolve_pulse_json(),
+            hardware_path=self._resolve_hardware_json(),
         )
 
         # ---- 2. Hardware controller (connection) ----

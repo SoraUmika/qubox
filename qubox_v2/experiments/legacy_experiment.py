@@ -205,7 +205,6 @@ def load_exp_config(exp_path: str | Path):
             "Loading configuration failed: %s. Building a minimal default.", e, exc_info=True
         )
         builder = ConfigBuilder.minimal_config()
-        # BUGFIX: this should write *builder* to disk, not assign the classmethod result.
         builder.to_json(exp_path/"config.json")
         _logger.info("Wrote minimal config to %s", exp_path/"config.json")
     return builder

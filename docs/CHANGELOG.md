@@ -1125,3 +1125,48 @@ program builders, sequence macros, and session management.
 - `qubox_v2/docs/CHANGELOG.md`
 - `qubox_v2/docs/API_REFERENCE.md`
 - `docs/api_refactor_output_binding_report.md`
+
+---
+
+### 2026-02-27 — CRIT-02, HIGH-04, HIGH-05 Bug Fixes (v2.3.2)
+
+**Classification: Minor**
+
+Fixed three remaining issues from the code survey:
+
+1. **CRIT-02 — Safe threshold access in QUA program builders**
+   - `programs/builders/readout.py` line 668 and `programs/builders/simulation.py`
+     line 34 used bare `_ro_disc_params["threshold"]` subscript access.
+     When `threshold` is `None` (uncalibrated default), this silently passed
+     `None` to downstream QUA operations, producing semantically incorrect
+     programs.
+   - Changed both to `_ro_disc_params.get("threshold") or 0.0` so
+     uncalibrated sessions fall back to a zero threshold rather than `None`.
+
+2. **HIGH-04 — `sync_ok` initialized before conditional block**
+   - In `calibration/orchestrator.py` `apply_patch()`, `sync_ok` was only
+     assigned inside the `if not dry_run:` block, making the return expression
+     `sync_ok if not dry_run else True` fragile for static analysis and future
+     refactoring.
+   - Added `sync_ok = True` immediately after `preview` initialization so the
+     variable is always bound regardless of `dry_run`.
+
+3. **HIGH-05 — Removed misleading `BUGFIX` comment in `load_exp_config`**
+   - `experiments/legacy_experiment.py` had a self-annotated
+     `# BUGFIX: this should write *builder* to disk, not assign the classmethod result.`
+     comment on a line that was already correct. Removed the stale comment.
+
+4. **Tests for CRIT-02**
+   - Added three tests to `tests/test_calibration_fixes.py`:
+     `test_readout_builder_uses_safe_threshold_access`,
+     `test_simulation_builder_uses_safe_threshold_access`,
+     `test_measure_macro_threshold_none_safe_default`.
+
+**Files affected:**
+
+- `qubox_v2/programs/builders/readout.py`
+- `qubox_v2/programs/builders/simulation.py`
+- `qubox_v2/calibration/orchestrator.py`
+- `qubox_v2/experiments/legacy_experiment.py`
+- `qubox_v2/tests/test_calibration_fixes.py`
+- `docs/CHANGELOG.md` — This entry
