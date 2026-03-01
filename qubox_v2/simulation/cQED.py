@@ -53,14 +53,14 @@ class circuitQED:
         else:
             self.kappa = 0
         if qubit_T1 is not None:
-            self.Î“_1 = 1/qubit_T1
+            self.gamma_1 = 1/qubit_T1
         else:
-            self.Î“_1 = 0
+            self.gamma_1 = 0
         if qubit_T2 is not None:
             invT1 = 0.0 if qubit_T1 is None else 1.0/qubit_T1
-            self.Î“_Ï• = max(0.0, 1.0/qubit_T2 - 0.5*invT1)
+            self.gamma_phi = max(0.0, 1.0/qubit_T2 - 0.5*invT1)
         else:
-            self.Î“_Ï• = 0.0  
+            self.gamma_phi = 0.0  
 
         self.Nc = Nc
         self.Nq = Nq
@@ -407,12 +407,12 @@ class circuitQED:
         collapse_ops = []
         if self.kappa > 0:
             collapse_ops.append(np.sqrt(self.kappa) * self.a)
-        if self.Î“_1 > 0:
-            collapse_ops.append(np.sqrt(self.Î“_1) * self.b)
-        if self.Î“_Ï• > 0:
+        if self.gamma_1 > 0:
+            collapse_ops.append(np.sqrt(self.gamma_1) * self.b)
+        if self.gamma_phi > 0:
             # use L = sqrt(2 Î“_Ï•) * n so that Ï_ge decays at Î“_Ï•
             n_q = (self.bdag * self.b)
-            collapse_ops.append(np.sqrt(2.0 * self.Î“_Ï•) * n_q)
+            collapse_ops.append(np.sqrt(2.0 * self.gamma_phi) * n_q)
         return collapse_ops
 
     def initial_state(self):

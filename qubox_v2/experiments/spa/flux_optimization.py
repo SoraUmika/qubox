@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,7 +13,7 @@ from ..experiment_base import ExperimentBase
 from ..result import AnalysisResult
 from ...analysis import post_process as pp
 from ...analysis.output import Output
-from ...hardware.program_runner import RunResult
+from ...hardware.program_runner import ExecMode, RunResult
 from ...programs import api as cQED_programs
 
 
@@ -243,7 +243,7 @@ class SPAFluxOptimization2(ExperimentBase):
             "best_dc": best_dc,
             "mode": mode,
         })
-        return RunResult(mode="run", output=output, sim_samples=None)
+        return RunResult(mode=ExecMode.HARDWARE, output=output, sim_samples=None)
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
         mode = result.output.get("mode", "sweep")
@@ -339,14 +339,15 @@ class SPAPumpFrequencyOptimization(ExperimentBase):
                             readout_op, drive_frequency,
                             r180=r180, n_samples=samples_per_run, **kw,
                         )
-                        I_g = result.output.get("I_g", np.array([0]))
-                        Q_g = result.output.get("Q_g", np.array([0]))
-                        I_e = result.output.get("I_e", np.array([0]))
-                        Q_e = result.output.get("Q_e", np.array([0]))
+                        S_g = result.output.get("S_g", np.array([0 + 0j]))
+                        S_e = result.output.get("S_e", np.array([0 + 0j]))
+                        I_g = np.real(S_g)
+                        Q_g = np.imag(S_g)
+                        I_e = np.real(S_e)
+                        Q_e = np.imag(S_e)
                         from ...analysis.analysis_tools import two_state_discriminator
-                        _, _, fid, _, _, _ = two_state_discriminator(
-                            I_g, Q_g, I_e, Q_e,
-                        )
+                        disc = two_state_discriminator(I_g, Q_g, I_e, Q_e)
+                        fid = float(disc.get("fidelity", 0.0))
                         results[i, j] = fid
                     else:
                         bfly = ReadoutButterflyMeasurement(self._ctx)
@@ -370,7 +371,7 @@ class SPAPumpFrequencyOptimization(ExperimentBase):
             "metric": metric,
         })
         self.save_output(output, "SPAPumpFreqOpt")
-        return RunResult(mode="run", output=output, sim_samples=None)
+        return RunResult(mode=ExecMode.HARDWARE, output=output, sim_samples=None)
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
         metric_matrix = result.output.extract("metric_matrix")

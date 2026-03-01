@@ -14,7 +14,7 @@ from ...analysis import post_process as pp
 from ...analysis.analysis_tools import two_state_discriminator
 from ...analysis.fitting import fit_and_wrap, generalized_fit, build_fit_legend
 from ...analysis.cQED_models import resonator_spec_model
-from ...hardware.program_runner import RunResult
+from ...hardware.program_runner import ExecMode, RunResult
 from ...programs import api as cQED_programs
 from ...programs.macros.measure import measureMacro
 
@@ -584,6 +584,11 @@ class ReadoutFrequencyOptimization(ExperimentBase):
         attr = self.attr
         lo_freq = self.get_readout_lo()
         if_freqs = create_if_frequencies(attr.ro_el, rf_begin, rf_end, df, lo_freq)
+        if len(if_freqs) == 0:
+            raise ValueError(
+                "ReadoutFrequencyOptimization received an empty frequency sweep. "
+                "Adjust rf_begin/rf_end/df to include at least one IF point."
+            )
 
         self.set_standard_frequencies()
 
@@ -607,7 +612,8 @@ class ReadoutFrequencyOptimization(ExperimentBase):
                 S_e = result.output["S_e"]
                 I_g, Q_g = np.real(S_g), np.imag(S_g)
                 I_e, Q_e = np.real(S_e), np.imag(S_e)
-                _, _, fid, _, _, _ = two_state_discriminator(I_g, Q_g, I_e, Q_e)
+                disc = two_state_discriminator(I_g, Q_g, I_e, Q_e)
+                fid = float(disc.get("fidelity", 0.0))
                 fidelities.append(fid)
             except Exception:
                 fidelities.append(0.0)
@@ -619,7 +625,7 @@ class ReadoutFrequencyOptimization(ExperimentBase):
             "best_freq": lo_freq + if_freqs[int(np.argmax(fidelities))],
         })
         self.save_output(output, "readoutFreqOpt")
-        return RunResult(mode=result.mode, output=output, sim_samples=None)
+        return RunResult(mode=ExecMode.HARDWARE, output=output, sim_samples=None)
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
         freqs = result.output.extract("frequencies")

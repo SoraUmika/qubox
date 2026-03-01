@@ -12,7 +12,6 @@ from ...analysis import post_process as pp
 from ...analysis.cQED_plottings import plot_bloch_states
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
-from ...programs.macros.measure import measureMacro
 from ...programs.measurement import try_build_readout_snapshot_from_macro
 
 
@@ -35,7 +34,6 @@ class QubitStateTomography(ExperimentBase):
         therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
-        mm = measureMacro
 
         if callable(state_prep):
             preps = [state_prep]
