@@ -8,7 +8,7 @@ from ..experiment_base import ExperimentBase, create_clks_array
 from ..result import AnalysisResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...hardware.program_runner import RunResult
-from ...programs import cQED_programs
+from ...programs import api as cQED_programs
 
 
 class TimeRabiChevron(ExperimentBase):

@@ -75,12 +75,12 @@ class ContextResolver:
         config_hash = self._compute_config_hash(paths)
 
         # Read calibration schema version if calibration file exists
-        schema_version = "4.0.0"
+        schema_version = "5.0.0"
         cal_path = paths.get("calibration.json")
         if cal_path is not None and cal_path.exists():
             try:
                 cal_data = json.loads(cal_path.read_text(encoding="utf-8"))
-                schema_version = str(cal_data.get("version", "4.0.0"))
+                schema_version = str(cal_data.get("version", "5.0.0"))
             except (json.JSONDecodeError, OSError):
                 pass
 
@@ -96,32 +96,6 @@ class ContextResolver:
             sample_id, cooldown_id, wiring_rev,
         )
         return ctx
-
-    def resolve_legacy(self, experiment_path: Path) -> ExperimentContext | None:
-        """Attempt to build a minimal context from a legacy experiment directory.
-
-        Returns None if hardware.json is not found.
-        """
-        config_dir = experiment_path / "config"
-        if not config_dir.exists():
-            config_dir = experiment_path
-
-        hw_path = config_dir / "hardware.json"
-        if not hw_path.exists():
-            return None
-
-        wiring_rev = ExperimentContext.compute_wiring_rev(hw_path)
-
-        # Derive a sample_id from directory name
-        sample_id = experiment_path.name
-
-        return ExperimentContext(
-            sample_id=sample_id,
-            cooldown_id="legacy",
-            wiring_rev=wiring_rev,
-            schema_version="4.0.0",
-            config_hash="",
-        )
 
     @staticmethod
     def _compute_config_hash(paths: dict[str, Path]) -> str:

@@ -14,7 +14,7 @@ from ..result import AnalysisResult
 from ...analysis import post_process as pp
 from ...analysis.output import Output
 from ...hardware.program_runner import RunResult
-from ...programs import cQED_programs
+from ...programs import api as cQED_programs
 
 
 class SPAFluxOptimization(ExperimentBase):

@@ -3,7 +3,7 @@
 Base class for modular experiment types.
 
 Each experiment class wraps one or more QUA program factories from
-``qubox_v2.programs.cQED_programs`` and provides a consistent interface
+``qubox_v2.programs.api`` and provides a consistent interface
 for building, running, and post-processing results.
 
 Experiment classes are lightweight — they hold a reference to the
@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from ..programs import cQED_programs
+from ..programs import api as cQED_programs
 from ..analysis import post_process as pp
 from ..analysis.output import Output
 from ..core.logging import get_logger

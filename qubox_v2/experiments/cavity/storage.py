@@ -21,7 +21,7 @@ from ...analysis.cQED_models import (
 )
 from ...analysis.output import Output
 from ...hardware.program_runner import ExecMode, RunResult
-from ...programs import cQED_programs
+from ...programs import api as cQED_programs
 
 logger = logging.getLogger(__name__)
 

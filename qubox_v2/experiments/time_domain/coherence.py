@@ -14,7 +14,7 @@ from ...analysis import post_process as pp
 from ...analysis.fitting import fit_and_wrap, build_fit_legend
 from ...analysis.cQED_models import T2_ramsey_model, T2_echo_model
 from ...hardware.program_runner import RunResult
-from ...programs import cQED_programs
+from ...programs import api as cQED_programs
 from ...programs.macros.measure import measureMacro
 
 

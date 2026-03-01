@@ -16,15 +16,6 @@ _logger = logging.getLogger(__name__)
 # Fields that must be non-None for a context to be usable
 _REQUIRED_FIELDS = ("ro_el", "qb_el", "ro_fq", "qb_fq")
 
-_DEPRECATED_WORKFLOW_FIELDS = (
-    "ro_therm_clks",
-    "qb_therm_clks",
-    "st_therm_clks",
-    "b_coherent_amp",
-    "b_coherent_len",
-    "b_alpha",
-)
-
 
 @dataclass
 class cQED_attributes:
@@ -42,9 +33,6 @@ class cQED_attributes:
     st_chi3:         Optional[float] = None
     st_K:            Optional[float] = None
     st_K2:           Optional[float] = None
-    ro_therm_clks:   Optional[int] = None
-    qb_therm_clks:   Optional[int] = None
-    st_therm_clks:   Optional[int] = None
     qb_T1_relax:     Optional[float] = None
     qb_T2_ramsey:    Optional[float] = None
     qb_T2_echo:      Optional[float] = None
@@ -57,14 +45,6 @@ class cQED_attributes:
     ef_rlen:         Optional[float] = None
     ef_rsigma:       Optional[int] = None
 
-    # Legacy bare pulse fields (backward compat — reads fall through)
-    r180_amp       : Optional[float] = None
-    rlen           : Optional[float] = None
-    rsigma         : Optional[int] = None
-
-    b_coherent_amp : Optional[float] = None
-    b_coherent_len : Optional[int] = None
-    b_alpha :        Optional[float] = None
     fock_fqs :       Optional[np.ndarray] = None
 
     # Metadata (not persisted, tracked for provenance)
@@ -74,19 +54,10 @@ class cQED_attributes:
     def __post_init__(self):
         """Convert fock_fqs to numpy array if it's a list.
 
-        Also promote legacy bare pulse fields → ge_* canonical fields
-        when the canonical fields are not already set.
+        Also convert fock_fqs lists to numpy arrays.
         """
         if self.fock_fqs is not None and isinstance(self.fock_fqs, list):
             self.fock_fqs = np.array(self.fock_fqs)
-
-        # Legacy → canonical promotion: bare r180_amp/rlen/rsigma → ge_*
-        if self.ge_r180_amp is None and self.r180_amp is not None:
-            self.ge_r180_amp = self.r180_amp
-        if self.ge_rlen is None and self.rlen is not None:
-            self.ge_rlen = self.rlen
-        if self.ge_rsigma is None and self.rsigma is not None:
-            self.ge_rsigma = self.rsigma
 
     # ------------------------------------------------------------------
     # Serialisation
@@ -146,20 +117,6 @@ class cQED_attributes:
         # Filter to known fields only (ignore unknown keys in the JSON)
         known = {f.name for f in fields(cls) if not f.name.startswith("_")}
         filtered = {k: v for k, v in data.items() if k in known}
-
-        present_deprecated = [k for k in _DEPRECATED_WORKFLOW_FIELDS if filtered.get(k) is not None]
-        if present_deprecated:
-            warnings.warn(
-                "cqed_params.json contains deprecated workflow/calibration keys "
-                f"{present_deprecated}. Move these to calibration/session-level config; "
-                "cqed_params.json support is kept for backward compatibility.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            _logger.warning(
-                "Deprecated cqed_params keys loaded for backward compatibility: %s",
-                present_deprecated,
-            )
 
         unknown = set(data) - known
         if unknown:

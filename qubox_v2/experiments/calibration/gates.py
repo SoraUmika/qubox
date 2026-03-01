@@ -13,7 +13,7 @@ from ...analysis.fitting import fit_and_wrap, build_fit_legend
 from ...analysis.cQED_models import rb_survival_model
 from ...analysis.algorithms import random_sequences
 from ...hardware.program_runner import RunResult
-from ...programs import cQED_programs
+from ...programs import api as cQED_programs
 from ...calibration.pulse_train_tomo import (
     run_pulse_train_tomography,
     fit_pulse_train_model,

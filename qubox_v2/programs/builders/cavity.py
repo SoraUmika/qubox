@@ -9,7 +9,7 @@ from ..macros.sequence import sequenceMacros
 import numpy as np
 
 if TYPE_CHECKING:
-    from ...experiments.gates_legacy import Gate
+    from ...gates.gate import Gate
 
 
 def storage_spectroscopy(qb_el, st_el, disp, sel_r180, if_frequencies, st_therm_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):

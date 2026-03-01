@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+import warnings
 
 
 @dataclass
@@ -131,9 +132,9 @@ class ReadoutConfig:
     update_weights: bool = True
     update_threshold: bool = True
     rotation_method: str = "optimal"
-    weight_extraction_method: str = "legacy_ge_diff_norm"
+    weight_extraction_method: str = "ge_diff_norm"
     histogram_fitting: str = "two_state_discriminator"
-    threshold_extraction: str = "legacy_discriminator"
+    threshold_extraction: str = "optimal_discriminator"
     overwrite_policy: str = "override"
 
     # Explicit persistence controls
@@ -168,17 +169,31 @@ class ReadoutConfig:
             raise ValueError(
                 f"rotation_method={self.rotation_method!r} not supported; only 'optimal' is valid"
             )
-        if self.weight_extraction_method not in {"legacy_ge_diff_norm"}:
+        if self.weight_extraction_method == "legacy_ge_diff_norm":
+            warnings.warn(
+                "weight_extraction_method='legacy_ge_diff_norm' is deprecated; use 'ge_diff_norm'.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.weight_extraction_method = "ge_diff_norm"
+        if self.weight_extraction_method not in {"ge_diff_norm"}:
             raise ValueError(
-                "weight_extraction_method must be 'legacy_ge_diff_norm' for parity"
+                "weight_extraction_method must be 'ge_diff_norm'"
             )
         if self.histogram_fitting not in {"two_state_discriminator"}:
             raise ValueError(
                 "histogram_fitting must be 'two_state_discriminator' for parity"
             )
-        if self.threshold_extraction not in {"legacy_discriminator"}:
+        if self.threshold_extraction == "legacy_discriminator":
+            warnings.warn(
+                "threshold_extraction='legacy_discriminator' is deprecated; use 'optimal_discriminator'.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.threshold_extraction = "optimal_discriminator"
+        if self.threshold_extraction not in {"optimal_discriminator"}:
             raise ValueError(
-                "threshold_extraction must be 'legacy_discriminator' for parity"
+                "threshold_extraction must be 'optimal_discriminator'"
             )
         if self.overwrite_policy not in {"override", "error_if_exists"}:
             raise ValueError(

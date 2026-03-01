@@ -1,4 +1,4 @@
-# qubox_v2/migration/pulses_converter.py
+# tools/pulses_converter.py
 """Convert legacy pulses.json to declarative pulse_specs.json.
 
 This module provides the ``convert`` function and CLI entry point for
@@ -11,13 +11,13 @@ Usage (CLI)
 -----------
 ::
 
-    python -m qubox_v2.migration.pulses_converter \\
+    python tools/pulses_converter.py \\
         --input config/pulses.json \\
         --output config/pulse_specs.json
 
 Usage (API)
 -----------
->>> from qubox_v2.migration.pulses_converter import convert
+>>> from tools.pulses_converter import convert
 >>> result = convert("config/pulses.json")
 >>> result.save("config/pulse_specs.json")
 """
@@ -183,7 +183,7 @@ def _try_drag_gaussian_fit(
     Q_samples: np.ndarray,
 ) -> tuple[str, dict] | None:
     """Brute-force DRAG Gaussian parameter detection."""
-    from ..tools.waveforms import drag_gaussian_pulse_waveforms
+    from qubox_v2.tools.waveforms import drag_gaussian_pulse_waveforms
 
     length = len(I_samples)
     peak_amp = float(np.max(np.abs(I_samples)))
@@ -238,7 +238,7 @@ def _verify_drag_gaussian(
     params: dict,
 ) -> bool:
     """Verify that params reproduce the target waveform."""
-    from ..tools.waveforms import drag_gaussian_pulse_waveforms
+    from qubox_v2.tools.waveforms import drag_gaussian_pulse_waveforms
 
     try:
         I_gen, Q_gen = drag_gaussian_pulse_waveforms(
@@ -268,7 +268,7 @@ def _verify_drag_cosine(
     params: dict,
 ) -> bool:
     """Verify that params reproduce the target waveform."""
-    from ..tools.waveforms import drag_cosine_pulse_waveforms
+    from qubox_v2.tools.waveforms import drag_cosine_pulse_waveforms
 
     try:
         I_gen, Q_gen = drag_cosine_pulse_waveforms(

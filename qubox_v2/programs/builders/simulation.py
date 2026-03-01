@@ -3,11 +3,18 @@ from qm.qua import *
 from qualang_tools.loops import from_array
 from ..macros.measure import measureMacro
 from ..macros.sequence import sequenceMacros
-from ...experiments.gates_legacy import Gate, Measure
-from typing import List
+from ...gates.gate import Gate
+from typing import List, Protocol, Any
 import numpy as np
 
-def sequential_simulation(gates: list[Gate], measurement_gates: List[Measure], st_therm_clks, num_shots):
+class MeasurementGate(Protocol):
+    axis: str
+
+    def play(self, targets: list[Any], state: Any = None, with_state: bool = False) -> None:
+        ...
+
+
+def sequential_simulation(gates: list[Gate], measurement_gates: List[MeasurementGate], st_therm_clks, num_shots):
     measurement_counts = sum(1 for mg in measurement_gates if mg.axis != "none")
     with program() as prog:
         I   = declare(fixed)

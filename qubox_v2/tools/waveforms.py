@@ -1,5 +1,6 @@
 import numpy as np
 from collections.abc import Sequence
+import warnings
 
 from scipy.signal.windows import gaussian, blackman, dpss
 
@@ -30,7 +31,11 @@ def drag_gaussian_pulse_waveforms(
     """
     delta = kwargs.get("delta", None)
     if delta is not None:
-        print("'delta' has been replaced by 'anharmonicity' and will be deprecated in the future. ")
+        warnings.warn(
+            "'delta' has been replaced by 'anharmonicity' and will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if alpha != 0 and delta == 0:
             raise Exception("Cannot create a DRAG pulse with `anharmonicity=0`")
         t = np.arange(length, step=1e9 / sampling_rate)  # An array of size pulse length in ns
@@ -122,7 +127,11 @@ def kaiser_pulse_waveforms(
     # Backward-compat: allow delta keyword like your gaussian_drag function
     delta = kwargs.get("delta", None)
     if delta is not None:
-        print("'delta' has been replaced by 'anharmonicity' and will be deprecated in the future.")
+        warnings.warn(
+            "'delta' has been replaced by 'anharmonicity' and will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         anharmonicity = float(delta)
 
     if alpha != 0.0 and anharmonicity == 0.0:
@@ -214,7 +223,11 @@ def slepian_pulse_waveforms(
     # Backward-compat: allow delta keyword like your gaussian_drag function
     delta = kwargs.get("delta", None)
     if delta is not None:
-        print("'delta' has been replaced by 'anharmonicity' and will be deprecated in the future.")
+        warnings.warn(
+            "'delta' has been replaced by 'anharmonicity' and will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         anharmonicity = float(delta)
 
     if alpha != 0.0 and anharmonicity == 0.0:
@@ -279,7 +292,11 @@ def drag_cosine_pulse_waveforms(amplitude, length, alpha, anharmonicity, detunin
     """
     delta = kwargs.get("delta", None)
     if delta is not None:
-        print("'delta' has been replaced by 'anharmonicity' and will be deprecated in the future.")
+        warnings.warn(
+            "'delta' has been replaced by 'anharmonicity' and will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if alpha != 0 and anharmonicity == 0:
             raise Exception("Cannot create a DRAG pulse with `anharmonicity=0`")
         t = np.arange(length, step=1e9 / sampling_rate)  # An array of size pulse length in ns

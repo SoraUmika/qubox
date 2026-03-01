@@ -41,7 +41,6 @@ def resonator_spectroscopy(
     n_avg: int = 1,
     *,
     ro_el: str | None = None,
-    depletion_len=None,
     bindings: "ExperimentBindings | None" = None,
 ):
     """
@@ -54,7 +53,6 @@ def resonator_spectroscopy(
         ro_gain        : Gain (amplitude) for the readout measurement
         if_frequencies : Python array/list of IFs to step through (integers)
         depletion_clks : Time (in clock cycles) to wait for photon depletion
-        depletion_len  : Deprecated alias for depletion_clks
         n_avg          : Number of averaging iterations (default=1)
     """
     if bindings is not None:
@@ -65,10 +63,6 @@ def resonator_spectroscopy(
     elif ro_el is None:
         raise ValueError("ro_el is required when bindings are not provided")
 
-    if depletion_clks is None:
-        depletion_clks = depletion_len
-    elif depletion_len is not None and int(depletion_len) != int(depletion_clks):
-        raise ValueError("depletion_clks and deprecated depletion_len disagree")
     if depletion_clks is None:
         raise TypeError("depletion_clks is required")
 
@@ -100,7 +94,6 @@ def resonator_power_spectroscopy(
     depletion_clks=None,
     n_avg: int = 1,
     *,
-    depletion_len=None,
     bindings: "ExperimentBindings | None" = None,
 ):
     """
@@ -112,13 +105,8 @@ def resonator_power_spectroscopy(
         if_frequencies : Python array/list of IFs to step through
         gains          : Python array/list of gain (amplitude) settings to step through
         depletion_clks : Time in clock cycles for photon depletion after measurement
-        depletion_len  : Deprecated alias for depletion_clks
         n_avg          : Number of averaging iterations (default=1)
     """
-    if depletion_clks is None:
-        depletion_clks = depletion_len
-    elif depletion_len is not None and int(depletion_len) != int(depletion_clks):
-        raise ValueError("depletion_clks and deprecated depletion_len disagree")
     if depletion_clks is None:
         raise TypeError("depletion_clks is required")
 

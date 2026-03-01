@@ -33,7 +33,7 @@ import numpy as np
 from tqdm import tqdm
 from octave_sdk import RFOutputMode
 
-from ..programs import cQED_programs
+from ..programs import api as cQED_programs
 
 _logger = logging.getLogger(__name__)
 

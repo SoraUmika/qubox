@@ -94,7 +94,7 @@ class OctaveLink(BaseModel):
 
 class QuboxExtras(BaseModel):
     """The __qubox section of hardware.json."""
-    external_lo_map: Dict[str, Union[ExternalLOEntry, str]] = Field(default_factory=dict)
+    external_lo_map: Dict[str, ExternalLOEntry] = Field(default_factory=dict)
     octave_links: List[OctaveLink] = Field(default_factory=list)
     bindings: Dict[str, Any] = Field(default_factory=dict)
     aliases: Dict[str, Any] = Field(default_factory=dict)
@@ -106,15 +106,15 @@ class QuboxExtras(BaseModel):
     @field_validator("external_lo_map", mode="before")
     @classmethod
     def normalize_lo_map(cls, v):
-        """Accept both legacy string and dict formats."""
+        """Accept dict format only: {"device": ..., "lo_port": ...}."""
         out = {}
         for key, val in (v or {}).items():
-            if isinstance(val, str):
-                out[key] = ExternalLOEntry(device=val, lo_port="")
-            elif isinstance(val, dict):
+            if isinstance(val, dict):
                 out[key] = ExternalLOEntry(**val)
             else:
-                out[key] = val
+                raise TypeError(
+                    f"external_lo_map['{key}'] must be a dict with device/lo_port fields"
+                )
         return out
 
 

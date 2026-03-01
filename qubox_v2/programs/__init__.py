@@ -11,13 +11,10 @@ Programs are organized by category for cleaner imports::
     from qubox_v2.programs.cavity import storage_chi_ramsey
     from qubox_v2.programs.tomography import qubit_state_tomography
 
-    # Legacy flat import (still works)
-    from qubox_v2.programs import cQED_programs
-
-The monolithic ``cQED_programs`` module is preserved for backward
-compatibility. Category modules re-export from it.
+Internal code should import from ``qubox_v2.programs.api`` or directly
+from category modules.
 """
-from .cQED_programs import *  # noqa: F401, F403 – re-export all program factories
+from .api import *  # noqa: F401, F403
 
 # Category sub-modules (importable via qubox_v2.programs.spectroscopy, etc.)
 from . import spectroscopy  # noqa: F401

@@ -352,7 +352,7 @@ class HardwareController:
         ``keep_best=True``. Otherwise restores initial power if readable.
         """
         from ..calibration.mixer_calibration import MixerCalibrationConfig, SAMeasurementHelper
-        from ..programs import cQED_programs
+        from ..programs import api as cQED_programs
 
         self._require_qm()
         self._check_el(el)
@@ -614,7 +614,7 @@ class HardwareController:
             return "\n".join(lines)
 
         def _measure_with_cw(e: str, lo_hz: float, if_hz: float) -> dict[str, float]:
-            from ..programs import cQED_programs
+            from ..programs import api as cQED_programs
 
             if cfg is None:
                 return sa_helper.measure_tones(float(lo_hz), float(if_hz))

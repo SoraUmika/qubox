@@ -911,7 +911,7 @@ Uses the unified `run() -> analyze() -> plot()` protocol via `PulseTrainCalibrat
 # ── 44c Pulse-Train code ──────────────────────────────
 cells.append(make_cell("code", """\
 from qm.qua import play, align
-from qubox_v2.experiments.gates_legacy import QubitRotation
+from dataclasses import dataclass
 
 pt = PulseTrainCalibration(session)
 
@@ -932,9 +932,24 @@ prep_defs = {
     "+x": prep_px, "+y": prep_py, "-x": prep_mx, "-y": prep_my,
 }
 
-# Gate under test
-arb_rot = QubitRotation(theta, phi, ref_r180_pulse="ref_r180_pulse", build=True)
-session.burn_pulses()
+# Gate under test (modern, non-legacy wrapper)
+@dataclass
+class NotebookRotationGate:
+    op: str
+    element: str
+    pulse_len: int
+
+    def play(self):
+        play(self.op, self.element)
+
+    def waveforms(self):
+        return [0.0] * self.pulse_len, [0.0] * self.pulse_len, self.pulse_len, True
+
+arb_rot = NotebookRotationGate(
+    op="x180",
+    element=attr.qb_el,
+    pulse_len=int(getattr(attr, "ge_rlen", 16) or 16),
+)
 
 # Run tomography sweep
 result = pt.run(

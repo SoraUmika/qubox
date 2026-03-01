@@ -5,8 +5,8 @@ This module defines the single source of truth for:
 
 1. **Transition labels** — ``"ge"`` (ground-excited), ``"ef"`` (excited-f).
 2. **Canonical pulse names** — ``ge_ref_r180``, ``ef_ref_r180``, etc.
-3. **Legacy alias resolution** — old bare names (``ref_r180``, ``x180``)
-   map unambiguously to their canonical ``ge_*`` equivalents.
+3. **Canonical pulse resolution** — canonical names and transition-scoped
+    bare names are resolved without legacy alias tables.
 
 Every subsystem that stores, looks up, or patches a pulse name must go
 through :func:`resolve_pulse_name` so that the calibration store,
@@ -16,8 +16,7 @@ Design rules
 ------------
 * Calibration JSON keys, ``PulseCalibration.pulse_name``, and
   ``PulseSpecEntry`` ``op`` fields **must** use canonical names.
-* Legacy (bare) names are accepted on *input* but never written to new
-  records.
+* Bare names are only transition-scoped when an explicit transition is provided.
 * The ``transition`` field on calibration/spec models identifies which
   qubit transition a record belongs to.
 """
@@ -85,26 +84,6 @@ ALL_CANONICAL: frozenset[str] = frozenset(
 
 
 # ---------------------------------------------------------------------------
-# Legacy alias map  (old bare name → canonical ge_* name)
-# ---------------------------------------------------------------------------
-
-_LEGACY_ALIASES: dict[str, str] = {
-    # Reference pulses
-    "ref_r180":     "ge_ref_r180",
-    "ref_r90":      "ge_ref_r90",
-    "sel_ref_r180": "ge_sel_ref_r180",
-    # Derived gates
-    "x180":  "ge_x180",
-    "y180":  "ge_y180",
-    "x90":   "ge_x90",
-    "xn90":  "ge_xn90",
-    "y90":   "ge_y90",
-    "yn90":  "ge_yn90",
-    "r0":    "ge_r0",
-}
-
-
-# ---------------------------------------------------------------------------
 # Public helpers
 # ---------------------------------------------------------------------------
 
@@ -122,11 +101,9 @@ def resolve_pulse_name(
     Resolution order:
 
     1. If *name* is already canonical, return as-is.
-    2. If *name* is a known legacy alias, return the canonical ``ge_*``
-       equivalent (legacy names always map to GE).
-    3. If a *transition* is provided and *name* is a bare suffix
+     2. If a *transition* is provided and *name* is a bare suffix
        (e.g. ``"ref_r180"``), prefix with the transition.
-    4. Otherwise return *name* unchanged (unknown names pass through so
+     3. Otherwise return *name* unchanged (unknown names pass through so
        that user-defined custom pulses are not blocked).
     """
     if is_canonical(name):
@@ -138,10 +115,6 @@ def resolve_pulse_name(
         candidate = f"{tr.value}_{name}"
         if candidate in ALL_CANONICAL:
             return candidate
-
-    # Legacy alias lookup (always maps to ge_*).
-    if name in _LEGACY_ALIASES:
-        return _LEGACY_ALIASES[name]
 
     # Unknown name — return as-is for forward compatibility.
     return name

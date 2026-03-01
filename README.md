@@ -1644,38 +1644,45 @@ class GateSequence:
 Computes the composed super-operator for ordered gate sequences, with
 optional caching via `ModelCache`.
 
-### 8.6 Legacy Gate Classes (`gates_legacy`)
+### 8.6 Hardware Gate Backends (`qubox_v2.gates`)
 
-**Module**: `qubox_v2.experiments.gates_legacy`
+**Module**: `qubox_v2.gates`
 
-The legacy gate classes provide concrete QUA-emitting gates for use in
-notebook-driven experiments.  Each gate supports serialization, simulation
-(via `ideal_unitary()`), and QUA code emission (via `play()`).
+Legacy experiment gate classes were removed. Use modern gate model/hardware
+objects under `qubox_v2.gates.*`, or use explicit operation-level wrappers in
+notebook code for pulse-train and calibration experiments.
 
-| Class | Gate | Constructor Key Params |
-|-------|------|------------------------|
-| `QubitRotation` | $R(\theta, \phi)$ | `theta`, `phi`, `d_lambda`, `d_alpha`, `d_omega`, `ref_r180_pulse` |
-| `Displacement` | $D(\alpha)$ | `alpha: complex`, `target` |
-| `SQR` | Selective Qubit Rotation | `thetas`, `phis`, per-Fock angles + optional error knobs |
-| `SNAP` | Selective Number-dependent Arbitrary Phase | `angles`, optional unselective correction |
-| `Idle` | Free evolution (wait gate) | `wait_time: int` |
-| `Measure` | Readout via measureMacro | `axis: str` |
-| `GateArray` | Composite multi-target gate | `gates: list[Gate]` |
+| Component | Purpose | Key API |
+|----------|---------|---------|
+| `Gate` | Combined model + optional hardware backend | `Gate(model=..., hw=...)`, `to_dict()`, `from_dict()` |
+| `QubitRotationModel` | Ideal qubit rotation model | model-only simulation/compile flows |
+| `QubitRotationHardware` | QUA emission backend for rotation operations | `build(hw_ctx=...)`, `play(hw_ctx=...)`, `waveforms(hw_ctx=...)` |
+| `GateSequence` | Ordered composition for simulation/evaluation | `superop(...)` |
 
 **Usage example — pulse-train tomography with QubitRotation:**
 
 ```python
-from qubox_v2.experiments.gates_legacy import QubitRotation
+from dataclasses import dataclass
 from qubox_v2.experiments import PulseTrainCalibration
 
-# Create a gate under test
-arb_rot = QubitRotation(
-    theta=np.pi,
-    phi=0.0,
-    ref_r180_pulse="ref_r180_pulse",
-    build=True,
+# Create a non-legacy gate wrapper under test
+@dataclass
+class NotebookRotationGate:
+    op: str
+    element: str
+    pulse_len: int
+
+    def play(self):
+        play(self.op, self.element)
+
+    def waveforms(self):
+        return [0.0] * self.pulse_len, [0.0] * self.pulse_len, self.pulse_len, True
+
+arb_rot = NotebookRotationGate(
+    op="x180",
+    element=attr.qb_el,
+    pulse_len=int(getattr(attr, "ge_rlen", 16) or 16),
 )
-session.burn_pulses()
 
 # Define state preparations using QUA primitives
 from qm.qua import play, align
@@ -1709,21 +1716,20 @@ print(f"phase_err = {analysis.metrics['phase_err']:+.6f} rad")
 print(f"d_lambda  = {analysis.metrics.get('d_lambda', 'N/A')}")
 ```
 
-**Usage example — save/load gate sequences:**
+**Usage example — serialize/restore gate objects:**
 
 ```python
-from qubox_v2.experiments.gates_legacy import (
-    QubitRotation, Displacement, SNAP, save_gates, load_gates,
-)
+import json
+from qubox_v2.gates.gate import Gate
 
-gates = [
-    Displacement(alpha=1.0+0.5j, target="storage"),
-    SNAP(angles=[0.0, np.pi, 0.0], target="qubit"),
-    Displacement(alpha=-1.0-0.5j, target="storage"),
-]
+payload = [gate.to_dict() for gate in gate_sequence]
+with open("my_gates.json", "w", encoding="utf-8") as f:
+    json.dump(payload, f, indent=2)
 
-save_gates("my_gates.json", gates)
-loaded = load_gates("my_gates.json", mgr=session.pulse_mgr, build=True)
+with open("my_gates.json", "r", encoding="utf-8") as f:
+    loaded_payload = json.load(f)
+
+loaded = [Gate.from_dict(item, hw_ctx=hw_ctx) for item in loaded_payload]
 ```
 
 ---
@@ -3730,16 +3736,12 @@ The `guarded_calibration_commit()` method:
 
 ### 23.8 Using Gate Objects in Custom Experiments
 
-For cavity QED or multi-qubit experiments, use the gate classes from
-`gates_legacy` to compose complex pulse sequences:
+For cavity QED or multi-qubit experiments, compose pulse sequences using
+registered operations and explicit QUA primitives:
 
 ```python
-from qubox_v2.experiments.gates_legacy import (
-    QubitRotation, Displacement, SNAP, Idle, Measure, GateArray,
-)
-
 class SNAPEchoExperiment(ExperimentBase):
-    """Apply a SNAP gate sandwiched between displacements with echo."""
+    """Apply displacement/SNAP-style operations with an echo wait."""
 
     def run(self, *, alpha=1.0, snap_angles=None, wait_ns=1000, n_avg=1000):
         self.set_standard_frequencies()
@@ -3747,16 +3749,7 @@ class SNAPEchoExperiment(ExperimentBase):
         if snap_angles is None:
             snap_angles = [0.0, np.pi, 0.0]
 
-        # Build gate sequence
-        D_plus  = Displacement(alpha=complex(alpha), target=self.attr.st_el, build=True)
-        snap    = SNAP(angles=snap_angles, target=self.attr.qb_el, build=True)
-        D_minus = Displacement(alpha=-complex(alpha), target=self.attr.st_el, build=True)
-        idle    = Idle(wait_time=wait_ns // 4)
-        meas    = Measure(axis="z")
-
-        self.burn_pulses()
-
-        # Build QUA program using gate.play()
+        # Build QUA program using registered operations
         with program() as prog:
             n = declare(int)
             I = declare(fixed)
@@ -3766,10 +3759,10 @@ class SNAPEchoExperiment(ExperimentBase):
             state_st = declare_stream()
 
             with for_(n, 0, n < n_avg, n + 1):
-                D_plus.play()
-                snap.play()
-                D_minus.play()
-                idle.play()
+                play("disp_plus", self.attr.st_el)
+                play("snap_core", self.attr.qb_el)
+                play("disp_minus", self.attr.st_el)
+                wait(wait_ns // 4, self.attr.qb_el)
                 align()
                 self.measure_macro.measure(I=I, Q=Q, state=state)
                 save(state, state_st)
@@ -5240,9 +5233,7 @@ from qubox_v2.tools.waveforms import (
 )
 
 # Gate classes
-from qubox_v2.experiments.gates_legacy import (
-    QubitRotation, Displacement, SQR, SNAP, Idle, Measure, GateArray,
-)
+from qubox_v2.gates.gate import Gate
 
 # Result types
 from qubox_v2.experiments.result import AnalysisResult, FitResult

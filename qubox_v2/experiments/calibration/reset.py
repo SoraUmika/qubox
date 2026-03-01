@@ -6,7 +6,7 @@ from typing import Any
 from ..experiment_base import ExperimentBase
 from ...analysis import post_process as pp
 from ...hardware.program_runner import RunResult
-from ...programs import cQED_programs
+from ...programs import api as cQED_programs
 
 
 class QubitResetBenchmark(ExperimentBase):

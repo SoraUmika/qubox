@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..core.persistence_policy import sanitize_mapping_for_json
+from qubox_v2.core.persistence_policy import sanitize_mapping_for_json
 
 
 def sanitize_json_file(

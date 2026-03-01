@@ -68,9 +68,9 @@ class SampleInfo:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SampleInfo:
         return cls(
-            sample_id=str(d.get("sample_id", d.get("device_id", ""))),
+            sample_id=str(d.get("sample_id", "")),
             description=str(d.get("description", "")),
-            metadata=dict(d.get("metadata", d.get("sample_info", {}))),
+            metadata=dict(d.get("metadata", {})),
             element_map=dict(d.get("element_map", {})),
             created=str(d.get("created", "")),
         )
@@ -88,15 +88,6 @@ class SampleRegistry:
     def __init__(self, base_path: str | Path) -> None:
         self._base = Path(base_path)
         self._samples_root = self._base / "samples"
-        # Backward compatibility: fall back to legacy "devices/" directory
-        if not self._samples_root.exists() and (self._base / "devices").exists():
-            _logger.warning(
-                "Legacy 'devices/' directory found at %s. "
-                "Consider running the migration script to rename it to 'samples/'. "
-                "Falling back to 'devices/' for now.",
-                self._base / "devices",
-            )
-            self._samples_root = self._base / "devices"
 
     @property
     def base_path(self) -> Path:
@@ -111,10 +102,7 @@ class SampleRegistry:
 
     def sample_exists(self, sample_id: str) -> bool:
         sample_dir = self._samples_root / sample_id
-        return (
-            (sample_dir / "sample.json").exists()
-            or (sample_dir / "device.json").exists()  # backward compat
-        )
+        return (sample_dir / "sample.json").exists()
 
     def list_samples(self) -> list[str]:
         """Return sorted list of sample IDs."""
@@ -122,18 +110,13 @@ class SampleRegistry:
             return []
         return sorted(
             d.name for d in self._samples_root.iterdir()
-            if d.is_dir() and (
-                (d / "sample.json").exists()
-                or (d / "device.json").exists()  # backward compat
-            )
+            if d.is_dir() and (d / "sample.json").exists()
         )
 
     def load_sample_info(self, sample_id: str) -> SampleInfo:
-        """Load sample metadata from sample.json (or legacy device.json)."""
+        """Load sample metadata from sample.json."""
         sample_dir = self._samples_root / sample_id
         info_path = sample_dir / "sample.json"
-        if not info_path.exists():
-            info_path = sample_dir / "device.json"  # backward compat
         if not info_path.exists():
             raise FileNotFoundError(f"Sample '{sample_id}' not found at {sample_dir}")
         raw = json.loads(info_path.read_text(encoding="utf-8"))

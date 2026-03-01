@@ -79,12 +79,6 @@ class CalibrationStore:
         self._auto_save = auto_save
         self._context = context
         self._data = self._load_or_create()
-        if self._normalize_coherence_units():
-            _logger.warning(
-                "Normalized legacy coherence units to seconds in %s",
-                self._path,
-            )
-            self.save()
         if context is not None:
             self._validate_context(strict=strict_context)
 
@@ -100,24 +94,12 @@ class CalibrationStore:
             _logger.info("Loading calibration from %s", self._path)
             with open(self._path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-            # Auto-migrate v3 → v4 → v5 in memory
-            version_str = raw.get("version", "3.0.0")
-            if version_str == "3.0.0":
-                raw["version"] = "4.0.0"
-                raw.setdefault("context", None)
-                _logger.info("Auto-migrated calibration in-memory from v3.0.0 to v4.0.0")
-                version_str = "4.0.0"
-            if version_str == "4.0.0":
-                raw["version"] = "5.0.0"
-                raw.setdefault("alias_index", {})
-                _logger.info("Auto-migrated calibration in-memory from v4.0.0 to v5.0.0")
-            # Backward compat: remap legacy "device_id" → "sample_id" in context
-            if "context" in raw and isinstance(raw["context"], dict):
-                ctx = raw["context"]
-                if "device_id" in ctx and "sample_id" not in ctx:
-                    ctx["sample_id"] = ctx.pop("device_id")
-            # Auto-migrate legacy bare pulse calibration keys to canonical names
-            raw = self._migrate_pulse_cal_keys(raw)
+            version_str = str(raw.get("version", ""))
+            if version_str != "5.0.0":
+                raise ValueError(
+                    f"Unsupported calibration schema version '{version_str}' in {self._path}. "
+                    "Only v5.0.0 is supported. Migrate calibration.json to v5.0.0 before loading."
+                )
             return CalibrationData.model_validate(raw)
         # Write defaults to disk immediately so the file actually exists.
         # Cannot call self.save() here because self._data is not yet assigned.
@@ -140,88 +122,6 @@ class CalibrationStore:
         self._atomic_write(data)
         _logger.info("Default calibration created at %s", self._path)
         return data
-
-    def _normalize_coherence_units(self) -> bool:
-        """Convert legacy coherence fields stored in ns into canonical seconds.
-
-        Canonical model units:
-          - ``T1``, ``T2_ramsey``, ``T2_echo`` are seconds.
-          - ``*_us`` companion fields are microseconds.
-        """
-        changed = False
-        coherence_map = self._data.coherence or {}
-        field_pairs = (
-            ("T1", "T1_us"),
-            ("T2_ramsey", "T2_star_us"),
-            ("T2_echo", "T2_echo_us"),
-        )
-
-        for element, params in coherence_map.items():
-            for sec_field, us_field in field_pairs:
-                sec_val = getattr(params, sec_field, None)
-                if sec_val is None:
-                    continue
-                sec_val = float(sec_val)
-                if sec_val <= 0:
-                    continue
-
-                us_val = getattr(params, us_field, None)
-                if us_val is not None and float(us_val) > 0:
-                    expected_sec = float(us_val) * 1e-6
-                    if not np.isclose(sec_val, expected_sec, rtol=0.2, atol=1e-12):
-                        setattr(params, sec_field, expected_sec)
-                        changed = True
-                        _logger.warning(
-                            "Coherence unit mismatch for %s.%s; using %s from %s.",
-                            element,
-                            sec_field,
-                            sec_field,
-                            us_field,
-                        )
-                    continue
-
-                if sec_val > 1.0:
-                    setattr(params, sec_field, sec_val * 1e-9)
-                    changed = True
-                    _logger.warning(
-                        "Detected legacy ns value for %s.%s=%g; converted to seconds.",
-                        element,
-                        sec_field,
-                        sec_val,
-                    )
-
-        if changed:
-            self._data.last_modified = datetime.now().isoformat()
-        return changed
-
-    @staticmethod
-    def _migrate_pulse_cal_keys(raw: dict) -> dict:
-        """Rename legacy bare pulse-calibration keys to canonical names.
-
-        Operates on the raw JSON dict *before* Pydantic validation so
-        that existing calibration files are transparently upgraded.
-        """
-        pc = raw.get("pulse_calibrations")
-        if not isinstance(pc, dict):
-            return raw
-
-        migrated: dict[str, Any] = {}
-        changed = False
-        for key, entry in pc.items():
-            canonical = resolve_pulse_name(key)
-            if canonical != key:
-                _logger.info(
-                    "Migrating pulse calibration key '%s' -> '%s'", key, canonical,
-                )
-                if isinstance(entry, dict):
-                    entry["pulse_name"] = canonical
-                    entry.setdefault("transition", "ge")
-                changed = True
-            migrated[canonical] = entry
-
-        if changed:
-            raw["pulse_calibrations"] = migrated
-        return raw
 
     # ------------------------------------------------------------------
     # Alias index — maps human-friendly names to physical channel IDs
@@ -516,11 +416,9 @@ class CalibrationStore:
 
         # No context block on disk (legacy v3 file) — skip
         if stored is None:
-            _logger.warning(
-                "Calibration file has no context block (legacy v3). "
-                "Skipping context validation for %s", self._path,
+            raise ContextMismatchError(
+                f"Calibration file {self._path} has no context block; v5.0.0 context is required."
             )
-            return
 
         # Sample mismatch
         if stored.sample_id and ctx.sample_id and stored.sample_id != ctx.sample_id:

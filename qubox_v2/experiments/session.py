@@ -51,8 +51,8 @@ class SessionManager:
     Parameters
     ----------
     experiment_path : str | Path | None
-        Root directory for this experiment (config, data, calibration live here).
-        Required when ``sample_id`` is not provided (legacy mode).
+        Optional registry base path hint. In strict mode, session location is
+        always resolved from ``sample_id`` + ``cooldown_id``.
     qop_ip : str | None
         OPX+ IP / hostname.  Resolved from hardware JSON if *None*.
     cluster_name : str | None
@@ -69,7 +69,7 @@ class SessionManager:
     cooldown_id : str | None
         Cooldown cycle identifier (requires ``sample_id``).
     registry_base : str | Path | None
-        Root directory for the sample registry.  Defaults to
+        Root directory for the sample registry. Defaults to
         ``experiment_path`` or current directory.
     strict_context : bool
         If True (default), sample/wiring mismatches raise
@@ -98,43 +98,40 @@ class SessionManager:
         self._experiment_context = None
         self._sample_config_dir: Path | None = None
 
-        if sample_id is not None and cooldown_id is not None:
-            # Context mode: resolve paths from sample registry
-            from ..devices.sample_registry import SampleRegistry
-            from ..devices.context_resolver import ContextResolver
-
-            base = Path(registry_base) if registry_base else (
-                Path(experiment_path) if experiment_path else Path.cwd()
-            )
-            registry = SampleRegistry(base)
-            if not registry.sample_exists(sample_id):
-                raise ConfigError(
-                    f"Sample '{sample_id}' not found in registry at {base}. "
-                    f"Available: {registry.list_samples()}"
-                )
-            if not registry.cooldown_exists(sample_id, cooldown_id):
-                raise ConfigError(
-                    f"Cooldown '{cooldown_id}' not found for sample '{sample_id}'. "
-                    f"Available: {registry.list_cooldowns(sample_id)}"
-                )
-
-            resolver = ContextResolver(registry)
-            self._experiment_context = resolver.resolve(sample_id, cooldown_id)
-
-            # Set experiment_path to the cooldown directory
-            self.experiment_path = registry.cooldown_path(sample_id, cooldown_id)
-            self._sample_config_dir = registry.sample_path(sample_id) / "config"
-            _logger.info(
-                "Context mode: sample=%s cooldown=%s wiring=%s",
-                sample_id, cooldown_id, self._experiment_context.wiring_rev,
-            )
-        elif experiment_path is not None:
-            self.experiment_path = Path(experiment_path)
-        else:
+        if sample_id is None or cooldown_id is None:
             raise ConfigError(
-                "Either 'experiment_path' or both 'sample_id' and 'cooldown_id' "
-                "must be provided."
+                "Both 'sample_id' and 'cooldown_id' are required in strict session mode."
             )
+
+        # Context mode: resolve paths from sample registry
+        from ..devices.sample_registry import SampleRegistry
+        from ..devices.context_resolver import ContextResolver
+
+        base = Path(registry_base) if registry_base else (
+            Path(experiment_path) if experiment_path else Path.cwd()
+        )
+        registry = SampleRegistry(base)
+        if not registry.sample_exists(sample_id):
+            raise ConfigError(
+                f"Sample '{sample_id}' not found in registry at {base}. "
+                f"Available: {registry.list_samples()}"
+            )
+        if not registry.cooldown_exists(sample_id, cooldown_id):
+            raise ConfigError(
+                f"Cooldown '{cooldown_id}' not found for sample '{sample_id}'. "
+                f"Available: {registry.list_cooldowns(sample_id)}"
+            )
+
+        resolver = ContextResolver(registry)
+        self._experiment_context = resolver.resolve(sample_id, cooldown_id)
+
+        # Set experiment_path to the cooldown directory
+        self.experiment_path = registry.cooldown_path(sample_id, cooldown_id)
+        self._sample_config_dir = registry.sample_path(sample_id) / "config"
+        _logger.info(
+            "Context mode: sample=%s cooldown=%s wiring=%s",
+            sample_id, cooldown_id, self._experiment_context.wiring_rev,
+        )
 
         self.experiment_path.mkdir(parents=True, exist_ok=True)
 
@@ -564,9 +561,8 @@ class SessionManager:
     def _load_runtime_settings(self) -> dict[str, Any]:
         """Load runtime/session-owned workflow settings.
 
-        Precedence policy for migrated workflow knobs:
+        Source of truth:
         1) ``config/session_runtime.json``
-        2) deprecated ``cqed_params.json`` fields (fallback with warning)
         """
         path = self._runtime_settings_path()
         data: dict[str, Any] = {}
@@ -579,25 +575,6 @@ class SessionManager:
                     _logger.info("Loaded runtime settings from %s", path)
             except Exception as exc:
                 _logger.warning("Failed to load runtime settings from %s: %s", path, exc)
-
-        attr = self.attributes
-        defaults = {
-            "ro_therm_clks": getattr(attr, "ro_therm_clks", None),
-            "qb_therm_clks": getattr(attr, "qb_therm_clks", None),
-            "st_therm_clks": getattr(attr, "st_therm_clks", None),
-            "b_coherent_amp": getattr(attr, "b_coherent_amp", None),
-            "b_coherent_len": getattr(attr, "b_coherent_len", None),
-            "b_alpha": getattr(attr, "b_alpha", None),
-        }
-        for key, fallback in defaults.items():
-            if key not in data and fallback is not None:
-                data[key] = fallback
-                warnings.warn(
-                    f"Using deprecated cqed_params.json fallback for '{key}'. "
-                    "Move this setting to config/session_runtime.json.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
 
         return data
 

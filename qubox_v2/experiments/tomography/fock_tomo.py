@@ -11,7 +11,7 @@ from ..result import AnalysisResult
 from ...analysis import post_process as pp
 from ...analysis.cQED_plottings import display_fock_populations
 from ...hardware.program_runner import RunResult
-from ...programs import cQED_programs
+from ...programs import api as cQED_programs
 
 
 class FockResolvedStateTomography(ExperimentBase):

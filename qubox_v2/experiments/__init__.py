@@ -17,9 +17,8 @@ Architecture
 
 Legacy support
 --------------
-``cQED_Experiment`` (in ``legacy_experiment.py``) is preserved for
-backward compatibility. New code should use the modular experiment
-classes instead.
+Legacy monolithic experiment interfaces have been removed. Use modular
+experiment classes only.
 """
 from .base import ExperimentRunner
 from .experiment_base import ExperimentBase

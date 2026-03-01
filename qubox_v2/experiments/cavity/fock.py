@@ -18,7 +18,7 @@ from ...analysis.cQED_models import (
     power_rabi_model,
 )
 from ...hardware.program_runner import RunResult
-from ...programs import cQED_programs
+from ...programs import api as cQED_programs
 from ...tools.generators import validate_displacement_ops
 
 logger = logging.getLogger(__name__)

@@ -21,7 +21,7 @@ from ...analysis.metrics import butterfly_metrics, gaussian2D_score, wilson_inte
 from ...analysis.post_selection import PostSelectionConfig
 from ...core.logging import get_logger
 from ...hardware.program_runner import RunResult
-from ...programs import cQED_programs
+from ...programs import api as cQED_programs
 from ...programs.macros.measure import measureMacro
 from .readout_config import ReadoutConfig
 
@@ -421,29 +421,8 @@ class ReadoutGEDiscrimination(ExperimentBase):
     ) -> RunResult:
         attr = self.attr
         readout_element = ro_element or attr.ro_el
-
-        legacy_update_measure = kwargs.pop("update_measureMacro", None)
-        if legacy_update_measure is not None:
-            update_measure_macro = bool(legacy_update_measure)
-
-        legacy_k = kwargs.pop("k", None)
-        legacy_k_g = kwargs.pop("k_g", None)
-        legacy_k_e = kwargs.pop("k_e", None)
-
-        if legacy_k_g is not None and blob_k_g == 2.0:
-            blob_k_g = float(legacy_k_g)
-        elif legacy_k is not None and blob_k_g == 2.0:
-            blob_k_g = float(legacy_k)
-
         if blob_k_e is None:
-            if legacy_k_e is not None:
-                blob_k_e = float(legacy_k_e)
-            elif legacy_k_g is not None:
-                blob_k_e = float(legacy_k_g)
-            elif legacy_k is not None:
-                blob_k_e = float(legacy_k)
-            else:
-                blob_k_e = blob_k_g
+            blob_k_e = blob_k_g
 
         # Resolve pulse and integration weight mapping
         pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(readout_element, measure_op, strict=False)

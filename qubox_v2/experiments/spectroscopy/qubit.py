@@ -16,7 +16,7 @@ from ...analysis.fitting import fit_and_wrap, build_fit_legend
 from ...analysis.cQED_models import qubit_spec_model
 from ...analysis.output import Output
 from ...hardware.program_runner import ExecMode, RunResult
-from ...programs import cQED_programs
+from ...programs import api as cQED_programs
 from ...programs.macros.measure import measureMacro
 from ...calibration.transitions import Transition, DEFAULT_TRANSITION, resolve_pulse_name
 
