@@ -24,6 +24,12 @@ class SPAFluxOptimization(ExperimentBase):
     SPA-enhanced readout at each point.
     """
 
+    def _build_impl(self, **kw):
+        raise NotImplementedError(
+            "SPAFluxOptimization performs device-side DC sweeps with per-point runs "
+            "and does not compile to a single ProgramBuildResult."
+        )
+
     def run(
         self,
         dc_list: list[float] | np.ndarray,
@@ -145,6 +151,12 @@ class SPAFluxOptimization2(ExperimentBase):
     - 'refine': narrow scan around best peak
     - 'lock': iterative convergence to optimal flux point
     """
+
+    def _build_impl(self, **kw):
+        raise NotImplementedError(
+            "SPAFluxOptimization2 is an adaptive optimizer over repeated measurements "
+            "and does not map to one QUA ProgramBuildResult."
+        )
 
     def run(
         self,
@@ -279,6 +291,12 @@ class SPAPumpFrequencyOptimization(ExperimentBase):
     Sweeps pump power and detuning coordinates while evaluating
     either assignment fidelity or butterfly QND metric at each point.
     """
+
+    def _build_impl(self, **kw):
+        raise NotImplementedError(
+            "SPAPumpFrequencyOptimization performs hardware parameter sweeps with "
+            "nested sub-runs and does not compile into one ProgramBuildResult."
+        )
 
     def run(
         self,

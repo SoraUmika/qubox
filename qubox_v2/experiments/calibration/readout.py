@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from qm.qua import dual_demod
 
 from ..experiment_base import ExperimentBase
-from ..result import AnalysisResult, FitResult
+from ..result import AnalysisResult, FitResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.analysis_tools import two_state_discriminator
 from ...analysis.output import Output
@@ -22,6 +22,12 @@ from ...analysis.post_selection import PostSelectionConfig
 from ...core.logging import get_logger
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
+from ...programs.circuit_runner import (
+    CircuitRunner,
+    make_ge_discrimination_circuit,
+    make_butterfly_circuit,
+)
+from ...programs.measurement import try_build_readout_snapshot_from_macro
 from ...programs.macros.measure import measureMacro
 from .readout_config import ReadoutConfig
 
@@ -106,22 +112,44 @@ def _weight_checksum_from_qm_config(qm_config: Mapping[str, Any], weight_name: s
 class IQBlob(ExperimentBase):
     """Simple g/e IQ blob acquisition (no discrimination fitting)."""
 
-    def run(
+    def _build_impl(
         self,
         r180: str = "x180",
         n_runs: int = 1000,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
-        self.set_standard_frequencies()
         qb_therm_clks = self.get_therm_clks("qb", fallback=0) or 0
 
         prog = cQED_programs.iq_blobs(
             attr.ro_el, attr.qb_el, r180, qb_therm_clks, n_runs,
         )
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_runs,
+            processors=(pp.proc_default,),
+            experiment_name="IQBlob",
+            params={"r180": r180, "n_runs": n_runs},
+            resolved_frequencies={
+                attr.ro_el: self._resolve_readout_frequency(),
+                attr.qb_el: self._resolve_qubit_frequency(),
+            },
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.iq_blobs",
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            run_program_kwargs={"targets": [("Ig", "Qg"), ("Ie", "Qe")]},
+        )
+
+    def run(
+        self,
+        r180: str = "x180",
+        n_runs: int = 1000,
+    ) -> RunResult:
+        build = self.build_program(r180=r180, n_runs=n_runs)
         return self.run_program(
-            prog, n_total=n_runs,
-            processors=[pp.proc_default],
-            targets=[("Ig", "Qg"), ("Ie", "Qe")],
+            build.program,
+            n_total=build.n_total,
+            processors=list(build.processors),
+            **(build.run_program_kwargs or {}),
         )
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
@@ -196,6 +224,39 @@ class IQBlob(ExperimentBase):
 class ReadoutGERawTrace(ExperimentBase):
     """Raw time-domain readout traces for ground and excited states."""
 
+    def _build_impl(
+        self,
+        ro_freq: float,
+        r180: str = "x180",
+        ro_depl_clks: int = 10000,
+        n_avg: int = 1000,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        qb_therm_clks = self.get_therm_clks("qb", fallback=0) or 0
+
+        prog = cQED_programs.readout_ge_raw_trace(
+            attr.qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg,
+        )
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(pp.proc_default,),
+            experiment_name="ReadoutGERawTrace",
+            params={
+                "ro_freq": ro_freq,
+                "r180": r180,
+                "ro_depl_clks": ro_depl_clks,
+                "n_avg": n_avg,
+            },
+            resolved_frequencies={
+                attr.ro_el: float(ro_freq),
+                attr.qb_el: self._resolve_qubit_frequency(),
+            },
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.readout_ge_raw_trace",
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
+        )
+
     def run(
         self,
         ro_freq: float,
@@ -203,17 +264,17 @@ class ReadoutGERawTrace(ExperimentBase):
         ro_depl_clks: int = 10000,
         n_avg: int = 1000,
     ) -> RunResult:
-        attr = self.attr
-        self.hw.set_element_fq(attr.ro_el, ro_freq)
-        self.set_standard_frequencies()
-        qb_therm_clks = self.get_therm_clks("qb", fallback=0) or 0
-
-        prog = cQED_programs.readout_ge_raw_trace(
-            attr.qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg,
+        build = self.build_program(
+            ro_freq=ro_freq,
+            r180=r180,
+            ro_depl_clks=ro_depl_clks,
+            n_avg=n_avg,
         )
         return self.run_program(
-            prog, n_total=n_avg,
-            processors=[pp.proc_default],
+            build.program,
+            n_total=build.n_total,
+            processors=list(build.processors),
+            **(build.run_program_kwargs or {}),
         )
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
@@ -255,7 +316,7 @@ class ReadoutGERawTrace(ExperimentBase):
 class ReadoutGEIntegratedTrace(ExperimentBase):
     """Time-sliced integrated g/e readout traces."""
 
-    def run(
+    def _build_impl(
         self,
         ro_op: str,
         drive_frequency: float,
@@ -266,11 +327,9 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
         ro_depl_clks: int | None = None,
         n_avg: int = 100,
         process_in_sim: bool = False,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
-        self.hw.set_element_fq(attr.ro_el, drive_frequency)
         self.measure_macro.set_drive_frequency(drive_frequency)
-        self.set_standard_frequencies()
         ro_therm_clks = self.get_therm_clks("ro", fallback=0) or 0
 
         resolved_weights = weights
@@ -359,9 +418,58 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
 
         measureMacro.restore_settings()
 
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(_post_proc,),
+            experiment_name="ReadoutGEIntegratedTrace",
+            params={
+                "ro_op": ro_op,
+                "drive_frequency": drive_frequency,
+                "weights": list(weights) if isinstance(weights, (list, tuple)) else weights,
+                "num_div": num_div,
+                "r180": r180,
+                "ro_depl_clks": ro_depl_clks,
+                "n_avg": n_avg,
+                "process_in_sim": bool(process_in_sim),
+            },
+            resolved_frequencies={
+                attr.ro_el: float(drive_frequency),
+                attr.qb_el: self._resolve_qubit_frequency(),
+            },
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.readout_ge_integrated_trace",
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            run_program_kwargs={"process_in_sim": bool(process_in_sim)},
+        )
+
+    def run(
+        self,
+        ro_op: str,
+        drive_frequency: float,
+        weights: Any,
+        num_div: int | None = None,
+        *,
+        r180: str = "x180",
+        ro_depl_clks: int | None = None,
+        n_avg: int = 100,
+        process_in_sim: bool = False,
+    ) -> RunResult:
+        build = self.build_program(
+            ro_op=ro_op,
+            drive_frequency=drive_frequency,
+            weights=weights,
+            num_div=num_div,
+            r180=r180,
+            ro_depl_clks=ro_depl_clks,
+            n_avg=n_avg,
+            process_in_sim=process_in_sim,
+        )
         return self.run_program(
-            prog, n_total=n_avg, process_in_sim=process_in_sim,
-            processors=[_post_proc],
+            build.program,
+            n_total=build.n_total,
+            processors=list(build.processors),
+            **(build.run_program_kwargs or {}),
         )
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
@@ -400,7 +508,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
     angle, and optionally registers rotated weights.
     """
 
-    def run(
+    def _build_impl(
         self,
         measure_op: str,
         drive_frequency: float,
@@ -417,8 +525,9 @@ class ReadoutGEDiscrimination(ExperimentBase):
         blob_k_g: float = 2.0,
         blob_k_e: float | None = None,
         debug: bool = False,
+        use_circuit_runner: bool = True,
         **kwargs: Any,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
         readout_element = ro_element or attr.ro_el
         if blob_k_e is None:
@@ -504,13 +613,106 @@ class ReadoutGEDiscrimination(ExperimentBase):
         self.set_standard_frequencies()
         self.hw.set_element_fq(readout_element, drive_frequency)
 
-        prog = cQED_programs.iq_blobs(
-            readout_element, attr.qb_el, r180, attr.qb_therm_clks, n_samples,
+        builder_function = "cQED_programs.iq_blobs"
+        if use_circuit_runner:
+            try:
+                circuit, sweep = make_ge_discrimination_circuit(
+                    ro_el=readout_element,
+                    qb_el=attr.qb_el,
+                    measure_op=measure_op,
+                    drive_frequency=drive_frequency,
+                    qb_therm_clks=int(attr.qb_therm_clks),
+                    n_samples=n_samples,
+                    r180=r180,
+                    base_weight_keys=(cos_key, sin_key, m_sin_key),
+                )
+                prog = CircuitRunner(self._ctx).compile(circuit, sweep=sweep).program
+                builder_function = "CircuitRunner.ge_discrimination"
+            except Exception:
+                prog = cQED_programs.iq_blobs(
+                    readout_element, attr.qb_el, r180, attr.qb_therm_clks, n_samples,
+                )
+        else:
+            prog = cQED_programs.iq_blobs(
+                readout_element, attr.qb_el, r180, attr.qb_therm_clks, n_samples,
+            )
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_samples,
+            processors=(pp.proc_default,),
+            experiment_name="ReadoutGEDiscrimination",
+            params={
+                "measure_op": measure_op,
+                "drive_frequency": drive_frequency,
+                "ro_element": ro_element,
+                "r180": r180,
+                "gain": gain,
+                "update_measure_macro": update_measure_macro,
+                "burn_rot_weights": burn_rot_weights,
+                "apply_rotated_weights": apply_rotated_weights,
+                "persist": persist,
+                "n_samples": n_samples,
+                "base_weight_keys": base_weight_keys,
+                "auto_update_postsel": auto_update_postsel,
+                "blob_k_g": blob_k_g,
+                "blob_k_e": blob_k_e,
+                "debug": bool(debug),
+                "use_circuit_runner": bool(use_circuit_runner),
+            },
+            resolved_frequencies={
+                readout_element: float(drive_frequency),
+                attr.qb_el: self._resolve_qubit_frequency(),
+            },
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function=builder_function,
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            run_program_kwargs={"targets": [("Ig", "Qg"), ("Ie", "Qe")]},
+        )
+
+    def run(
+        self,
+        measure_op: str,
+        drive_frequency: float,
+        ro_element: str | None = None,
+        r180: str = "x180",
+        gain: float = 1.0,
+        update_measure_macro: bool = False,
+        burn_rot_weights: bool = True,
+        apply_rotated_weights: bool = True,
+        persist: bool = False,
+        n_samples: int = 10_000,
+        base_weight_keys: tuple[str, str, str] | None = None,
+        auto_update_postsel: bool = True,
+        blob_k_g: float = 2.0,
+        blob_k_e: float | None = None,
+        debug: bool = False,
+        use_circuit_runner: bool = True,
+        **kwargs: Any,
+    ) -> RunResult:
+        build = self.build_program(
+            measure_op=measure_op,
+            drive_frequency=drive_frequency,
+            ro_element=ro_element,
+            r180=r180,
+            gain=gain,
+            update_measure_macro=update_measure_macro,
+            burn_rot_weights=burn_rot_weights,
+            apply_rotated_weights=apply_rotated_weights,
+            persist=persist,
+            n_samples=n_samples,
+            base_weight_keys=base_weight_keys,
+            auto_update_postsel=auto_update_postsel,
+            blob_k_g=blob_k_g,
+            blob_k_e=blob_k_e,
+            debug=debug,
+            use_circuit_runner=use_circuit_runner,
+            **kwargs,
         )
         result = self.run_program(
-            prog, n_total=n_samples,
-            processors=[pp.proc_default],
-            targets=[("Ig", "Qg"), ("Ie", "Qe")],
+            build.program,
+            n_total=build.n_total,
+            processors=list(build.processors),
+            **(build.run_program_kwargs or {}),
         )
         return result
 
@@ -1380,7 +1582,7 @@ class ReadoutWeightsOptimization(ExperimentBase):
     the :class:`PulseOperationManager`.
     """
 
-    def run(
+    def _build_impl(
         self,
         ro_op: str,
         drive_frequency: float,
@@ -1396,11 +1598,9 @@ class ReadoutWeightsOptimization(ExperimentBase):
         set_measure_macro: bool = False,
         make_plots: bool = True,
         revert_on_no_improvement: bool = False,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
-        self.hw.set_element_fq(attr.ro_el, drive_frequency)
         self.measure_macro.set_drive_frequency(drive_frequency)
-        self.set_standard_frequencies()
 
         # Store run params for analyze()
         self._run_params = {
@@ -1421,10 +1621,78 @@ class ReadoutWeightsOptimization(ExperimentBase):
         # First get integrated traces
         trace_exp = ReadoutGEIntegratedTrace(self._ctx)
         trace_weights = [cos_w_key, sin_w_key, m_sin_w_key, cos_w_key]
-        result = trace_exp.run(
+        trace_build = trace_exp.build_program(
             ro_op, drive_frequency, trace_weights,
             num_div=num_div, r180=r180,
             ro_depl_clks=ro_depl_clks, n_avg=n_avg,
+        )
+        return ProgramBuildResult(
+            program=trace_build.program,
+            n_total=trace_build.n_total,
+            processors=trace_build.processors,
+            experiment_name="ReadoutWeightsOptimization",
+            params={
+                "ro_op": ro_op,
+                "drive_frequency": drive_frequency,
+                "cos_w_key": cos_w_key,
+                "sin_w_key": sin_w_key,
+                "m_sin_w_key": m_sin_w_key,
+                "num_div": num_div,
+                "r180": r180,
+                "ro_depl_clks": ro_depl_clks,
+                "n_avg": n_avg,
+                "persist": bool(persist),
+                "set_measure_macro": bool(set_measure_macro),
+                "make_plots": bool(make_plots),
+                "revert_on_no_improvement": bool(revert_on_no_improvement),
+            },
+            resolved_frequencies={
+                attr.ro_el: float(drive_frequency),
+                attr.qb_el: self._resolve_qubit_frequency(),
+            },
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="ReadoutGEIntegratedTrace.build_program",
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            run_program_kwargs=dict(trace_build.run_program_kwargs or {}),
+        )
+
+    def run(
+        self,
+        ro_op: str,
+        drive_frequency: float,
+        cos_w_key: str,
+        sin_w_key: str,
+        m_sin_w_key: str,
+        *,
+        num_div: int | None = None,
+        r180: str = "x180",
+        ro_depl_clks: int | None = None,
+        n_avg: int = 100,
+        persist: bool = False,
+        set_measure_macro: bool = False,
+        make_plots: bool = True,
+        revert_on_no_improvement: bool = False,
+    ) -> RunResult:
+        build = self.build_program(
+            ro_op=ro_op,
+            drive_frequency=drive_frequency,
+            cos_w_key=cos_w_key,
+            sin_w_key=sin_w_key,
+            m_sin_w_key=m_sin_w_key,
+            num_div=num_div,
+            r180=r180,
+            ro_depl_clks=ro_depl_clks,
+            n_avg=n_avg,
+            persist=persist,
+            set_measure_macro=set_measure_macro,
+            make_plots=make_plots,
+            revert_on_no_improvement=revert_on_no_improvement,
+        )
+        result = self.run_program(
+            build.program,
+            n_total=build.n_total,
+            processors=list(build.processors),
+            **(build.run_program_kwargs or {}),
         )
         self.save_output(result.output, "readoutWeightsOpt")
         return result
@@ -1716,7 +1984,7 @@ class ReadoutWeightsOptimization(ExperimentBase):
 class ReadoutButterflyMeasurement(ExperimentBase):
     """Three-measurement butterfly protocol for F, Q, and QND metrics."""
 
-    def run(
+    def _build_impl(
         self,
         prep_policy: str | None = None,
         prep_kwargs: dict | None = None,
@@ -1730,7 +1998,8 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         use_stored_config: bool = True,
         det_L_threshold: float = 1e-8,
         debug: bool = False,
-    ) -> RunResult:
+        use_circuit_runner: bool = True,
+    ) -> ProgramBuildResult:
         attr = self.attr
         self.set_standard_frequencies()
 
@@ -2009,17 +2278,100 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             post_sel_source,
         )
 
-        prog = cQED_programs.readout_butterfly_measurement(
-            attr.qb_el,
-            r180,
-            post_sel_policy,
-            post_sel_kwargs,
-            M0_MAX_TRIALS,
-            n_samples,
+        builder_function = "cQED_programs.readout_butterfly_measurement"
+        if use_circuit_runner:
+            try:
+                circuit, sweep = make_butterfly_circuit(
+                    qb_el=attr.qb_el,
+                    n_samples=n_samples,
+                    prep_policy=str(post_sel_policy),
+                    prep_kwargs=dict(post_sel_kwargs),
+                    r180=r180,
+                    max_trials=M0_MAX_TRIALS,
+                )
+                prog = CircuitRunner(self._ctx).compile(circuit, sweep=sweep).program
+                builder_function = "CircuitRunner.butterfly"
+            except Exception:
+                prog = cQED_programs.readout_butterfly_measurement(
+                    attr.qb_el,
+                    r180,
+                    post_sel_policy,
+                    post_sel_kwargs,
+                    M0_MAX_TRIALS,
+                    n_samples,
+                )
+        else:
+            prog = cQED_programs.readout_butterfly_measurement(
+                attr.qb_el,
+                r180,
+                post_sel_policy,
+                post_sel_kwargs,
+                M0_MAX_TRIALS,
+                n_samples,
+            )
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_samples,
+            processors=(pp.bare_proc,),
+            experiment_name="ReadoutButterflyMeasurement",
+            params={
+                "prep_policy": prep_policy,
+                "prep_kwargs": dict(prep_kwargs or {}),
+                "k": k,
+                "r180": r180,
+                "update_measure_macro": bool(update_measure_macro),
+                "show_analysis": bool(show_analysis),
+                "n_samples": n_samples,
+                "M0_MAX_TRIALS": M0_MAX_TRIALS,
+                "use_stored_config": bool(use_stored_config),
+                "det_L_threshold": det_L_threshold,
+                "debug": bool(debug),
+                "use_circuit_runner": bool(use_circuit_runner),
+            },
+            resolved_frequencies={
+                attr.ro_el: self._resolve_readout_frequency(),
+                attr.qb_el: self._resolve_qubit_frequency(),
+            },
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function=builder_function,
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
+        )
+
+    def run(
+        self,
+        prep_policy: str | None = None,
+        prep_kwargs: dict | None = None,
+        k: float | None = None,
+        r180: str = "x180",
+        update_measure_macro: bool = False,
+        show_analysis: bool = False,
+        n_samples: int = 10_000,
+        M0_MAX_TRIALS: int = 16,
+        *,
+        use_stored_config: bool = True,
+        det_L_threshold: float = 1e-8,
+        debug: bool = False,
+        use_circuit_runner: bool = True,
+    ) -> RunResult:
+        build = self.build_program(
+            prep_policy=prep_policy,
+            prep_kwargs=prep_kwargs,
+            k=k,
+            r180=r180,
+            update_measure_macro=update_measure_macro,
+            show_analysis=show_analysis,
+            n_samples=n_samples,
+            M0_MAX_TRIALS=M0_MAX_TRIALS,
+            use_stored_config=use_stored_config,
+            det_L_threshold=det_L_threshold,
+            debug=debug,
+            use_circuit_runner=use_circuit_runner,
         )
         result = self.run_program(
-            prog, n_total=n_samples,
-            processors=[pp.bare_proc],
+            build.program,
+            n_total=build.n_total,
+            processors=list(build.processors),
+            **(build.run_program_kwargs or {}),
         )
         if debug:
             self._save_debug_runtime_snapshot(result.output, tag="butterfly_debug")
@@ -2549,6 +2901,145 @@ class CalibrateReadoutFull(ExperimentBase):
     :class:`ReadoutConfig` object (Section 5).
     """
 
+    def _build_impl(self, **kw):
+        raise NotImplementedError(
+            "CalibrateReadoutFull is a multi-stage orchestrator (weights/ge/butterfly) "
+            "and does not compile to a single QUA ProgramBuildResult. "
+            "Use build_plan() for introspection and run() for execution."
+        )
+
+    def build_plan(
+        self,
+        ro_op: str | None = None,
+        drive_frequency: float | None = None,
+        *,
+        config: ReadoutConfig | None = None,
+        ro_el: str = "resonator",
+        r180: str = "x180",
+        n_avg_weights: int = 200_000,
+        n_samples_disc: int = 250_000,
+        n_shots_butterfly: int = 50_000,
+        display_analysis: bool = False,
+        persist_weights: bool = True,
+        save: bool = True,
+        skip_weights_optimization: bool = False,
+        blob_k_g: float = 2.0,
+        blob_k_e: float | None = None,
+        k: float | None = None,
+        M0_MAX_TRIALS: int = 16,
+        burn_rot_weights: bool = True,
+        wopt_kwargs: dict | None = None,
+        ge_kwargs: dict | None = None,
+        bfly_kwargs: dict | None = None,
+    ) -> dict[str, Any]:
+        """Build an execution plan for the readout calibration pipeline.
+
+        This method is introspection-only and does not compile or execute QUA.
+        """
+        k_value = float(k) if k is not None else None
+        effective_blob_k_g = blob_k_g
+        effective_blob_k_e = blob_k_e
+        if k_value is not None and blob_k_g == 2.0:
+            effective_blob_k_g = k_value
+        if effective_blob_k_e is None and k_value is not None:
+            effective_blob_k_e = k_value
+
+        if config is not None:
+            cfg = config
+            cfg_k = float(cfg.k) if getattr(cfg, "k", None) is not None else None
+            if cfg_k is not None and cfg.blob_k_g == 2.0:
+                cfg.blob_k_g = cfg_k
+            if cfg.blob_k_e is None and cfg_k is not None:
+                cfg.blob_k_e = cfg_k
+        else:
+            cfg = ReadoutConfig(
+                ro_op=ro_op or "readout",
+                drive_frequency=drive_frequency,
+                ro_el=ro_el,
+                r180=r180,
+                skip_weights_optimization=skip_weights_optimization,
+                n_avg_weights=n_avg_weights,
+                persist_weights=persist_weights,
+                n_samples_disc=n_samples_disc,
+                burn_rot_weights=burn_rot_weights,
+                blob_k_g=effective_blob_k_g,
+                blob_k_e=effective_blob_k_e,
+                k=k_value,
+                n_shots_butterfly=n_shots_butterfly,
+                M0_MAX_TRIALS=M0_MAX_TRIALS,
+                display_analysis=display_analysis,
+                save=save,
+                wopt_kwargs=dict(wopt_kwargs or {}),
+                ge_kwargs=dict(ge_kwargs or {}),
+                bfly_kwargs=dict(bfly_kwargs or {}),
+            )
+
+        cfg.validate()
+
+        eff_ro_op = cfg.resolved_ro_op()
+        eff_drive_freq = cfg.drive_frequency
+        if ro_op is not None:
+            eff_ro_op = ro_op
+        if drive_frequency is not None:
+            eff_drive_freq = drive_frequency
+        if eff_drive_freq is None:
+            raise ValueError("drive_frequency is required")
+
+        ge_kw = dict(cfg.ge_kwargs)
+        bfly_kw = dict(cfg.bfly_kwargs)
+        if "update_measureMacro" in ge_kw and "update_measure_macro" not in ge_kw:
+            ge_kw["update_measure_macro"] = ge_kw.pop("update_measureMacro")
+        if "update_measureMacro" in bfly_kw and "update_measure_macro" not in bfly_kw:
+            bfly_kw["update_measure_macro"] = bfly_kw.pop("update_measureMacro")
+
+        ge_n_samples_override = ge_kw.pop("n_samples", None)
+        bfly_n_samples_override = bfly_kw.pop("n_samples", None)
+        bfly_max_trials_override = bfly_kw.pop("M0_MAX_TRIALS", cfg.M0_MAX_TRIALS)
+
+        steps: list[dict[str, Any]] = []
+        if not cfg.skip_weights_optimization:
+            steps.append(
+                {
+                    "step": "weights_optimization",
+                    "runner": "ReadoutWeightsOptimization.run",
+                    "params": {
+                        "ro_op": eff_ro_op,
+                        "drive_frequency": float(eff_drive_freq),
+                        "r180": cfg.r180,
+                        "n_avg": int(cfg.n_avg_weights),
+                        "persist": bool(cfg.persist_weights),
+                    },
+                }
+            )
+
+        steps.append(
+            {
+                "step": "iterative_ge_butterfly",
+                "runner": "ReadoutGEDiscrimination.run + ReadoutButterflyMeasurement.run",
+                "params": {
+                    "max_iterations": int(cfg.max_iterations),
+                    "adaptive_samples": bool(cfg.adaptive_samples),
+                    "ge_n_samples": int(ge_n_samples_override) if ge_n_samples_override is not None else int(cfg.resolved_n_samples_disc()),
+                    "bfly_n_samples": int(bfly_n_samples_override) if bfly_n_samples_override is not None else int(cfg.n_shots_butterfly),
+                    "bfly_max_trials": int(bfly_max_trials_override),
+                    "blob_k_g": float(cfg.blob_k_g),
+                    "blob_k_e": float(cfg.blob_k_e) if cfg.blob_k_e is not None else None,
+                    "fidelity_tolerance": float(cfg.fidelity_tolerance),
+                },
+            }
+        )
+
+        return {
+            "pipeline": "CalibrateReadoutFull",
+            "resolved": {
+                "ro_op": eff_ro_op,
+                "drive_frequency": float(eff_drive_freq),
+                "ro_el": cfg.ro_el,
+                "r180": cfg.r180,
+            },
+            "steps": steps,
+        }
+
     def run(
         self,
         ro_op: str | None = None,
@@ -2932,6 +3423,50 @@ class CalibrationReadoutFull(CalibrateReadoutFull):
 
 class ReadoutAmpLenOpt(ExperimentBase):
     """2-D sweep of readout amplitude x length for fidelity optimization."""
+
+    def _build_impl(self, **kw):
+        raise NotImplementedError(
+            "ReadoutAmpLenOpt sweeps over many per-point sub-runs and does not "
+            "map to a single QUA ProgramBuildResult. Use build_plan() + run()."
+        )
+
+    def build_plan(
+        self,
+        drive_frequency: float,
+        min_len: int,
+        max_len: int,
+        dlen: int,
+        min_g: float,
+        max_g: float,
+        dg: float,
+        ringdown_len: int | None = None,
+        r180: str = "x180",
+        base_voltage: float = 0.01,
+        ge_disc_kwargs: Mapping[str, Any] | None = None,
+        butterfly_kwargs: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Build an execution plan for 2-D readout amplitude/length scan."""
+        lengths = np.arange(min_len, max_len + 1, dlen, dtype=int)
+        gains = np.arange(min_g, max_g + 1e-12, dg, dtype=float)
+        return {
+            "pipeline": "ReadoutAmpLenOpt",
+            "resolved": {
+                "drive_frequency": float(drive_frequency),
+                "r180": r180,
+                "ringdown_len": ringdown_len,
+                "base_voltage": float(base_voltage),
+            },
+            "grid": {
+                "lengths": lengths.tolist(),
+                "gains": gains.tolist(),
+                "n_points": int(len(lengths) * len(gains)),
+            },
+            "sub_experiment": {
+                "runner": "ReadoutGEDiscrimination.run",
+                "ge_disc_kwargs": dict(ge_disc_kwargs or {}),
+                "butterfly_kwargs": dict(butterfly_kwargs or {}),
+            },
+        }
 
     def run(
         self,

@@ -12,6 +12,7 @@ from ...analysis import post_process as pp
 from ...analysis.fitting import fit_and_wrap
 from ...analysis.cQED_models import T1_relaxation_model
 from ...hardware.program_runner import RunResult
+from ...programs.circuit_runner import CircuitRunner, make_t1_circuit
 from ...programs import api as cQED_programs
 
 
@@ -28,6 +29,8 @@ class T1Relaxation(ExperimentBase):
         delay_begin: int = 4,
         r180: str = "x180",
         n_avg: int = 1000,
+        *,
+        use_circuit_runner: bool = True,
     ) -> ProgramBuildResult:
         attr = self.attr
         delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
@@ -35,11 +38,31 @@ class T1Relaxation(ExperimentBase):
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
 
-        prog = cQED_programs.T1_relaxation(
-            r180, delay_clks, attr.qb_therm_clks, n_avg,
-            qb_el=attr.qb_el,
-            bindings=self._bindings_or_none,
-        )
+        builder_function = "cQED_programs.T1_relaxation"
+        if use_circuit_runner:
+            try:
+                circuit, sweep = make_t1_circuit(
+                    qb_el=attr.qb_el,
+                    qb_therm_clks=int(attr.qb_therm_clks),
+                    n_avg=n_avg,
+                    waits_clks=delay_clks,
+                    r180=r180,
+                )
+                compiled = CircuitRunner(self._ctx).compile(circuit, sweep=sweep)
+                prog = compiled.program
+                builder_function = "CircuitRunner.t1"
+            except Exception:
+                prog = cQED_programs.T1_relaxation(
+                    r180, delay_clks, attr.qb_therm_clks, n_avg,
+                    qb_el=attr.qb_el,
+                    bindings=self._bindings_or_none,
+                )
+        else:
+            prog = cQED_programs.T1_relaxation(
+                r180, delay_clks, attr.qb_therm_clks, n_avg,
+                qb_el=attr.qb_el,
+                bindings=self._bindings_or_none,
+            )
 
         return ProgramBuildResult(
             program=prog,
@@ -56,7 +79,7 @@ class T1Relaxation(ExperimentBase):
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
-            builder_function="cQED_programs.T1_relaxation",
+            builder_function=builder_function,
             sweep_axes={"delays": delay_clks * 4},
         )
 
@@ -67,10 +90,13 @@ class T1Relaxation(ExperimentBase):
         delay_begin: int = 4,
         r180: str = "x180",
         n_avg: int = 1000,
+        *,
+        use_circuit_runner: bool = True,
     ) -> RunResult:
         build = self.build_program(
             delay_end=delay_end, dt=dt, delay_begin=delay_begin,
             r180=r180, n_avg=n_avg,
+            use_circuit_runner=use_circuit_runner,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,

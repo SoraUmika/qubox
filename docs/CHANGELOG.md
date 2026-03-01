@@ -1125,3 +1125,514 @@ program builders, sequence macros, and session management.
 - `qubox_v2/docs/CHANGELOG.md`
 - `qubox_v2/docs/API_REFERENCE.md`
 - `docs/api_refactor_output_binding_report.md`
+
+---
+
+### 2026-03-01 — Measurement Refactor Kickoff (Stage 0/1)
+
+**Classification: Moderate**
+
+Started the approved refactor away from implicit singleton-only measurement
+usage by introducing first-class measurement specification primitives and a
+compatibility lowering wrapper. This is the first migration slice and is
+non-breaking: existing `measureMacro` behavior is preserved while the new API
+is introduced for incremental adoption.
+
+**Summary:**
+
+1. **New module: `programs/measurement.py`**
+   - Added immutable `MeasureSpec` and `MeasureGate` dataclasses.
+   - Added deterministic snapshot hashing utility (`version_hash`).
+   - Added snapshot builders:
+     - `build_readout_snapshot_from_macro()`
+     - `build_readout_snapshot_from_handle()`
+     - `try_build_readout_snapshot_from_macro()` (safe optional capture)
+   - Added `emit_measurement_spec(...)` compatibility lowering wrapper that
+     routes through current measurement backends while establishing the new
+     first-class call shape.
+
+2. **Builder migration start (`programs/builders/time_domain.py`)**
+   - `temporal_rabi()` and `power_rabi()` now call
+     `emit_measurement_spec(MeasureSpec(kind="iq"), ...)` instead of direct
+     `measureMacro.measure(...)`.
+   - Readout alignment and output semantics are unchanged.
+
+3. **Build provenance enhancement (`experiments/time_domain/rabi.py`)**
+   - `ProgramBuildResult.measure_macro_state` now captures optional readout
+     snapshot provenance via `try_build_readout_snapshot_from_macro()` for
+     `TemporalRabi` and `PowerRabi`.
+
+4. **Package exposure (`programs/__init__.py`)**
+   - Exported `measurement` submodule for discoverability and import
+     consistency.
+
+**Files affected:**
+
+- `qubox_v2/programs/measurement.py` (new)
+- `qubox_v2/programs/builders/time_domain.py`
+- `qubox_v2/experiments/time_domain/rabi.py`
+- `qubox_v2/programs/__init__.py`
+- `docs/CHANGELOG.md` — This entry
+
+---
+
+### 2026-03-01 — CircuitRunner + Serialization Validation (Simulator-Only)
+
+**Classification: Major**
+
+Implemented an initial Gate/QuantumCircuit/CircuitRunner path and added a
+mandatory serialization-based validation workflow that compares legacy and new
+compiled QUA scripts for four scoped experiments (Power Rabi, T1, GE
+discrimination, Butterfly), without executing live hardware runs.
+
+**Summary:**
+
+1. **New CircuitRunner module (`programs/circuit_runner.py`)**
+   - Added first-class abstractions: `Gate`, `QuantumCircuit`, `SweepAxis`,
+     `SweepSpec`, `CircuitBuildResult`, and `CircuitRunner`.
+   - Added compiler routes for:
+     - `power_rabi`
+     - `t1`
+     - `readout_ge_discrimination`
+     - `readout_butterfly`
+   - Added serialization helper and snapshot capture for build provenance.
+
+2. **Programs package exposure**
+   - Exported `circuit_runner` module via `programs/__init__.py`.
+
+3. **Serialization validation tool (`tools/validate_circuit_runner_serialization.py`)**
+   - Added simulator-only compile/serialize comparator.
+   - Produces per-experiment legacy/new serialized scripts under:
+     `docs/circuit_serialized/*.py`.
+   - Generates validation report:
+     `docs/circuit_runner_serialization_validation.md`.
+   - Uses isolated temporary sample-registry copy for safe, non-destructive
+     validation and context compatibility with legacy calibration files.
+
+4. **Validation outcome (current state)**
+   - All four scoped experiments currently report **Behaviorally different**
+     under strict textual serialization comparison and are marked **REVIEW** in
+     the report.
+   - No hardware execution was performed in this phase.
+
+**Files affected:**
+
+- `qubox_v2/programs/circuit_runner.py` (new)
+- `qubox_v2/programs/__init__.py`
+- `tools/validate_circuit_runner_serialization.py` (new)
+- `docs/circuit_runner_serialization_validation.md` (new generated report)
+- `docs/circuit_serialized/*.py` (new generated serialized artifacts)
+- `docs/CHANGELOG.md` — This entry
+
+---
+
+### 2026-03-01 — Serialization Comparator Normalization (Timestamp-Only Diffs)
+
+**Classification: Moderate**
+
+Improved the CircuitRunner validation comparator to normalize known
+non-semantic serialization metadata (`# Single QUA script generated at ...`).
+This removes false behavioral mismatches caused purely by per-run timestamps in
+generated QUA headers.
+
+**Summary:**
+
+1. **Comparator enhancement (`tools/validate_circuit_runner_serialization.py`)**
+  - Added `_normalize_script()` to strip generation timestamp header lines.
+  - Updated `_diff_scripts()` to classify normalized-equal scripts as:
+    `Functionally equivalent with timing notes`.
+
+2. **Validation rerun (same four-scope set)**
+  - Power Rabi: PASS (functionally equivalent, timestamp-only diff)
+  - T1: PASS (functionally equivalent, timestamp-only diff)
+  - Readout GE discrimination: PASS (functionally equivalent, timestamp-only diff)
+  - Butterfly measurement: PASS (functionally equivalent, timestamp-only diff)
+
+3. **Report regeneration**
+  - Rewrote `docs/circuit_runner_serialization_validation.md` with updated
+    per-experiment outcomes and overall `PASS` verdict.
+
+**Files affected:**
+
+- `tools/validate_circuit_runner_serialization.py`
+- `docs/circuit_runner_serialization_validation.md`
+- `docs/CHANGELOG.md` — This entry
+
+---
+
+### 2026-03-01 — Phase 2 Migration Start: Experiment Build Paths + Hard Serialization Gate
+
+**Classification: Major**
+
+Continued CircuitRunner adoption by migrating production experiment build paths
+for `PowerRabi` and `T1Relaxation` to compile via `CircuitRunner` (with
+safe fallback to legacy builders), and enforced serialization validation as a
+hard gate (`non-PASS` exits with status code 1).
+
+**Summary:**
+
+1. **Experiment-level CircuitRunner integration**
+   - `PowerRabi` now supports `use_circuit_runner` in `_build_impl()` / `run()`.
+   - `T1Relaxation` now supports `use_circuit_runner` in `_build_impl()` / `run()`.
+   - Both default to CircuitRunner path with automatic fallback to legacy
+     builder on compile exceptions, preserving runtime compatibility.
+   - `ProgramBuildResult.builder_function` now reflects actual compilation
+     route (`CircuitRunner.*` vs legacy builder).
+
+2. **Serialization gate enforcement**
+   - `tools/validate_circuit_runner_serialization.py` now exits with non-zero
+     status when any experiment verdict is not `PASS`, making it CI-friendly
+     as a required validation gate.
+
+3. **Validation rerun after migration**
+   - Re-ran serialization validation across all four scoped experiments.
+   - Current outcome remains `PASS` for all four, with only timestamp-header
+     metadata differences.
+
+**Files affected:**
+
+- `qubox_v2/experiments/time_domain/rabi.py`
+- `qubox_v2/experiments/time_domain/relaxation.py`
+- `tools/validate_circuit_runner_serialization.py`
+- `docs/circuit_runner_serialization_validation.md` (regenerated)
+- `docs/CHANGELOG.md` — This entry
+
+---
+
+### 2026-03-01 — Phase 2 Readout Run-Path Migration + Serialization Re-Validation
+
+**Classification: Major**
+
+Extended CircuitRunner integration to readout-heavy calibration experiments by
+migrating production `run()` compile paths for GE discrimination and Butterfly
+measurement (with legacy fallback preserved), then re-ran the serialization
+equivalence gate to confirm no behavioral drift.
+
+**Summary:**
+
+1. **Readout experiment run-path migration**
+   - `ReadoutGEDiscrimination.run()` now supports `use_circuit_runner` and
+     compiles via `CircuitRunner.compile_ge_discrimination(...)` by default.
+   - `ReadoutButterflyMeasurement.run()` now supports `use_circuit_runner` and
+     compiles via `CircuitRunner.compile_butterfly(...)` by default.
+   - Both methods preserve safe fallback to existing legacy builders when
+     CircuitRunner compilation raises.
+
+2. **Post-migration validation rerun**
+   - Re-ran `tools/validate_circuit_runner_serialization.py` after this patch.
+   - Power Rabi: PASS (functionally equivalent with timing notes)
+   - T1: PASS (functionally equivalent with timing notes)
+   - Readout GE discrimination: PASS (functionally equivalent with timing notes)
+   - Butterfly measurement: PASS (functionally equivalent with timing notes)
+
+3. **Report refresh**
+   - Regenerated `docs/circuit_runner_serialization_validation.md` with current
+     all-PASS outcomes for the four scoped experiments.
+
+**Files affected:**
+
+- `qubox_v2/experiments/calibration/readout.py`
+- `tools/validate_circuit_runner_serialization.py` (executed for gate verification)
+- `docs/circuit_runner_serialization_validation.md` (regenerated)
+- `docs/CHANGELOG.md` — This entry
+
+---
+
+### 2026-03-01 — Readout Build-Protocol Migration (_build_impl + build_program)
+
+**Classification: Major**
+
+Migrated `ReadoutGEDiscrimination` and `ReadoutButterflyMeasurement` to the
+v2.2 experiment build protocol by introducing `_build_impl()` return paths with
+`ProgramBuildResult`, and making `run()` delegate through `build_program()`.
+This aligns readout calibration experiments with the unified build/simulate
+architecture while preserving legacy fallback behavior and serialization parity.
+
+**Summary:**
+
+1. **Protocol alignment in readout experiments**
+  - Added `_build_impl()` in `ReadoutGEDiscrimination`.
+  - Added `_build_impl()` in `ReadoutButterflyMeasurement`.
+  - `run()` in both classes now calls `build_program(...)` then `run_program(...)`.
+
+2. **Provenance and execution metadata**
+  - Build results now include `builder_function`, `resolved_frequencies`,
+    `bindings_snapshot`, and `measure_macro_state` snapshots.
+  - GE discrimination build stores `run_program_kwargs` targets for
+    deterministic output extraction parity.
+
+3. **Compatibility preserved**
+  - CircuitRunner compile path remains default where enabled.
+  - Existing legacy `cQED_programs.*` builders remain as safe fallback.
+
+4. **Validation rerun after migration**
+  - Re-ran `tools/validate_circuit_runner_serialization.py` after this change.
+  - Power Rabi: PASS
+  - T1: PASS
+  - Readout GE discrimination: PASS
+  - Butterfly measurement: PASS
+
+**Files affected:**
+
+- `qubox_v2/experiments/calibration/readout.py`
+- `docs/circuit_runner_serialization_validation.md` (regenerated)
+- `docs/CHANGELOG.md` — This entry
+
+---
+
+### 2026-03-01 — Experiment Refactor Closure: Full `_build_impl()` Coverage
+
+**Classification: Major**
+
+Completed the refactor sweep so all `ExperimentBase` subclasses now define
+`_build_impl()` contracts. Single-program experiments were migrated to the
+v2.2 build protocol (`build_program()` + `ProgramBuildResult`), while true
+multi-run orchestrators now expose explicit non-support contracts via
+`NotImplementedError` in `_build_impl()` and retain run-driven execution.
+
+**Summary:**
+
+1. **Single-program migration completed**
+   - Migrated `calibration/reset.py` classes:
+     `QubitResetBenchmark`, `ActiveQubitResetBenchmark`,
+     `ReadoutLeakageBenchmarking`.
+   - Migrated tomography classes:
+     `QubitStateTomography`, `FockResolvedStateTomography`,
+     `StorageWignerTomography`, `SNAPOptimization`.
+   - Migrated gate calibration classes:
+     `AllXY`, `DRAGCalibration`.
+
+2. **Orchestrator contract formalization**
+   - Added explicit `_build_impl()` non-support contracts for multi-run
+     orchestrators in:
+     - `calibration/readout.py` (`CalibrateReadoutFull`, `ReadoutAmpLenOpt`)
+     - `calibration/gates.py` (`RandomizedBenchmarking`, `PulseTrainCalibration`)
+     - `spa/flux_optimization.py` (`SPAFluxOptimization`,
+       `SPAFluxOptimization2`, `SPAPumpFrequencyOptimization`)
+
+3. **Global coverage verification**
+   - Repository audit now reports:
+     `ALL_EXPERIMENT_CLASSES_HAVE__BUILD_IMPL`
+
+4. **Post-refactor serialization validation**
+   - Re-ran `tools/validate_circuit_runner_serialization.py`.
+   - Power Rabi: PASS
+   - T1: PASS
+   - Readout GE discrimination: PASS
+   - Butterfly measurement: PASS
+
+**Files affected:**
+
+- `qubox_v2/experiments/calibration/reset.py`
+- `qubox_v2/experiments/calibration/gates.py`
+- `qubox_v2/experiments/calibration/readout.py`
+- `qubox_v2/experiments/tomography/qubit_tomo.py`
+- `qubox_v2/experiments/tomography/fock_tomo.py`
+- `qubox_v2/experiments/tomography/wigner_tomo.py`
+- `qubox_v2/experiments/spa/flux_optimization.py`
+- `docs/circuit_runner_serialization_validation.md` (regenerated)
+- `docs/CHANGELOG.md` — This entry
+
+---
+
+### 2026-03-01 — Gate Tune-Up Framework + Circuit Visualization System (MVP Phase 1)
+
+**Classification: Major**
+
+Implemented the requested Gate Tune-Up extension for `qubox_v2` with
+family-based tuning artifacts, compiler-level tuning application hooks,
+deterministic gate identity naming, and dual circuit visualization
+representations (logical diagram + pulse-level view).
+
+**Summary:**
+
+1. **Gate tuning framework implementation**
+   - Added `qubox_v2/programs/gate_tuning.py` with:
+     - `GateFamily`
+     - `GateTuningRecord`
+     - `GateTuningStore`
+     - `make_xy_tuning_record()` and default X-family derivation (`x90=0.5*x180`)
+   - Added tuning provenance (`record_id`) and deterministic resolution per
+     `(target, operation)`.
+
+2. **Circuit abstraction and identity upgrades**
+   - Extended `Gate` with `instance_name` and deterministic `resolved_name()`.
+   - Added `QuantumCircuit.with_stable_gate_names()`.
+   - Implemented deterministic gate naming convention of the form:
+     `<GateFamily>_<AngleOrParam>_<Target>_<Index>`.
+
+3. **Visualization APIs (required dual representation)**
+   - Implemented `QuantumCircuit.draw_logical(...)`:
+     deterministic wire layout, gate boxes, label composition, export support.
+   - Implemented `QuantumCircuit.draw_pulses(...)` delegating to runner.
+   - Implemented `CircuitRunner.visualize_pulses(...)`:
+     - Preferred path: compiled program simulation samples
+     - Fallback path: compiled timing-model + pulse registry waveforms
+     - Per-element subplot grouping, I/Q overlays, gate-boundary annotations,
+       optional zoom and save.
+
+4. **Compiler-level tuning hook integration**
+   - `CircuitRunner.compile()` now applies tuning resolution before lowering.
+   - `power_rabi` compile path applies tuned amplitude scale to sweep gains and
+     records `applied_gain_scale` in build metadata.
+   - Added short-circuit helper flow: `make_xy_pair_circuit(...)` and compile
+     support (`xy_pair`) for validation scenarios.
+
+5. **Design + validation deliverables generated**
+   - Added required design docs:
+     - `docs/design_gate_tuning_framework.md`
+     - `docs/design_circuit_visualization.md`
+   - Added validation tooling:
+     - `tools/validate_gate_tuning_visualization.py`
+   - Generated required validation docs:
+     - `docs/gate_tuning_serialization_validation.md`
+     - `docs/circuit_pulse_visualization_validation.md`
+   - Generated serialization artifacts:
+     - `docs/circuit_tuning_serialized/*.py`
+   - Generated pulse figures:
+     - `docs/figures/circuit_pulses/*.png`
+
+6. **Regression and compatibility verification**
+   - Re-ran existing serialization parity gate:
+     `tools/validate_circuit_runner_serialization.py`.
+   - Outcomes remain PASS for Power Rabi, T1, Readout GE discrimination,
+     and Butterfly.
+
+**Files affected:**
+
+- `qubox_v2/programs/gate_tuning.py` (new)
+- `qubox_v2/programs/circuit_runner.py`
+- `qubox_v2/programs/__init__.py`
+- `tools/validate_gate_tuning_visualization.py` (new)
+- `docs/design_gate_tuning_framework.md` (new)
+- `docs/design_circuit_visualization.md` (new)
+- `docs/gate_tuning_serialization_validation.md` (generated)
+- `docs/circuit_pulse_visualization_validation.md` (generated)
+- `docs/circuit_tuning_serialized/*.py` (generated)
+- `docs/figures/circuit_pulses/*.png` (generated)
+- `docs/circuit_runner_serialization_validation.md` (regenerated)
+- `docs/CHANGELOG.md` — This entry
+
+---
+
+### 2026-03-01 — Orchestrator Refactor: Explicit Pipeline Build Plans
+
+**Classification: Moderate**
+
+Added explicit, non-invasive planning APIs to orchestrator-style readout
+experiments so their execution flow is introspectable and refactor-aligned
+without forcing a single-program `_build_impl()` model where it does not fit.
+
+**Summary:**
+
+1. **`CalibrateReadoutFull.build_plan(...)`**
+  - Added a configuration-resolved pipeline planner that returns structured
+    step metadata for weights optimization and iterative GE+Butterfly phases.
+  - Planner validates and resolves the same effective configuration contract
+    as `run()`, but performs no QUA build or execution.
+
+2. **`ReadoutAmpLenOpt.build_plan(...)`**
+  - Added a 2-D scan planner returning resolved sweep axes, total grid size,
+    and delegated sub-experiment execution metadata.
+
+3. **Behavior preserved**
+  - No runtime behavior change to `run()` in either orchestrator class.
+  - Existing execution remains run-driven and multi-program where appropriate.
+
+4. **Post-change validation rerun**
+  - Re-ran `tools/validate_circuit_runner_serialization.py`.
+  - Power Rabi: PASS
+  - T1: PASS
+  - Readout GE discrimination: PASS
+  - Butterfly measurement: PASS
+
+**Files affected:**
+
+- `qubox_v2/experiments/calibration/readout.py`
+- `docs/circuit_runner_serialization_validation.md` (regenerated)
+- `docs/CHANGELOG.md` — This entry
+
+---
+
+### 2026-03-01 — Readout Protocol Closure: Weights Optimization Migration
+
+**Classification: Major**
+
+Completed the next readout refactor slice by migrating
+`ReadoutWeightsOptimization` to the unified v2.2 build protocol while
+retaining existing algorithmic behavior and output semantics.
+
+**Summary:**
+
+1. **`ReadoutWeightsOptimization` build migration**
+  - Added `_build_impl()` returning `ProgramBuildResult`.
+  - Updated `run()` to delegate via `build_program()` and execute with
+    `run_program(...)`.
+  - Reused `ReadoutGEIntegratedTrace.build_program(...)` internally to avoid
+    duplicating trace-construction logic.
+
+2. **Behavior and provenance preservation**
+  - Kept existing run-parameter side effects used by `analyze()`.
+  - Preserved output artifact save path (`readoutWeightsOpt`).
+  - Added build provenance (`builder_function`, snapshots, resolved frequencies).
+
+3. **Intentional non-migration in this slice**
+  - `CalibrateReadoutFull` and `ReadoutAmpLenOpt` remain orchestrator-style
+    multi-run workflows (not single-program build artifacts), so they are
+    intentionally kept as `run()`-driven controllers.
+
+4. **Validation rerun after migration**
+  - Re-ran `tools/validate_circuit_runner_serialization.py`.
+  - Power Rabi: PASS
+  - T1: PASS
+  - Readout GE discrimination: PASS
+  - Butterfly measurement: PASS
+
+**Files affected:**
+
+- `qubox_v2/experiments/calibration/readout.py`
+- `docs/circuit_runner_serialization_validation.md` (regenerated)
+- `docs/CHANGELOG.md` — This entry
+
+---
+
+### 2026-03-01 — Readout Protocol Expansion: IQBlob/RawTrace/IntegratedTrace
+
+**Classification: Major**
+
+Expanded the v2.2 build-protocol migration in readout calibration by moving
+three additional classes to `_build_impl()` + `build_program()` execution flow:
+`IQBlob`, `ReadoutGERawTrace`, and `ReadoutGEIntegratedTrace`.
+
+**Summary:**
+
+1. **Unified build protocol adoption**
+   - Added `_build_impl()` to `IQBlob` and updated `run()` to delegate via
+     `build_program()`.
+   - Added `_build_impl()` to `ReadoutGERawTrace` and updated `run()` to
+     delegate via `build_program()`.
+   - Added `_build_impl()` to `ReadoutGEIntegratedTrace` and updated `run()`
+     to delegate via `build_program()`.
+
+2. **Program provenance and frequency resolution**
+   - Added `ProgramBuildResult` payloads with resolved frequencies,
+     `builder_function`, `bindings_snapshot`, and `measure_macro_state`.
+   - Preserved legacy output shaping through `run_program_kwargs` for target
+     mapping and simulation processing flags where applicable.
+
+3. **Legacy behavior parity preserved**
+   - Kept integrated-trace measureMacro push/restore and custom post-process
+     closure logic unchanged in semantics.
+
+4. **Validation rerun after migration**
+   - Re-ran `tools/validate_circuit_runner_serialization.py` post-change.
+   - Power Rabi: PASS
+   - T1: PASS
+   - Readout GE discrimination: PASS
+   - Butterfly measurement: PASS
+
+**Files affected:**
+
+- `qubox_v2/experiments/calibration/readout.py`
+- `docs/circuit_runner_serialization_validation.md` (regenerated)
+- `docs/CHANGELOG.md` — This entry

@@ -7,11 +7,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase
-from ..result import AnalysisResult
+from ..result import AnalysisResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.cQED_plottings import plot_wigner
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
+from ...programs.measurement import try_build_readout_snapshot_from_macro
 
 
 class StorageWignerTomography(ExperimentBase):
@@ -20,6 +21,52 @@ class StorageWignerTomography(ExperimentBase):
     Sweeps displacement amplitudes over phase-space (x, p) grid and
     measures mode-parity to reconstruct the Wigner function.
     """
+
+    def _build_impl(
+        self,
+        gates: list,
+        x_vals: np.ndarray | list[float],
+        p_vals: np.ndarray | list[float],
+        base_alpha: float = 10.0,
+        r90_pulse: str = "x90",
+        n_avg: int = 200,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        x_arr = np.asarray(x_vals)
+        p_arr = np.asarray(p_vals)
+
+        prog = cQED_programs.storage_wigner_tomography(
+            attr.qb_el, attr.st_el,
+            gates, x_arr, p_arr,
+            base_alpha, r90_pulse,
+            attr.qb_therm_clks, n_avg,
+        )
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
+                pp.proc_default,
+                pp.proc_attach("x_vals", x_arr),
+                pp.proc_attach("p_vals", p_arr),
+            ),
+            experiment_name="StorageWignerTomography",
+            params={
+                "base_alpha": base_alpha,
+                "r90_pulse": r90_pulse,
+                "n_avg": n_avg,
+                "x_len": int(len(x_arr)),
+                "p_len": int(len(p_arr)),
+            },
+            resolved_frequencies={
+                attr.ro_el: self._resolve_readout_frequency(),
+                attr.qb_el: self._resolve_qubit_frequency(),
+                attr.st_el: self.get_storage_frequency(),
+            },
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.storage_wigner_tomography",
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            sweep_axes={"x_vals": x_arr, "p_vals": p_arr},
+        )
 
     def run(
         self,
@@ -30,22 +77,18 @@ class StorageWignerTomography(ExperimentBase):
         r90_pulse: str = "x90",
         n_avg: int = 200,
     ) -> RunResult:
-        attr = self.attr
-        self.set_standard_frequencies()
-
-        prog = cQED_programs.storage_wigner_tomography(
-            attr.qb_el, attr.st_el,
-            gates, np.asarray(x_vals), np.asarray(p_vals),
-            base_alpha, r90_pulse,
-            attr.qb_therm_clks, n_avg,
+        build = self.build_program(
+            gates=gates,
+            x_vals=x_vals,
+            p_vals=p_vals,
+            base_alpha=base_alpha,
+            r90_pulse=r90_pulse,
+            n_avg=n_avg,
         )
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
-                pp.proc_default,
-                pp.proc_attach("x_vals", np.asarray(x_vals)),
-                pp.proc_attach("p_vals", np.asarray(p_vals)),
-            ],
+            build.program,
+            n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "wignerTomography")
         return result
@@ -112,6 +155,59 @@ class SNAPOptimization(ExperimentBase):
     ``cQED_programs.fock_resolved_state_tomography`` (callable state-prep).
     """
 
+    def _build_impl(
+        self,
+        snap_gate: Any,
+        disp1_gate: Any,
+        fock_probe_fqs: list[float] | np.ndarray,
+        *,
+        sel_r180: str = "sel_x180",
+        sel_rxp90: str = "sel_x90",
+        sel_rym90: str = "sel_yn90",
+        n_avg: int = 100,
+        qb_x180: str = "x180",
+        post_meas_wait_clks: int = 0,
+    ) -> ProgramBuildResult:
+        attr = self.attr
+        fock_probe = np.asarray(fock_probe_fqs)
+
+        prog = cQED_programs.SQR_state_tomography(
+            attr.qb_el, attr.st_el,
+            snap_gate, disp1_gate,
+            fock_probe,
+            sel_r180=sel_r180,
+            sel_rxp90=sel_rxp90,
+            sel_rym90=sel_rym90,
+            qb_x180=qb_x180,
+            post_meas_wait_clks=post_meas_wait_clks,
+            therm_clks=attr.qb_therm_clks,
+            n_avg=n_avg,
+        )
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(pp.proc_default,),
+            experiment_name="SNAPOptimization",
+            params={
+                "n_avg": n_avg,
+                "sel_r180": sel_r180,
+                "sel_rxp90": sel_rxp90,
+                "sel_rym90": sel_rym90,
+                "qb_x180": qb_x180,
+                "post_meas_wait_clks": post_meas_wait_clks,
+                "fock_probe_len": int(len(fock_probe)),
+            },
+            resolved_frequencies={
+                attr.ro_el: self._resolve_readout_frequency(),
+                attr.qb_el: self._resolve_qubit_frequency(),
+                attr.st_el: self.get_storage_frequency(),
+            },
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.SQR_state_tomography",
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            sweep_axes={"fock_probe_fqs": fock_probe},
+        )
+
     def run(
         self,
         snap_gate: Any,
@@ -125,24 +221,21 @@ class SNAPOptimization(ExperimentBase):
         qb_x180: str = "x180",
         post_meas_wait_clks: int = 0,
     ) -> RunResult:
-        attr = self.attr
-        self.set_standard_frequencies()
-
-        prog = cQED_programs.SQR_state_tomography(
-            attr.qb_el, attr.st_el,
-            snap_gate, disp1_gate,
-            np.asarray(fock_probe_fqs),
+        build = self.build_program(
+            snap_gate=snap_gate,
+            disp1_gate=disp1_gate,
+            fock_probe_fqs=fock_probe_fqs,
             sel_r180=sel_r180,
             sel_rxp90=sel_rxp90,
             sel_rym90=sel_rym90,
+            n_avg=n_avg,
             qb_x180=qb_x180,
             post_meas_wait_clks=post_meas_wait_clks,
-            therm_clks=attr.qb_therm_clks,
-            n_avg=n_avg,
         )
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[pp.proc_default],
+            build.program,
+            n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "snapOptimization")
         return result

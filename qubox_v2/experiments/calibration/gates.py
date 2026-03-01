@@ -7,13 +7,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase
-from ..result import AnalysisResult, FitResult
+from ..result import AnalysisResult, FitResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.fitting import fit_and_wrap, build_fit_legend
 from ...analysis.cQED_models import rb_survival_model
 from ...analysis.algorithms import random_sequences
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
+from ...programs.measurement import try_build_readout_snapshot_from_macro
 from ...calibration.pulse_train_tomo import (
     run_pulse_train_tomography,
     fit_pulse_train_model,
@@ -53,15 +54,14 @@ class AllXY(ExperimentBase):
         -1, -1, -1, -1,
     ], dtype=float)
 
-    def run(
+    def _build_impl(
         self,
         gate_indices: list[int] | None = None,
         prefix: str = "",
         qb_detuning: int = 0,
         n_avg: int = 1000,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
-        self.set_standard_frequencies(qb_fq=self.get_qubit_frequency() + qb_detuning)
 
         # Build rotation sequences
         if gate_indices is not None:
@@ -75,9 +75,43 @@ class AllXY(ExperimentBase):
         prog = cQED_programs.all_xy(
             attr.qb_el, ops, attr.qb_therm_clks, n_avg,
         )
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(pp.proc_default, pp.proc_attach("ops", ops)),
+            experiment_name="AllXY",
+            params={
+                "gate_indices": list(gate_indices) if gate_indices is not None else None,
+                "prefix": prefix,
+                "qb_detuning": qb_detuning,
+                "n_avg": n_avg,
+            },
+            resolved_frequencies={
+                attr.ro_el: self._resolve_readout_frequency(),
+                attr.qb_el: self.get_qubit_frequency() + qb_detuning,
+            },
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.all_xy",
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            sweep_axes={"ops": ops},
+        )
+
+    def run(
+        self,
+        gate_indices: list[int] | None = None,
+        prefix: str = "",
+        qb_detuning: int = 0,
+        n_avg: int = 1000,
+    ) -> RunResult:
+        build = self.build_program(
+            gate_indices=gate_indices,
+            prefix=prefix,
+            qb_detuning=qb_detuning,
+            n_avg=n_avg,
+        )
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[pp.proc_default, pp.proc_attach("ops", ops)],
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
         )
         self.save_output(result.output, "allXY")
         return result
@@ -187,7 +221,7 @@ class DRAGCalibration(ExperimentBase):
     same units (``amps * base_alpha``).
     """
 
-    def run(
+    def _build_impl(
         self,
         amps: np.ndarray | list[float],
         n_avg: int = 1000,
@@ -198,7 +232,7 @@ class DRAGCalibration(ExperimentBase):
         x90: str = "ge_x90",
         y180: str = "ge_y180",
         y90: str = "ge_y90",
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         """Run the Yale DRAG calibration sweep.
 
         Parameters
@@ -240,8 +274,6 @@ class DRAGCalibration(ExperimentBase):
                 f"(|a| must be < 2, got max |a|={max_abs:.6g}). "
                 "Use a narrower range (legacy notebook uses -0.5 to 0.5)."
             )
-
-        self.set_standard_frequencies()
 
         # ----- Legacy parity: generate DRAG waveforms with base_alpha -----
         # Retrieve pulse parameters from calibration store or attributes
@@ -314,15 +346,64 @@ class DRAGCalibration(ExperimentBase):
             x180_op, x90_op, y180_op, y90_op,
             attr.qb_therm_clks, n_avg,
         )
-        result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(
                 pp.proc_default,
                 pp.proc_attach("amps", amps),
                 pp.proc_attach("base_alpha", float(base_alpha)),
                 pp.proc_attach("pulse_len", int(rlen)),
-            ],
-            targets=[("I1", "Q1"), ("I2", "Q2")],
+            ),
+            experiment_name="DRAGCalibration",
+            params={
+                "amps": amps.tolist(),
+                "n_avg": n_avg,
+                "base_alpha": float(base_alpha),
+                "calibration_op": calibration_op,
+                "x180": x180,
+                "x90": x90,
+                "y180": y180,
+                "y90": y90,
+            },
+            resolved_frequencies={
+                attr.ro_el: self._resolve_readout_frequency(),
+                attr.qb_el: self._resolve_qubit_frequency(),
+            },
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.drag_calibration_YALE",
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            sweep_axes={"amps": amps},
+            run_program_kwargs={"targets": [("I1", "Q1"), ("I2", "Q2")]},
+        )
+
+    def run(
+        self,
+        amps: np.ndarray | list[float],
+        n_avg: int = 1000,
+        *,
+        base_alpha: float = 1.0,
+        calibration_op: str = "ge_ref_r180",
+        x180: str = "ge_x180",
+        x90: str = "ge_x90",
+        y180: str = "ge_y180",
+        y90: str = "ge_y90",
+    ) -> RunResult:
+        build = self.build_program(
+            amps=amps,
+            n_avg=n_avg,
+            base_alpha=base_alpha,
+            calibration_op=calibration_op,
+            x180=x180,
+            x90=x90,
+            y180=y180,
+            y90=y90,
+        )
+        result = self.run_program(
+            build.program,
+            n_total=build.n_total,
+            processors=list(build.processors),
+            **(build.run_program_kwargs or {}),
         )
         self._run_params = {"calibration_op": calibration_op}
         self.save_output(result.output, "dragCalibration")
@@ -446,6 +527,12 @@ class RandomizedBenchmarking(ExperimentBase):
     Runs random Clifford sequences of varying depth to extract
     average gate fidelity. Supports interleaving a specific gate.
     """
+
+    def _build_impl(self, **kw):
+        raise NotImplementedError(
+            "RandomizedBenchmarking compiles/executes many batched programs per run "
+            "and does not map to a single ProgramBuildResult."
+        )
 
     # Canonical 1Q Clifford set (24 elements decomposed into 7 primitives)
     _CLIFFORD_1Q_SEQS = [
@@ -814,6 +901,12 @@ class PulseTrainCalibration(ExperimentBase):
     the Bloch-vector data in a RunResult.  The ``analyze()`` method wraps
     ``fit_pulse_train_model()`` and ``fit_params_to_qubitrotation_knobs()``.
     """
+
+    def _build_impl(self, **kw):
+        raise NotImplementedError(
+            "PulseTrainCalibration orchestrates tomography runs over N and prep sets "
+            "and does not compile to one ProgramBuildResult."
+        )
 
     def run(
         self,

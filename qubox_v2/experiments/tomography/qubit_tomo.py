@@ -7,12 +7,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase
-from ..result import AnalysisResult
+from ..result import AnalysisResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.cQED_plottings import plot_bloch_states
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
 from ...programs.macros.measure import measureMacro
+from ...programs.measurement import try_build_readout_snapshot_from_macro
 
 
 class QubitStateTomography(ExperimentBase):
@@ -24,7 +25,7 @@ class QubitStateTomography(ExperimentBase):
     dimension.
     """
 
-    def run(
+    def _build_impl(
         self,
         state_prep: Callable | list[Callable],
         n_avg: int,
@@ -32,7 +33,7 @@ class QubitStateTomography(ExperimentBase):
         x90_pulse: str = "x90",
         yn90_pulse: str = "yn90",
         therm_clks: int | None = None,
-    ) -> RunResult:
+    ) -> ProgramBuildResult:
         attr = self.attr
         mm = measureMacro
 
@@ -41,8 +42,6 @@ class QubitStateTomography(ExperimentBase):
         else:
             preps = list(state_prep)
         n_preps = len(preps)
-
-        self.set_standard_frequencies()
 
         if therm_clks is None:
             therm_clks = attr.qb_therm_clks
@@ -56,12 +55,57 @@ class QubitStateTomography(ExperimentBase):
             yn90=yn90_pulse,
         )
 
+        run_kwargs = {
+            "targets": [("state_x", "sx"), ("state_y", "sy"), ("state_z", "sz")],
+            "confusion": self.get_confusion_matrix(),
+            "to_sigmaz": True,
+            "n_preps": n_preps,
+        }
+        return ProgramBuildResult(
+            program=prog,
+            n_total=n_avg,
+            processors=(pp.ro_state_correct_proc,),
+            experiment_name="QubitStateTomography",
+            params={
+                "state_prep_count": n_preps,
+                "n_avg": n_avg,
+                "x90_pulse": x90_pulse,
+                "yn90_pulse": yn90_pulse,
+                "therm_clks": therm_clks,
+            },
+            resolved_frequencies={
+                attr.ro_el: self._resolve_readout_frequency(),
+                attr.qb_el: self._resolve_qubit_frequency(),
+            },
+            bindings_snapshot=self._serialize_bindings(),
+            builder_function="cQED_programs.qubit_state_tomography",
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            run_program_kwargs=run_kwargs,
+        )
+
+    def run(
+        self,
+        state_prep: Callable | list[Callable],
+        n_avg: int,
+        *,
+        x90_pulse: str = "x90",
+        yn90_pulse: str = "yn90",
+        therm_clks: int | None = None,
+    ) -> RunResult:
+        build = self.build_program(
+            state_prep=state_prep,
+            n_avg=n_avg,
+            x90_pulse=x90_pulse,
+            yn90_pulse=yn90_pulse,
+            therm_clks=therm_clks,
+        )
+        run_kwargs = dict(build.run_program_kwargs or {})
+        n_preps = int(run_kwargs.pop("n_preps", 1))
         result = self.run_program(
-            prog, n_total=n_avg,
-            processors=[pp.ro_state_correct_proc],
-            targets=[("state_x", "sx"), ("state_y", "sy"), ("state_z", "sz")],
-            confusion=self.get_confusion_matrix(),
-            to_sigmaz=True,
+            build.program,
+            n_total=build.n_total,
+            processors=list(build.processors),
+            **run_kwargs,
         )
 
         if n_preps > 1:

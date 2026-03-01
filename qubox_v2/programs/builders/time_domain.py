@@ -2,6 +2,7 @@
 from qm.qua import *
 from qualang_tools.loops import from_array
 from ..macros.measure import measureMacro
+from ..measurement import MeasureSpec, emit_measurement_spec
 from ..macros.sequence import sequenceMacros
 import numpy as np
 
@@ -27,6 +28,8 @@ def temporal_rabi(pulse, pulse_clks, pulse_gain, qb_therm_clks, n_avg, *, qb_el:
     elif qb_el is None:
         raise ValueError("qb_el is required when bindings are not provided")
 
+    measure_spec = MeasureSpec(kind="iq")
+
     with program() as rabi_prog:
         pulse_clk = declare(int)
         n = declare(int)
@@ -39,7 +42,7 @@ def temporal_rabi(pulse, pulse_clks, pulse_gain, qb_therm_clks, n_avg, *, qb_el:
             with for_(*from_array(pulse_clk, pulse_clks)):
                 play(pulse*amp(pulse_gain), qb_el, duration=pulse_clk)
                 align(qb_el, measureMacro.active_element())
-                measureMacro.measure(targets=[I,Q])
+                emit_measurement_spec(measure_spec, targets=[I, Q])
                 wait(int(qb_therm_clks))
                 save(I, I_st)
                 save(Q, Q_st)
@@ -72,6 +75,8 @@ def power_rabi(qb_clock_len:int, gains, qb_therm_clks, pulse, truncate_clks, n_a
     elif qb_el is None:
         raise ValueError("qb_el is required when bindings are not provided")
 
+    measure_spec = MeasureSpec(kind="iq")
+
     with program() as power_rabi_prog:
         g = declare(fixed)
         n = declare(int)
@@ -84,7 +89,7 @@ def power_rabi(qb_clock_len:int, gains, qb_therm_clks, pulse, truncate_clks, n_a
             with for_(*from_array(g, gains)):
                 play(pulse*amp(g), qb_el, duration=qb_clock_len, truncate=truncate_clks)
                 align(qb_el, measureMacro.active_element())
-                measureMacro.measure(targets=[I, Q])
+                emit_measurement_spec(measure_spec, targets=[I, Q])
                 wait(int(qb_therm_clks))
                 save(I, I_st)
                 save(Q, Q_st)

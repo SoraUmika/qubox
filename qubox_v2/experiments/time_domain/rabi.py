@@ -13,7 +13,9 @@ from ...analysis.fitting import fit_and_wrap, build_fit_legend
 from ...analysis.cQED_models import power_rabi_model, temporal_rabi_model
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
+from ...programs.circuit_runner import CircuitRunner, make_power_rabi_circuit
 from ...programs.macros.measure import measureMacro
+from ...programs.measurement import try_build_readout_snapshot_from_macro
 from ...pulses.manager import MAX_AMPLITUDE
 
 
@@ -58,6 +60,7 @@ class TemporalRabi(ExperimentBase):
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.temporal_rabi",
             sweep_axes={"pulse_durations": pulse_clks * 4},
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
         )
 
     def run(
@@ -175,6 +178,8 @@ class PowerRabi(ExperimentBase):
         length: int | None = None,
         truncate_clks: int | None = None,
         n_avg: int = 1000,
+        *,
+        use_circuit_runner: bool = True,
     ) -> ProgramBuildResult:
         attr = self.attr
         gains = np.arange(-max_gain, max_gain + 1e-12, dg, dtype=float)
@@ -195,12 +200,35 @@ class PowerRabi(ExperimentBase):
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
 
-        prog = cQED_programs.power_rabi(
-            pulse_clock_len, gains, attr.qb_therm_clks,
-            op, truncate_clks, n_avg,
-            qb_el=attr.qb_el,
-            bindings=self._bindings_or_none,
-        )
+        builder_function = "cQED_programs.power_rabi"
+        if use_circuit_runner:
+            try:
+                circuit, sweep = make_power_rabi_circuit(
+                    qb_el=attr.qb_el,
+                    qb_therm_clks=int(attr.qb_therm_clks),
+                    pulse_clock_len=pulse_clock_len,
+                    n_avg=n_avg,
+                    op=op,
+                    truncate_clks=truncate_clks,
+                    gains=gains,
+                )
+                compiled = CircuitRunner(self._ctx).compile(circuit, sweep=sweep)
+                prog = compiled.program
+                builder_function = "CircuitRunner.power_rabi"
+            except Exception:
+                prog = cQED_programs.power_rabi(
+                    pulse_clock_len, gains, attr.qb_therm_clks,
+                    op, truncate_clks, n_avg,
+                    qb_el=attr.qb_el,
+                    bindings=self._bindings_or_none,
+                )
+        else:
+            prog = cQED_programs.power_rabi(
+                pulse_clock_len, gains, attr.qb_therm_clks,
+                op, truncate_clks, n_avg,
+                qb_el=attr.qb_el,
+                bindings=self._bindings_or_none,
+            )
 
         return ProgramBuildResult(
             program=prog,
@@ -217,8 +245,9 @@ class PowerRabi(ExperimentBase):
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
-            builder_function="cQED_programs.power_rabi",
+            builder_function=builder_function,
             sweep_axes={"gains": gains},
+            measure_macro_state=try_build_readout_snapshot_from_macro(),
         )
 
     def run(
@@ -229,10 +258,13 @@ class PowerRabi(ExperimentBase):
         length: int | None = None,
         truncate_clks: int | None = None,
         n_avg: int = 1000,
+        *,
+        use_circuit_runner: bool = True,
     ) -> RunResult:
         build = self.build_program(
             max_gain=max_gain, dg=dg, op=op,
             length=length, truncate_clks=truncate_clks, n_avg=n_avg,
+            use_circuit_runner=use_circuit_runner,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
