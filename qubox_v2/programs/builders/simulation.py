@@ -38,7 +38,7 @@ def sequential_simulation(gates: list[Gate], measurement_gates: List[Measurement
                     save(Q, Q_st)
                 else:
                     measureMacro.measure(targets=[I, Q])
-                sequenceMacros.conditional_reset_ground(I, thr=measureMacro._ro_disc_params["threshold"], r180="x180", qb_el="qubit")
+                sequenceMacros.conditional_reset_ground(I, thr=measureMacro._ro_disc_params.get("threshold") or 0.0, r180="x180", qb_el="qubit")
             wait(int(st_therm_clks))
             save(rep, n_st)
         with stream_processing():

@@ -614,7 +614,7 @@ class ExperimentBase:
         Phase B: apply calibration update only if validation gates pass.
         """
         exp_path = Path(getattr(self._ctx, "experiment_path", "."))
-        art_dir = exp_path / "artifacts" / "calibration_runs"
+        art_dir = exp_path / "artifacts" / "runtime" / "calibration_runs"
         art_dir.mkdir(parents=True, exist_ok=True)
 
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

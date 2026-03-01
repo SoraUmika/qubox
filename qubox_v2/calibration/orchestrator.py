@@ -164,6 +164,7 @@ class CalibrationOrchestrator:
 
     def apply_patch(self, patch: Patch, dry_run: bool = False) -> dict[str, Any]:
         preview: list[dict[str, Any]] = []
+        sync_ok = True
 
         for update in patch.updates:
             op = update.op
