@@ -11,6 +11,7 @@ import numpy as np
 from qm import generate_qua_script
 from qubox_v2.programs.macros.measure import measureMacro
 
+from qubox_v2.calibration import CalibrationStore
 from qubox_v2.programs import api as cQED_programs
 from qubox_v2.hardware.config_engine import ConfigEngine
 from qubox_v2.pulses.manager import PulseOperationManager
@@ -28,9 +29,12 @@ from qubox_v2.programs.gate_tuning import GateTuningStore, make_xy_tuning_record
 class LocalSessionShim:
     config_engine: Any
     pulse_mgr: Any
-    attributes: Any
     bindings: Any
+    _context_snapshot: Any
     gate_tuning_store: GateTuningStore | None = None
+
+    def context_snapshot(self) -> Any:
+        return self._context_snapshot
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -97,8 +101,10 @@ def _load_local_session(*, repo_root: Path, sample_id: str, cooldown_id: str) ->
     pulse_mgr = PulseOperationManager.from_json(cooldown_cfg / "pulses.json")
     cfg_engine.merge_pulses(pulse_mgr, include_volatile=True)
 
-    attrs = cQED_attributes.from_json(sample_cfg / "cqed_params.json")
-    bindings = bindings_from_hardware_config(cfg_engine.hardware, attrs)
+    ctx = cQED_attributes.from_json(sample_cfg / "cqed_params.json")
+    calibration = CalibrationStore(cooldown_cfg / "calibration.json")
+    _overlay_calibration_context(ctx, calibration)
+    bindings = bindings_from_hardware_config(cfg_engine.hardware, ctx)
 
     measure_cfg = cooldown_cfg / "measureConfig.json"
     if measure_cfg.exists():
@@ -107,10 +113,50 @@ def _load_local_session(*, repo_root: Path, sample_id: str, cooldown_id: str) ->
     return LocalSessionShim(
         config_engine=cfg_engine,
         pulse_mgr=pulse_mgr,
-        attributes=attrs,
         bindings=bindings,
+        _context_snapshot=ctx,
         gate_tuning_store=GateTuningStore(),
     )
+
+
+def _overlay_calibration_context(ctx: cQED_attributes, calibration: CalibrationStore) -> None:
+    resonator = calibration.get_cqed_params("resonator")
+    transmon = calibration.get_cqed_params("transmon")
+    storage = calibration.get_cqed_params("storage")
+
+    if resonator is not None:
+        if resonator.resonator_freq is not None:
+            ctx.ro_fq = resonator.resonator_freq
+        if resonator.kappa is not None:
+            ctx.ro_kappa = resonator.kappa
+        if resonator.ro_therm_clks is not None:
+            setattr(ctx, "ro_therm_clks", resonator.ro_therm_clks)
+
+    if transmon is not None:
+        if transmon.qubit_freq is not None:
+            ctx.qb_fq = transmon.qubit_freq
+        if transmon.anharmonicity is not None:
+            ctx.anharmonicity = transmon.anharmonicity
+        if transmon.qb_therm_clks is not None:
+            setattr(ctx, "qb_therm_clks", transmon.qb_therm_clks)
+
+    if storage is not None:
+        if storage.storage_freq is not None:
+            ctx.st_fq = storage.storage_freq
+        if storage.chi is not None:
+            ctx.st_chi = storage.chi
+        if storage.chi2 is not None:
+            ctx.st_chi2 = storage.chi2
+        if storage.chi3 is not None:
+            ctx.st_chi3 = storage.chi3
+        if storage.kerr is not None:
+            ctx.st_K = storage.kerr
+        if storage.kerr2 is not None:
+            ctx.st_K2 = storage.kerr2
+        if storage.fock_freqs is not None:
+            ctx.fock_fqs = np.asarray(storage.fock_freqs, dtype=float)
+        if storage.st_therm_clks is not None:
+            setattr(ctx, "st_therm_clks", storage.st_therm_clks)
 
 
 def _serialize(session: LocalSessionShim, program: Any) -> str:
@@ -138,8 +184,9 @@ def run_validation(*, sample_id: str = "post_cavity_sample_A", cooldown_id: str 
     session_legacy = _load_local_session(repo_root=repo_root, sample_id=sample_id, cooldown_id=cooldown_id)
     session_tuned = _load_local_session(repo_root=repo_root, sample_id=sample_id, cooldown_id=cooldown_id)
 
-    qb_el = session_tuned.attributes.qb_el
-    qb_therm = int(getattr(session_tuned.attributes, "qb_therm_clks", 250_000) or 250_000)
+    ctx = session_tuned.context_snapshot()
+    qb_el = ctx.qb_el
+    qb_therm = int(getattr(ctx, "qb_therm_clks", 250_000) or 250_000)
 
     tuning = make_xy_tuning_record(
         target=qb_el,

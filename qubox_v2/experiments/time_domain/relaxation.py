@@ -11,9 +11,19 @@ from ..result import AnalysisResult, FitResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.fitting import fit_and_wrap
 from ...analysis.cQED_models import T1_relaxation_model
+from ...analysis.analysis_tools import project_complex_to_line_real
 from ...hardware.program_runner import RunResult
 from ...programs.circuit_runner import CircuitRunner, make_t1_circuit
 from ...programs import api as cQED_programs
+
+
+def _resolve_qb_therm_clks(exp: ExperimentBase, value: int | None, owner: str) -> int:
+    return int(exp.resolve_override_or_attr(
+        value=value,
+        attr_name="qb_therm_clks",
+        owner=owner,
+        cast=int,
+    ))
 
 
 class T1Relaxation(ExperimentBase):
@@ -34,6 +44,7 @@ class T1Relaxation(ExperimentBase):
     ) -> ProgramBuildResult:
         attr = self.attr
         delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
+        qb_therm_clks = _resolve_qb_therm_clks(self, None, "T1Relaxation")
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
@@ -43,7 +54,7 @@ class T1Relaxation(ExperimentBase):
             try:
                 circuit, sweep = make_t1_circuit(
                     qb_el=attr.qb_el,
-                    qb_therm_clks=int(attr.qb_therm_clks),
+                    qb_therm_clks=int(qb_therm_clks),
                     n_avg=n_avg,
                     waits_clks=delay_clks,
                     r180=r180,
@@ -53,13 +64,13 @@ class T1Relaxation(ExperimentBase):
                 builder_function = "CircuitRunner.t1"
             except Exception:
                 prog = cQED_programs.T1_relaxation(
-                    r180, delay_clks, attr.qb_therm_clks, n_avg,
+                    r180, delay_clks, qb_therm_clks, n_avg,
                     qb_el=attr.qb_el,
                     bindings=self._bindings_or_none,
                 )
         else:
             prog = cQED_programs.T1_relaxation(
-                r180, delay_clks, attr.qb_therm_clks, n_avg,
+                r180, delay_clks, qb_therm_clks, n_avg,
                 qb_el=attr.qb_el,
                 bindings=self._bindings_or_none,
             )
@@ -108,7 +119,7 @@ class T1Relaxation(ExperimentBase):
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
         delays = result.output.extract("delays")
         S = result.output.extract("S")
-        ydata = np.real(S)
+        ydata, proj_center, proj_direction = project_complex_to_line_real(S)
 
         derive_qb_therm_clks = bool(kw.pop("derive_qb_therm_clks", False))
         clock_period_ns = float(kw.pop("clock_period_ns", 4.0))
@@ -157,14 +168,14 @@ class T1Relaxation(ExperimentBase):
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"coherence.{self.attr.qb_el}.T1",
+                        "path": "cqed_params.transmon.T1",
                         "value": t1_s,
                     },
                 },
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"coherence.{self.attr.qb_el}.T1_us",
+                        "path": "cqed_params.transmon.T1_us",
                         "value": t1_ns / 1e3,
                     },
                 },
@@ -178,11 +189,18 @@ class T1Relaxation(ExperimentBase):
                     {
                         "op": "SetCalibration",
                         "payload": {
-                            "path": f"coherence.{self.attr.qb_el}.qb_therm_clks",
+                            "path": "cqed_params.transmon.qb_therm_clks",
                             "value": qb_therm_clks,
                         },
                     }
                 )
+
+        metadata["signal_projection"] = {
+            "center_real": float(np.real(proj_center)),
+            "center_imag": float(np.imag(proj_center)),
+            "direction_real": float(np.real(proj_direction)),
+            "direction_imag": float(np.imag(proj_direction)),
+        }
 
         analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics, metadata=metadata)
 
@@ -194,7 +212,7 @@ class T1Relaxation(ExperimentBase):
         if delays is None or S is None:
             return None
 
-        ydata = np.real(S)
+        ydata, _, _ = project_complex_to_line_real(S)
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 5))
         else:
@@ -215,7 +233,7 @@ class T1Relaxation(ExperimentBase):
                     label=legend)
 
         ax.set_xlabel("Delay (us)")
-        ax.set_ylabel("Re(S)")
+        ax.set_ylabel("Projected Signal (a.u.)")
         ax.set_title("T1 Relaxation")
         ax.legend(
             bbox_to_anchor=(1.05, 1), loc='upper left',

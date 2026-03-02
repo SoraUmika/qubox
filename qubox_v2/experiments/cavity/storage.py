@@ -125,14 +125,14 @@ class StorageSpectroscopy(ExperimentBase):
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"frequencies.{self.attr.st_el}.qubit_freq",
+                        "path": "cqed_params.storage.qubit_freq",
                         "value": float(fit.params["f0"]),
                     },
                 },
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"frequencies.{self.attr.st_el}.kappa",
+                        "path": "cqed_params.storage.kappa",
                         "value": float(fit.params["kappa"]),
                     },
                 },
@@ -258,14 +258,14 @@ class StorageSpectroscopyCoarse(ExperimentBase):
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"frequencies.{self.attr.st_el}.qubit_freq",
+                        "path": "cqed_params.storage.qubit_freq",
                         "value": float(fit.params["f0"]),
                     },
                 },
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"frequencies.{self.attr.st_el}.kappa",
+                        "path": "cqed_params.storage.kappa",
                         "value": float(fit.params["kappa"]),
                     },
                 },

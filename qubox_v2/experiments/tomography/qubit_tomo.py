@@ -41,8 +41,14 @@ class QubitStateTomography(ExperimentBase):
             preps = list(state_prep)
         n_preps = len(preps)
 
-        if therm_clks is None:
-            therm_clks = attr.qb_therm_clks
+        therm_clks = self.resolve_param(
+            "qb_therm_clks",
+            override=therm_clks,
+            calibration_value=self._calibration_cqed_value("transmon", "qb_therm_clks"),
+            calibration_path="cqed_params.transmon.qb_therm_clks",
+            owner="QubitStateTomography",
+            cast=int,
+        )
 
         prog = cQED_programs.qubit_state_tomography(
             state_prep=state_prep,

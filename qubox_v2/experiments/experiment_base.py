@@ -24,8 +24,9 @@ from __future__ import annotations
 import datetime
 import json
 import warnings
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import numpy as np
 
@@ -169,6 +170,8 @@ class ExperimentBase:
                 "ExperimentRunner instance when creating an experiment."
             )
         self._ctx = ctx
+        self._last_build = None
+        self._resolved_param_trace: dict[str, dict[str, Any]] = {}
 
     @property
     def name(self) -> str:
@@ -179,11 +182,13 @@ class ExperimentBase:
     # ------------------------------------------------------------------
     @property
     def attr(self) -> cQED_attributes:
+        snapshot = getattr(self._ctx, "context_snapshot", None)
+        if callable(snapshot):
+            return snapshot()
         a = getattr(self._ctx, "attributes", None)
         if a is None:
             raise RuntimeError(
-                "Experiment context has no 'attributes'. Ensure cqed_params.json "
-                "exists in your experiment directory and was loaded successfully."
+                "Experiment context has no calibration-backed context snapshot."
             )
         return a
 
@@ -251,6 +256,79 @@ class ExperimentBase:
     # ------------------------------------------------------------------
     # Common helpers
     # ------------------------------------------------------------------
+    def _record_resolved_param(
+        self,
+        name: str,
+        value: Any,
+        *,
+        source: str,
+        calibration_path: str | None = None,
+    ) -> Any:
+        self._resolved_param_trace[name] = {
+            "value": value,
+            "source": source,
+        }
+        if calibration_path:
+            self._resolved_param_trace[name]["calibration_path"] = calibration_path
+        _logger.info("Resolved %s=%r (source=%s)", name, value, source)
+        return value
+
+    def _calibration_cqed_value(self, alias: str, field: str) -> Any:
+        cal = getattr(self._ctx, "calibration", None)
+        if cal is None:
+            return None
+        try:
+            params = cal.get_cqed_params(alias)
+        except Exception:
+            return None
+        return getattr(params, field, None) if params is not None else None
+
+    def resolve_param(
+        self,
+        name: str,
+        *,
+        override: Any = None,
+        calibration_value: Any = None,
+        calibration_path: str | None = None,
+        default: Any = None,
+        has_default: bool = False,
+        required: bool = True,
+        owner: str | None = None,
+        cast: Callable[[Any], Any] | None = None,
+    ) -> Any:
+        resolved = override
+        source = None
+        if resolved is not None:
+            source = "override"
+        elif calibration_value is not None:
+            resolved = calibration_value
+            source = "calibration"
+        elif has_default:
+            resolved = default
+            source = "default"
+        elif not required:
+            return None
+        else:
+            where = f" in {calibration_path}" if calibration_path else ""
+            raise ValueError(
+                f"{owner or self.name}: missing required parameter '{name}'. "
+                f"Provide '{name}=...' explicitly or add it to calibration{where}."
+            )
+
+        if cast is not None:
+            try:
+                resolved = cast(resolved)
+            except Exception as exc:
+                raise ValueError(
+                    f"{owner or self.name}: invalid value for '{name}': {resolved!r}"
+                ) from exc
+        return self._record_resolved_param(
+            name,
+            resolved,
+            source=source,
+            calibration_path=calibration_path,
+        )
+
     def get_calibrated_frequency(
         self,
         element: str,
@@ -277,28 +355,102 @@ class ExperimentBase:
         return fallback
 
     def get_qubit_frequency(self) -> float:
-        """Return active qubit frequency in Hz (calibrated first, attributes fallback)."""
-        fallback = float(self.attr.qb_fq)
-        resolved = self.get_calibrated_frequency(self.attr.qb_el, field="qubit_freq", fallback=fallback)
-        return float(resolved if resolved is not None else fallback)
+        """Return active qubit frequency in Hz from calibration."""
+        resolved = self.get_calibrated_frequency(self.attr.qb_el, field="qubit_freq", fallback=None)
+        if resolved is None:
+            raise ValueError(
+                f"{self.name}: missing required calibration 'cqed_params.transmon.qubit_freq'. "
+                "Provide an explicit qubit frequency or populate calibration.json."
+            )
+        return float(
+            self._record_resolved_param(
+                "qubit_freq",
+                float(resolved),
+                source="calibration",
+                calibration_path="cqed_params.transmon.qubit_freq",
+            )
+        )
+
+    def get_readout_frequency(self) -> float:
+        """Return active readout frequency in Hz from calibration."""
+        freq_entry = None
+        cal = getattr(self._ctx, "calibration", None)
+        if cal is not None:
+            try:
+                freq_entry = cal.get_frequencies(self.attr.ro_el)
+            except Exception:
+                freq_entry = None
+
+        if freq_entry is not None:
+            ro = getattr(freq_entry, "resonator_freq", None)
+            if isinstance(ro, (int, float, np.floating)) and np.isfinite(ro):
+                return float(
+                    self._record_resolved_param(
+                        "resonator_freq",
+                        float(ro),
+                        source="calibration",
+                        calibration_path="cqed_params.resonator.resonator_freq",
+                    )
+                )
+
+            if_val = getattr(freq_entry, "if_freq", None)
+            if isinstance(if_val, (int, float, np.floating)) and np.isfinite(if_val):
+                lo_val = getattr(freq_entry, "lo_freq", None)
+                if not (isinstance(lo_val, (int, float, np.floating)) and np.isfinite(lo_val)):
+                    try:
+                        lo_val = self.get_readout_lo()
+                    except Exception:
+                        lo_val = None
+                if isinstance(lo_val, (int, float, np.floating)) and np.isfinite(lo_val):
+                    return float(
+                        self._record_resolved_param(
+                            "resonator_freq",
+                            float(lo_val) + float(if_val),
+                            source="calibration",
+                            calibration_path="cqed_params.resonator.if_freq",
+                        )
+                    )
+
+        raise ValueError(
+            f"{self.name}: missing required calibration for readout frequency "
+            f"at element '{self.attr.ro_el}'. Populate 'cqed_params.resonator.resonator_freq' "
+            "or 'cqed_params.resonator.if_freq'+'lo_freq'."
+        )
+
+    def get_storage_frequency(self) -> float:
+        """Return active storage frequency in Hz from calibration."""
+        if not getattr(self.attr, "st_el", None):
+            raise ValueError(f"{self.name}: no storage element is configured for this session.")
+        for field, path in (
+            ("storage_freq", "cqed_params.storage.storage_freq"),
+            ("qubit_freq", "cqed_params.storage.qubit_freq"),
+            ("rf_freq", "cqed_params.storage.rf_freq"),
+        ):
+            resolved = self.get_calibrated_frequency(self.attr.st_el, field=field, fallback=None)
+            if resolved is not None:
+                return float(
+                    self._record_resolved_param(
+                        "storage_freq",
+                        float(resolved),
+                        source="calibration",
+                        calibration_path=path,
+                    )
+                )
+        raise ValueError(
+            f"{self.name}: missing required calibration for storage frequency "
+            f"at element '{self.attr.st_el}'."
+        )
 
     def set_standard_frequencies(self, *, qb_fq: float | None = None) -> None:
         """Set readout and qubit element frequencies to calibrated values.
 
         Resolution order for readout frequency:
+          0. ``CalibrationStore`` resonator frequency (or IF+LO reconstruction)
           1. ``bindings.readout.drive_frequency`` (binding-driven path)
           2. ``measureMacro._drive_frequency`` (singleton compat)
           3. ``attr.ro_fq`` (attributes fallback)
         """
-        ro_fq = None
-        b = self._bindings_or_none
-        if b is not None and b.readout is not None:
-            ro_fq = getattr(b.readout, "drive_frequency", None)
-        if not isinstance(ro_fq, (int, float, np.floating)) or not np.isfinite(ro_fq):
-            mm = self.measure_macro
-            ro_fq = getattr(mm, "_drive_frequency", None)
-        if not isinstance(ro_fq, (int, float, np.floating)) or not np.isfinite(ro_fq):
-            ro_fq = self.attr.ro_fq
+        ro_fq = self.get_readout_frequency()
         self.hw.set_element_fq(self.attr.ro_el, float(ro_fq))
         target_qb_fq = float(qb_fq) if qb_fq is not None else self.get_qubit_frequency()
         self.hw.set_element_fq(self.attr.qb_el, target_qb_fq)
@@ -325,21 +477,12 @@ class ExperimentBase:
     # Pure frequency resolvers (no side-effects)
     # ------------------------------------------------------------------
     def _resolve_readout_frequency(self) -> float:
-        """Resolve readout frequency: bindings → measureMacro → attributes.
+        """Resolve readout frequency with calibration precedence.
 
         Unlike ``set_standard_frequencies`` this method does **not** apply
         the frequency — it only returns the resolved value.
         """
-        b = self._bindings_or_none
-        if b is not None and b.readout is not None:
-            ro_fq = getattr(b.readout, "drive_frequency", None)
-            if isinstance(ro_fq, (int, float, np.floating)) and np.isfinite(ro_fq):
-                return float(ro_fq)
-        mm = self.measure_macro
-        ro_fq = getattr(mm, "_drive_frequency", None)
-        if isinstance(ro_fq, (int, float, np.floating)) and np.isfinite(ro_fq):
-            return float(ro_fq)
-        return float(self.attr.ro_fq)
+        return self.get_readout_frequency()
 
     def _resolve_qubit_frequency(self, detune: float = 0.0) -> float:
         """Resolve qubit frequency with optional detuning (no side-effects).
@@ -351,17 +494,21 @@ class ExperimentBase:
         """
         return self.get_qubit_frequency() + detune
 
+    def _resolve_storage_frequency(self) -> float:
+        return self.get_storage_frequency()
+
     def _serialize_bindings(self) -> dict[str, Any] | None:
         """Serialise current bindings state for provenance logging."""
         b = self._bindings_or_none
         if b is None:
             return None
         try:
-            return sanitize_mapping_for_json({
+            payload, _ = sanitize_mapping_for_json({
                 "qubit": str(b.qubit) if b.qubit else None,
                 "readout": str(b.readout) if b.readout else None,
                 "storage": str(b.storage) if b.storage else None,
             })
+            return payload
         except Exception:
             return None
 
@@ -374,25 +521,63 @@ class ExperimentBase:
             raise RuntimeError("Experiment context has no burn_pulses method.")
 
     def get_therm_clks(self, channel: str, *, fallback: int | None = None) -> int | None:
-        """Resolve thermalization clocks via session runtime settings first."""
-        getter = getattr(self._ctx, "get_therm_clks", None)
-        if callable(getter):
-            val = getter(channel, default=None)
-            if val is not None:
-                return int(val)
+        """Resolve thermalization clocks from calibration with optional default."""
+        key_map = {
+            "qb": ("qb_therm_clks", "transmon", "qb_therm_clks"),
+            "qubit": ("qb_therm_clks", "transmon", "qb_therm_clks"),
+            "ro": ("ro_therm_clks", "resonator", "ro_therm_clks"),
+            "readout": ("ro_therm_clks", "resonator", "ro_therm_clks"),
+            "st": ("st_therm_clks", "storage", "st_therm_clks"),
+            "storage": ("st_therm_clks", "storage", "st_therm_clks"),
+        }
+        name, alias, field = key_map.get(
+            str(channel).lower(),
+            (f"{channel}_therm_clks", None, None),
+        )
+        calibration_value = None
+        calibration_path = None
+        if alias is not None:
+            calibration_value = self._calibration_cqed_value(alias, field)
+            calibration_path = f"cqed_params.{alias}.{field}"
+        return self.resolve_param(
+            name,
+            calibration_value=calibration_value,
+            calibration_path=calibration_path,
+            default=fallback,
+            has_default=fallback is not None,
+            required=False,
+            owner=self.name,
+            cast=int,
+        )
 
-        legacy_attr = f"{channel}_therm_clks"
-        legacy_val = getattr(self.attr, legacy_attr, None)
-        if legacy_val is not None:
-            warnings.warn(
-                f"Using deprecated cqed_params fallback for '{legacy_attr}'. "
-                "Prefer session runtime settings.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-            return int(legacy_val)
-
-        return fallback
+    def resolve_override_or_attr(
+        self,
+        *,
+        value: Any,
+        attr_name: str,
+        owner: str,
+        cast: Callable[[Any], Any] | None = None,
+    ) -> Any:
+        """Compatibility wrapper around calibration-backed parameter resolution."""
+        mapping = {
+            "qb_therm_clks": ("transmon", "qb_therm_clks"),
+            "ro_therm_clks": ("resonator", "ro_therm_clks"),
+            "st_therm_clks": ("storage", "st_therm_clks"),
+        }
+        alias, field = mapping.get(attr_name, (None, None))
+        calibration_value = None
+        calibration_path = None
+        if alias is not None:
+            calibration_value = self._calibration_cqed_value(alias, field)
+            calibration_path = f"cqed_params.{alias}.{field}"
+        return self.resolve_param(
+            attr_name,
+            override=value,
+            calibration_value=calibration_value,
+            calibration_path=calibration_path,
+            owner=owner,
+            cast=cast,
+        )
 
     def get_displacement_reference(self) -> dict[str, Any]:
         """Resolve displacement reference parameters from runtime settings first."""
@@ -421,20 +606,30 @@ class ExperimentBase:
         process_in_sim: bool = False, **kw,
     ) -> RunResult:
         """Run a QUA program via the ProgramRunner (or legacy QuaProgramManager)."""
+        self._log_run_element_frequencies(n_total=n_total)
         # New path: SessionManager / ExperimentRunner expose a ProgramRunner
         runner = getattr(self._ctx, "runner", None)
         if runner is not None:
-            return runner.run_program(
+            result = runner.run_program(
                 prog, n_total=n_total,
                 processors=processors or [pp.proc_default],
                 process_in_sim=process_in_sim, **kw,
             )
-        # Legacy path: QuaProgramManager has run_program directly
-        return self.hw.run_program(
-            prog, n_total=n_total,
-            processors=processors or [pp.proc_default],
-            process_in_sim=process_in_sim, **kw,
-        )
+        else:
+            # Legacy path: QuaProgramManager has run_program directly
+            result = self.hw.run_program(
+                prog, n_total=n_total,
+                processors=processors or [pp.proc_default],
+                process_in_sim=process_in_sim, **kw,
+            )
+
+        build = getattr(self, "_last_build", None)
+        if build is not None:
+            metadata = dict(getattr(result, "metadata", {}) or {})
+            metadata.setdefault("resolved_parameters", dict(build.resolved_parameter_sources or {}))
+            metadata.setdefault("resolved_frequencies", dict(build.resolved_frequencies or {}))
+            result.metadata = metadata
+        return result
 
     def save_output(self, output, tag: str = "") -> None:
         """Persist experiment output to disk."""
@@ -474,12 +669,76 @@ class ExperimentBase:
         ProgramBuildResult
             Frozen snapshot with QUA program, processors, and provenance.
         """
+        self._resolved_param_trace = {}
         build = self._build_impl(**params)
+        if not getattr(build, "resolved_parameter_sources", None) and self._resolved_param_trace:
+            build = replace(
+                build,
+                resolved_parameter_sources=dict(self._resolved_param_trace),
+            )
         # Apply resolved frequencies to hardware so the QM config is
         # correct for both execution and simulation.
         for element, freq in build.resolved_frequencies.items():
             self.hw.set_element_fq(element, float(freq))
+        self._last_build = build
         return build
+
+    def _elements_for_run_logging(self) -> list[str]:
+        """Infer elements associated with the next run for frequency logging."""
+        elements: set[str] = set()
+
+        build = getattr(self, "_last_build", None)
+        if build is not None:
+            resolved = getattr(build, "resolved_frequencies", {}) or {}
+            if isinstance(resolved, dict):
+                for name in resolved.keys():
+                    if isinstance(name, str) and name:
+                        elements.add(name)
+
+        hw_elements = set((getattr(self.hw, "elements", {}) or {}).keys())
+        for field in ("ro_el", "qb_el", "st_el"):
+            try:
+                name = getattr(self.attr, field, None)
+            except Exception:
+                name = None
+            if isinstance(name, str) and name in hw_elements:
+                elements.add(name)
+
+        return sorted(elements)
+
+    def _log_run_element_frequencies(self, *, n_total: int) -> None:
+        """Emit per-element frequency trace prior to execution.
+
+        Logged at DEBUG level with LO / IF and reconstructed RF frequency.
+        """
+        elements = self._elements_for_run_logging()
+        if not elements:
+            _logger.debug("RUN_FREQ experiment=%s n_total=%s elements=[]", self.name, n_total)
+            return
+
+        _logger.debug("RUN_FREQ experiment=%s n_total=%s elements=%s", self.name, n_total, elements)
+        for element in elements:
+            lo_hz = None
+            if_hz = None
+            rf_hz = None
+            try:
+                lo_hz = float(self.hw.get_element_lo(element))
+            except Exception:
+                lo_hz = None
+            try:
+                if_hz = float(self.hw.get_element_if(element))
+            except Exception:
+                if_hz = None
+            if lo_hz is not None and if_hz is not None:
+                rf_hz = lo_hz + if_hz
+
+            _logger.debug(
+                "RUN_FREQ element=%s lo_hz=%s if_hz=%s rf_hz=%s",
+                element,
+                lo_hz,
+                if_hz,
+                rf_hz,
+            )
 
     def _build_impl(self, **params: Any) -> "ProgramBuildResult":
         """Subclass override point for ``build_program()``.

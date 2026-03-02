@@ -81,7 +81,7 @@ _SCHEMA_DEFS: dict[str, tuple[str, list[Any], list[str]]] = {
     ),
     "calibration": (
         "version",
-        ["5.0.0"],
+        ["5.0.0", "5.1.0"],
         [],
     ),
     "measure_config": (

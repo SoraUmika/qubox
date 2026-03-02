@@ -38,8 +38,29 @@ class _ResourceStore:
                     )
             target.update(store)
         elems = cfg.setdefault("elements", {})
+
+        wildcard_ops = self.el_ops.get("*") or {}
+        if isinstance(wildcard_ops, dict) and wildcard_ops:
+            for el_name, el_cfg in elems.items():
+                if not isinstance(el_cfg, dict) or str(el_name).startswith("__"):
+                    continue
+                el_cfg.setdefault("operations", {}).update(wildcard_ops)
+
         for el, ops in self.el_ops.items():
-            elems.setdefault(el, {}).setdefault("operations", {}).update(ops)
+            if el == "*":
+                continue
+            if not isinstance(ops, dict) or not ops:
+                continue
+
+            el_cfg = elems.get(el)
+            if not isinstance(el_cfg, dict):
+                _logger.warning(
+                    "POM %s: skipping operation map for unknown element '%s'",
+                    tag,
+                    el,
+                )
+                continue
+            el_cfg.setdefault("operations", {}).update(ops)
 
     # â”€â”€â”€ serialization helpers (perm store only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def as_dict(self):

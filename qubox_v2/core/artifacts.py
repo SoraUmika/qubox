@@ -124,7 +124,7 @@ def save_config_snapshot(
 
     # Attributes summary
     try:
-        attr = session.attributes
+        attr = session.context_snapshot()
         attr_dict = {}
         for field in ("qb_el", "ro_el", "st_el", "qb_fq", "ro_fq", "st_fq",
                        "qb_lo", "ro_lo", "st_lo",
@@ -133,9 +133,9 @@ def save_config_snapshot(
             if hasattr(attr, field):
                 val = getattr(attr, field)
                 attr_dict[field] = val
-        snapshot["attributes"] = attr_dict
+        snapshot["context_snapshot"] = attr_dict
     except Exception as exc:
-        snapshot["attributes_error"] = str(exc)
+        snapshot["context_snapshot_error"] = str(exc)
 
     # Calibration store metadata
     try:

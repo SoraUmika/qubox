@@ -97,6 +97,7 @@ class ElementFrequencies(BaseModel):
     rf_freq: float | None = None   # Hz — absolute RF drive frequency
     resonator_freq: float | None = None  # Hz — calibrated resonator/readout frequency
     qubit_freq: float | None = None   # Hz — GE transition frequency (legacy / canonical GE slot)
+    storage_freq: float | None = None    # Hz — storage cavity frequency
     ef_freq: float | None = None      # Hz — EF transition frequency (canonical EF slot)
     anharmonicity: float | None = None
     fock_freqs: list[float] | None = None
@@ -121,7 +122,40 @@ class CoherenceParams(BaseModel):
     T2_echo: float | None = None   # seconds
     T2_echo_us: float | None = None  # microseconds (convenience, from echo)
     qb_therm_clks: int | None = None  # qubit thermalization wait (clock cycles)
+    ro_therm_clks: int | None = None  # readout cooldown wait (clock cycles)
+    st_therm_clks: int | None = None  # storage cooldown wait (clock cycles)
     timestamp: str | None = None
+
+
+class CQEDParams(BaseModel):
+    """Hamiltonian-level physical parameters for a cQED element alias."""
+
+    resonator_freq: float | None = None
+    kappa: float | None = None
+    qubit_freq: float | None = None
+    storage_freq: float | None = None
+    ef_freq: float | None = None
+    anharmonicity: float | None = None
+    fock_freqs: list[float] | None = None
+    chi: float | None = None
+    chi2: float | None = None
+    chi3: float | None = None
+    kerr: float | None = None
+    kerr2: float | None = None
+
+    T1: float | None = None
+    T1_us: float | None = None
+    T2_ramsey: float | None = None
+    T2_star_us: float | None = None
+    T2_echo: float | None = None
+    T2_echo_us: float | None = None
+    qb_therm_clks: int | None = None
+    ro_therm_clks: int | None = None
+    st_therm_clks: int | None = None
+
+    lo_freq: float | None = None
+    if_freq: float | None = None
+    rf_freq: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -200,12 +234,15 @@ class CalibrationData(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    version: str = "5.0.0"
+    version: str = "5.1.0"
     context: CalibrationContext | None = None
 
     # PRIMARY KEY: physical channel ID (ChannelRef.canonical_id) or legacy element name
     discrimination: dict[str, DiscriminationParams] = {}
     readout_quality: dict[str, ReadoutQuality] = {}
+    cqed_params: dict[str, CQEDParams] = {}
+
+    # Legacy stores retained for backward compatibility and migration.
     frequencies: dict[str, ElementFrequencies] = {}
     coherence: dict[str, CoherenceParams] = {}
     pulse_calibrations: dict[str, PulseCalibration] = {}

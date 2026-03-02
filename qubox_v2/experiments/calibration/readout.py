@@ -526,10 +526,17 @@ class ReadoutGEDiscrimination(ExperimentBase):
         blob_k_e: float | None = None,
         debug: bool = False,
         use_circuit_runner: bool = True,
+        qb_therm_clks: int | None = None,
         **kwargs: Any,
     ) -> ProgramBuildResult:
         attr = self.attr
         readout_element = ro_element or attr.ro_el
+        qb_therm = self.resolve_override_or_attr(
+            value=qb_therm_clks,
+            attr_name="qb_therm_clks",
+            owner="ReadoutGEDiscrimination",
+            cast=int,
+        )
         if blob_k_e is None:
             blob_k_e = blob_k_g
 
@@ -621,7 +628,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
                     qb_el=attr.qb_el,
                     measure_op=measure_op,
                     drive_frequency=drive_frequency,
-                    qb_therm_clks=int(attr.qb_therm_clks),
+                    qb_therm_clks=qb_therm,
                     n_samples=n_samples,
                     r180=r180,
                     base_weight_keys=(cos_key, sin_key, m_sin_key),
@@ -630,11 +637,11 @@ class ReadoutGEDiscrimination(ExperimentBase):
                 builder_function = "CircuitRunner.ge_discrimination"
             except Exception:
                 prog = cQED_programs.iq_blobs(
-                    readout_element, attr.qb_el, r180, attr.qb_therm_clks, n_samples,
+                    readout_element, attr.qb_el, r180, qb_therm, n_samples,
                 )
         else:
             prog = cQED_programs.iq_blobs(
-                readout_element, attr.qb_el, r180, attr.qb_therm_clks, n_samples,
+                readout_element, attr.qb_el, r180, qb_therm, n_samples,
             )
         return ProgramBuildResult(
             program=prog,
@@ -652,6 +659,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
                 "apply_rotated_weights": apply_rotated_weights,
                 "persist": persist,
                 "n_samples": n_samples,
+                "qb_therm_clks": qb_therm,
                 "base_weight_keys": base_weight_keys,
                 "auto_update_postsel": auto_update_postsel,
                 "blob_k_g": blob_k_g,
@@ -687,6 +695,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
         blob_k_e: float | None = None,
         debug: bool = False,
         use_circuit_runner: bool = True,
+        qb_therm_clks: int | None = None,
         **kwargs: Any,
     ) -> RunResult:
         build = self.build_program(
@@ -706,6 +715,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
             blob_k_e=blob_k_e,
             debug=debug,
             use_circuit_runner=use_circuit_runner,
+            qb_therm_clks=qb_therm_clks,
             **kwargs,
         )
         result = self.run_program(
@@ -1622,9 +1632,13 @@ class ReadoutWeightsOptimization(ExperimentBase):
         trace_exp = ReadoutGEIntegratedTrace(self._ctx)
         trace_weights = [cos_w_key, sin_w_key, m_sin_w_key, cos_w_key]
         trace_build = trace_exp.build_program(
-            ro_op, drive_frequency, trace_weights,
-            num_div=num_div, r180=r180,
-            ro_depl_clks=ro_depl_clks, n_avg=n_avg,
+            ro_op=ro_op,
+            drive_frequency=drive_frequency,
+            weights=trace_weights,
+            num_div=num_div,
+            r180=r180,
+            ro_depl_clks=ro_depl_clks,
+            n_avg=n_avg,
         )
         return ProgramBuildResult(
             program=trace_build.program,
@@ -3304,11 +3318,11 @@ class CalibrateReadoutFull(ExperimentBase):
             if cfg.save_session_state:
                 try:
                     save_pulses = getattr(self._ctx, "save_pulses", None)
-                    save_attributes = getattr(self._ctx, "save_attributes", None)
                     if callable(save_pulses):
                         save_pulses()
-                    if callable(save_attributes):
-                        save_attributes()
+                    calibration_store = getattr(self._ctx, "calibration", None)
+                    if calibration_store is not None:
+                        calibration_store.save()
                 except Exception as exc:
                     _logger.warning("Failed to save session-specific config state: %s", exc)
 

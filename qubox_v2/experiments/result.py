@@ -158,6 +158,9 @@ class ProgramBuildResult:
     """``{element_name: frequency_hz}`` — exact frequencies to set before
     program execution or simulation."""
 
+    resolved_parameter_sources: dict[str, dict[str, Any]] = field(default_factory=dict)
+    """Resolved parameter values and provenance, keyed by parameter name."""
+
     bindings_snapshot: dict[str, Any] | None = None
     """Serialisable snapshot of ``ExperimentBindings`` state."""
 

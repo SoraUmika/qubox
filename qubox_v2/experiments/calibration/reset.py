@@ -24,12 +24,19 @@ class QubitResetBenchmark(ExperimentBase):
         num_shots: int = 20_000,
         r180: str = "x180",
         random_seed: int | None = None,
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
+        qb_therm = self.resolve_override_or_attr(
+            value=qb_therm_clks,
+            attr_name="qb_therm_clks",
+            owner="QubitResetBenchmark",
+            cast=int,
+        )
 
         prog = cQED_programs.qubit_reset_benchmark(
             attr.qb_el, bit_size, r180,
-            attr.qb_therm_clks, num_shots,
+            qb_therm, num_shots,
             random_seed=random_seed,
         )
         return ProgramBuildResult(
@@ -42,6 +49,7 @@ class QubitResetBenchmark(ExperimentBase):
                 "num_shots": num_shots,
                 "r180": r180,
                 "random_seed": random_seed,
+                "qb_therm_clks": qb_therm,
             },
             resolved_frequencies={
                 attr.ro_el: self._resolve_readout_frequency(),
@@ -58,12 +66,14 @@ class QubitResetBenchmark(ExperimentBase):
         num_shots: int = 20_000,
         r180: str = "x180",
         random_seed: int | None = None,
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             bit_size=bit_size,
             num_shots=num_shots,
             r180=r180,
             random_seed=random_seed,
+            qb_therm_clks=qb_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -87,13 +97,20 @@ class ActiveQubitResetBenchmark(ExperimentBase):
         show_analysis: bool = True,
         MAX_PREP_TRIALS: int = 100,
         n_shots: int = 10_000,
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
+        qb_therm = self.resolve_override_or_attr(
+            value=qb_therm_clks,
+            attr_name="qb_therm_clks",
+            owner="ActiveQubitResetBenchmark",
+            cast=int,
+        )
 
         prog = cQED_programs.active_qubit_reset_benchmark(
             attr.qb_el, attr.ro_el,
             post_sel_policy, post_sel_kwargs or {},
-            MAX_PREP_TRIALS, attr.qb_therm_clks, n_shots,
+            MAX_PREP_TRIALS, qb_therm, n_shots,
         )
         return ProgramBuildResult(
             program=prog,
@@ -106,6 +123,7 @@ class ActiveQubitResetBenchmark(ExperimentBase):
                 "show_analysis": bool(show_analysis),
                 "MAX_PREP_TRIALS": MAX_PREP_TRIALS,
                 "n_shots": n_shots,
+                "qb_therm_clks": qb_therm,
             },
             resolved_frequencies={
                 attr.ro_el: self._resolve_readout_frequency(),
@@ -123,6 +141,7 @@ class ActiveQubitResetBenchmark(ExperimentBase):
         show_analysis: bool = True,
         MAX_PREP_TRIALS: int = 100,
         n_shots: int = 10_000,
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             post_sel_policy=post_sel_policy,
@@ -130,6 +149,7 @@ class ActiveQubitResetBenchmark(ExperimentBase):
             show_analysis=show_analysis,
             MAX_PREP_TRIALS=MAX_PREP_TRIALS,
             n_shots=n_shots,
+            qb_therm_clks=qb_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -148,13 +168,20 @@ class ReadoutLeakageBenchmarking(ExperimentBase):
         r180: str = "x180",
         num_sequences: int = 10,
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
+        qb_therm = self.resolve_override_or_attr(
+            value=qb_therm_clks,
+            attr_name="qb_therm_clks",
+            owner="ReadoutLeakageBenchmarking",
+            cast=int,
+        )
 
         prog = cQED_programs.readout_leakage_benchmarking(
             attr.qb_el, attr.ro_el, control_bits,
             r180, num_sequences,
-            attr.qb_therm_clks, n_avg,
+            qb_therm, n_avg,
         )
         return ProgramBuildResult(
             program=prog,
@@ -166,6 +193,7 @@ class ReadoutLeakageBenchmarking(ExperimentBase):
                 "r180": r180,
                 "num_sequences": num_sequences,
                 "n_avg": n_avg,
+                "qb_therm_clks": qb_therm,
             },
             resolved_frequencies={
                 attr.ro_el: self._resolve_readout_frequency(),
@@ -182,12 +210,14 @@ class ReadoutLeakageBenchmarking(ExperimentBase):
         r180: str = "x180",
         num_sequences: int = 10,
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             control_bits=control_bits,
             r180=r180,
             num_sequences=num_sequences,
             n_avg=n_avg,
+            qb_therm_clks=qb_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,

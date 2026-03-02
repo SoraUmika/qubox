@@ -48,6 +48,15 @@ class SPAFluxOptimization(ExperimentBase):
         if dm is None:
             raise RuntimeError("DeviceManager not available for SPA optimization.")
 
+        resolved_ro_depl_clks = int(
+            self.resolve_override_or_attr(
+                value=ro_depl_clks,
+                attr_name="ro_therm_clks",
+                owner="SPAFluxOptimization",
+                cast=int,
+            )
+        )
+
         self.set_standard_frequencies()
 
         results_matrix = []
@@ -56,7 +65,7 @@ class SPAFluxOptimization(ExperimentBase):
 
             prog = cQED_programs.SPA_flux_optimization(
                 attr.ro_el, sample_fqs,
-                ro_depl_clks or attr.ro_therm_clks,
+                resolved_ro_depl_clks,
                 n_avg,
             )
             rr = self.run_program(
@@ -201,6 +210,15 @@ class SPAFluxOptimization2(ExperimentBase):
         if dm is None:
             raise RuntimeError("DeviceManager not available for SPA optimization.")
 
+        resolved_ro_depl_clks = int(
+            self.resolve_override_or_attr(
+                value=ro_depl_clks,
+                attr_name="ro_therm_clks",
+                owner="SPAFluxOptimization2",
+                cast=int,
+            )
+        )
+
         self.set_standard_frequencies()
 
         def _measure_at_dc(dc_val: float) -> float:
@@ -208,7 +226,7 @@ class SPAFluxOptimization2(ExperimentBase):
             dm.ramp(odc_name, odc_param, dc_val, step=step, delay_s=delay_s)
             prog = cQED_programs.SPA_flux_optimization(
                 attr.ro_el, sample_fqs,
-                ro_depl_clks or attr.ro_therm_clks, n_avg,
+                resolved_ro_depl_clks, n_avg,
             )
             rr = self.run_program(
                 prog, n_total=n_avg,

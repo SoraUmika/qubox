@@ -96,7 +96,8 @@ def preflight_check(
         _fail("qm_connection", str(exc))
 
     # ---- 2. Elements in config ----
-    attr = getattr(session, "attributes", None)
+    snapshot = getattr(session, "context_snapshot", None)
+    attr = snapshot() if callable(snapshot) else getattr(session, "attributes", None)
     default_ro_el = getattr(attr, "ro_el", None)
     default_qb_el = getattr(attr, "qb_el", None)
 
@@ -159,7 +160,8 @@ def preflight_check(
     if check_readout_weights:
         tag = "readout_weights"
         try:
-            ro_el = session.attributes.ro_el if hasattr(session.attributes, "ro_el") else "readout"
+            ctx = session.context_snapshot() if callable(getattr(session, "context_snapshot", None)) else attr
+            ro_el = ctx.ro_el if hasattr(ctx, "ro_el") else "readout"
             ro_op = "readout"
             pinfo = pom.get_pulseOp_by_element_op(ro_el, ro_op, strict=False)
             if pinfo is not None:

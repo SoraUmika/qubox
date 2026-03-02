@@ -199,8 +199,8 @@ class SessionManager:
                 self.devices.instantiate(list(load_devices))
         self.hardware.set_device_manager(self.devices)
 
-        # --- 7. Experiment attributes (cQED parameters) ---
-        self.attributes = self._load_attributes()
+        # --- 7. Legacy compat inputs + runtime helpers ---
+        self._legacy_context_path = self._resolve_path("cqed_params.json", required=False)
         self._runtime_settings = self._load_runtime_settings()
         self.allow_inline_mutations = False
         self.orchestrator = CalibrationOrchestrator(self)
@@ -220,6 +220,11 @@ class SessionManager:
     @property
     def pulseOpMngr(self) -> PulseOperationManager:
         """Alias for legacy code that accesses ``ctx.pulseOpMngr``."""
+        return self.pulse_mgr
+
+    @property
+    def mgr(self) -> PulseOperationManager:
+        """Legacy alias used by gate hardware helpers."""
         return self.pulse_mgr
 
     @property
@@ -251,7 +256,7 @@ class SessionManager:
         if self._bindings_cache is None:
             from ..core.bindings import bindings_from_hardware_config
             self._bindings_cache = bindings_from_hardware_config(
-                self.config_engine.hardware, self.attributes,
+                self.config_engine.hardware, self.context_snapshot(),
             )
             # Sync readout DSP state from calibration store
             try:
@@ -270,7 +275,7 @@ class SessionManager:
     def _register_alias_index(self) -> None:
         """Register element-name → physical-ID aliases in the CalibrationStore."""
         from ..core.bindings import build_alias_map
-        alias_map = build_alias_map(self.config_engine.hardware, self.attributes)
+        alias_map = build_alias_map(self.config_engine.hardware, self.context_snapshot())
         for alias, channel_ref in alias_map.items():
             self.calibration.register_alias(alias, channel_ref.canonical_id)
 
@@ -307,18 +312,19 @@ class SessionManager:
         from ..core.bindings import DriveTarget
 
         b = self.bindings
+        ctx = self.context_snapshot()
         # Resolve the OutputBinding for this alias
-        if alias in ("qubit", "qb") or alias == getattr(self.attributes, "qb_el", None):
+        if alias in ("qubit", "qb") or alias == getattr(ctx, "qb_el", None):
             ob = b.qubit
-            element = self.attributes.qb_el or alias
-            default_therm = getattr(self.attributes, "qb_therm_clks", 250_000) or 250_000
+            element = ctx.qb_el or alias
+            default_therm = getattr(ctx, "qb_therm_clks", 250_000) or 250_000
             cal_field = "qubit_freq"
-        elif alias in ("storage", "st") or alias == getattr(self.attributes, "st_el", None):
+        elif alias in ("storage", "st") or alias == getattr(ctx, "st_el", None):
             ob = b.storage
             if ob is None:
                 raise ValueError(f"No storage binding available for alias '{alias}'.")
-            element = self.attributes.st_el or alias
-            default_therm = getattr(self.attributes, "st_therm_clks", 500_000) or 500_000
+            element = ctx.st_el or alias
+            default_therm = getattr(ctx, "st_therm_clks", 500_000) or 500_000
             cal_field = "storage_freq"
         elif alias in b.extras:
             ob = b.extras[alias]
@@ -333,7 +339,6 @@ class SessionManager:
 
         # Resolve RF frequency
         if rf_freq is None and cal_field is not None:
-            from ..experiments.experiment_base import ExperimentBase
             # Try calibration store first
             cal = getattr(self, "calibration", None)
             if cal is not None:
@@ -345,11 +350,11 @@ class SessionManager:
                             rf_freq = float(v)
                 except Exception:
                     pass
-            # Fallback to sample attributes
+            # Fallback to the compatibility snapshot
             if rf_freq is None:
                 attr_field = {"qubit_freq": "qb_fq", "storage_freq": "st_fq"}.get(cal_field)
                 if attr_field:
-                    v = getattr(self.attributes, attr_field, None)
+                    v = getattr(ctx, attr_field, None)
                     if v is not None:
                         rf_freq = float(v)
 
@@ -380,12 +385,13 @@ class SessionManager:
 
         b = self.bindings
         rb = b.readout  # ReadoutBinding
-        element = getattr(self.attributes, "ro_el", None) or alias
+        ctx = self.context_snapshot()
+        element = getattr(ctx, "ro_el", None) or alias
 
         # Build ReadoutCal from CalibrationStore (always fresh)
         drive_freq = rb.drive_frequency
         if not isinstance(drive_freq, (int, float)) or drive_freq == 0.0:
-            drive_freq = float(getattr(self.attributes, "ro_fq", 0.0) or 0.0)
+            drive_freq = float(getattr(ctx, "ro_fq", 0.0) or 0.0)
 
         cal = ReadoutCal.from_calibration_store(
             self.calibration,
@@ -544,17 +550,165 @@ class SessionManager:
         """Alias so ExperimentBase can access ``ctx.device_manager``."""
         return self.devices
 
-    def _load_attributes(self) -> cQED_attributes:
-        """Load or create cQED experiment attributes."""
-        resolved = self._resolve_path("cqed_params.json")
-        if resolved is not None:
-            _logger.info("Loading experiment context from %s", resolved)
-            obj = cQED_attributes.from_json(resolved)
-            obj._log_bindings()
-            obj.validate()
-            return obj
-        _logger.info("No cqed_params.json found — using default attributes")
+    def _load_legacy_context_snapshot(self) -> cQED_attributes:
+        """Load a legacy ``cqed_params.json`` snapshot when available.
+
+        This is a compatibility seed only. Runtime parameter resolution uses
+        ``calibration.json`` plus explicit per-call overrides.
+        """
+        resolved = getattr(self, "_legacy_context_path", None)
+        if resolved is not None and Path(resolved).exists():
+            try:
+                obj = cQED_attributes.from_json(resolved)
+                obj._log_bindings()
+                return obj
+            except Exception as exc:
+                _logger.warning("Failed to load legacy cqed_params snapshot from %s: %s", resolved, exc)
         return cQED_attributes()
+
+    def _binding_roles(self) -> dict[str, str]:
+        qubox = (self.config_engine.hardware_extras or {}).get("__qubox") or {}
+        roles = ((qubox.get("bindings") or {}).get("roles")) or {}
+        return {
+            str(key): str(value)
+            for key, value in roles.items()
+            if isinstance(key, str) and isinstance(value, str) and value
+        }
+
+    def _resolve_session_elements(self, ctx: cQED_attributes | None = None) -> dict[str, str | None]:
+        ctx = ctx or self._load_legacy_context_snapshot()
+        roles = self._binding_roles()
+        active_ro = self.get_runtime_setting("active_readout_element", None)
+        return {
+            "qb_el": roles.get("qubit") or getattr(ctx, "qb_el", None) or "qubit",
+            "ro_el": active_ro or roles.get("readout_drive") or roles.get("readout") or getattr(ctx, "ro_el", None) or "resonator",
+            "st_el": roles.get("storage") or getattr(ctx, "st_el", None),
+        }
+
+    def _resolve_cqed_param(
+        self,
+        alias: str,
+        field: str,
+        *,
+        legacy: cQED_attributes | None = None,
+        legacy_attr: str | None = None,
+    ) -> Any:
+        params = self.calibration.get_cqed_params(alias)
+        if params is not None:
+            value = getattr(params, field, None)
+            if value is not None:
+                return value
+        if legacy is not None and legacy_attr:
+            return getattr(legacy, legacy_attr, None)
+        return None
+
+    def _resolve_frequency_from_calibration(
+        self,
+        element: str | None,
+        *,
+        primary_field: str,
+        legacy_value: float | None = None,
+        allow_if_lo: bool = False,
+    ) -> float | None:
+        if element:
+            try:
+                freq_entry = self.calibration.get_frequencies(element)
+            except Exception:
+                freq_entry = None
+            if freq_entry is not None:
+                value = getattr(freq_entry, primary_field, None)
+                if isinstance(value, (int, float)):
+                    return float(value)
+                if allow_if_lo:
+                    if_val = getattr(freq_entry, "if_freq", None)
+                    lo_val = getattr(freq_entry, "lo_freq", None)
+                    if isinstance(if_val, (int, float)) and isinstance(lo_val, (int, float)):
+                        return float(lo_val) + float(if_val)
+        if isinstance(legacy_value, (int, float)):
+            return float(legacy_value)
+        return None
+
+    def context_snapshot(self) -> cQED_attributes:
+        """Return a calibration-backed compatibility snapshot for legacy code."""
+        ctx = self._load_legacy_context_snapshot()
+        elements = self._resolve_session_elements(ctx)
+        ctx.qb_el = elements["qb_el"]
+        ctx.ro_el = elements["ro_el"]
+        ctx.st_el = elements["st_el"]
+
+        ctx.qb_fq = self._resolve_frequency_from_calibration(
+            ctx.qb_el,
+            primary_field="qubit_freq",
+            legacy_value=getattr(ctx, "qb_fq", None),
+        )
+        ctx.ro_fq = self._resolve_frequency_from_calibration(
+            ctx.ro_el,
+            primary_field="resonator_freq",
+            legacy_value=getattr(ctx, "ro_fq", None),
+            allow_if_lo=True,
+        )
+        ctx.st_fq = self._resolve_frequency_from_calibration(
+            ctx.st_el,
+            primary_field="storage_freq",
+            legacy_value=getattr(ctx, "st_fq", None),
+        )
+        if ctx.st_fq is None:
+            ctx.st_fq = self._resolve_frequency_from_calibration(
+                ctx.st_el,
+                primary_field="qubit_freq",
+                legacy_value=getattr(ctx, "st_fq", None),
+            )
+
+        ctx.anharmonicity = self._resolve_cqed_param(
+            "transmon", "anharmonicity", legacy=ctx, legacy_attr="anharmonicity",
+        )
+        ctx.ro_kappa = self._resolve_cqed_param(
+            "resonator", "kappa", legacy=ctx, legacy_attr="ro_kappa",
+        )
+        ctx.st_chi = self._resolve_cqed_param(
+            "storage", "chi", legacy=ctx, legacy_attr="st_chi",
+        )
+        ctx.st_chi2 = self._resolve_cqed_param(
+            "storage", "chi2", legacy=ctx, legacy_attr="st_chi2",
+        )
+        ctx.st_chi3 = self._resolve_cqed_param(
+            "storage", "chi3", legacy=ctx, legacy_attr="st_chi3",
+        )
+        ctx.fock_fqs = self._resolve_cqed_param(
+            "storage", "fock_freqs", legacy=ctx, legacy_attr="fock_fqs",
+        )
+        ctx.qb_T1_relax = self._resolve_cqed_param(
+            "transmon", "T1_us", legacy=ctx, legacy_attr="qb_T1_relax",
+        )
+        ctx.qb_T2_ramsey = self._resolve_cqed_param(
+            "transmon", "T2_star_us", legacy=ctx, legacy_attr="qb_T2_ramsey",
+        )
+        ctx.qb_T2_echo = self._resolve_cqed_param(
+            "transmon", "T2_echo_us", legacy=ctx, legacy_attr="qb_T2_echo",
+        )
+
+        setattr(
+            ctx,
+            "qb_therm_clks",
+            self._resolve_cqed_param("transmon", "qb_therm_clks", legacy=ctx, legacy_attr="qb_therm_clks"),
+        )
+        setattr(
+            ctx,
+            "ro_therm_clks",
+            self._resolve_cqed_param("resonator", "ro_therm_clks", legacy=ctx, legacy_attr="ro_therm_clks"),
+        )
+        setattr(
+            ctx,
+            "st_therm_clks",
+            self._resolve_cqed_param("storage", "st_therm_clks", legacy=ctx, legacy_attr="st_therm_clks"),
+        )
+
+        for field in ("b_coherent_amp", "b_coherent_len", "b_alpha", "dt_s", "max_fock_level"):
+            runtime_value = self.get_runtime_setting(field, getattr(ctx, field, None))
+            if runtime_value is not None:
+                setattr(ctx, field, runtime_value)
+
+        return ctx
 
     def _runtime_settings_path(self) -> Path:
         return self.experiment_path / "config" / "session_runtime.json"
@@ -596,11 +750,24 @@ class SessionManager:
             self.save_runtime_settings()
 
     def get_therm_clks(self, channel: str, default: int | None = None) -> int | None:
-        key = f"{channel}_therm_clks"
-        val = self.get_runtime_setting(key, None)
-        if val is None:
+        key_map = {
+            "qb": ("transmon", "qb_therm_clks"),
+            "qubit": ("transmon", "qb_therm_clks"),
+            "ro": ("resonator", "ro_therm_clks"),
+            "readout": ("resonator", "ro_therm_clks"),
+            "st": ("storage", "st_therm_clks"),
+            "storage": ("storage", "st_therm_clks"),
+        }
+        alias, field = key_map.get(str(channel).lower(), (None, None))
+        if alias is None:
             return default
-        return int(val)
+        value = self._resolve_cqed_param(
+            alias,
+            field,
+            legacy=self._load_legacy_context_snapshot(),
+            legacy_attr=field,
+        )
+        return default if value is None else int(value)
 
     def get_displacement_reference(self) -> dict[str, Any]:
         return {
@@ -608,43 +775,6 @@ class SessionManager:
             "coherent_len": self.get_runtime_setting("b_coherent_len", None),
             "b_alpha": self.get_runtime_setting("b_alpha", None),
         }
-
-    def refresh_attribute_frequencies_from_calibration(self, *, persist: bool = False) -> dict[str, float]:
-        """Bind runtime attribute frequencies to latest calibration values.
-
-        Source-of-truth precedence:
-        1) CalibrationStore frequencies.<element>.qubit_freq
-        2) Existing attribute value (unchanged)
-        """
-        updates: dict[str, float] = {}
-
-        attr = getattr(self, "attributes", None)
-        cal = getattr(self, "calibration", None)
-        if attr is None or cal is None:
-            return updates
-
-        bindings = (
-            ("qb_el", "qb_fq"),
-            ("st_el", "st_fq"),
-        )
-        for el_attr, fq_attr in bindings:
-            element = getattr(attr, el_attr, None)
-            if not element:
-                continue
-            freq_entry = cal.get_frequencies(element)
-            if freq_entry is None:
-                continue
-            fq = getattr(freq_entry, "qubit_freq", None)
-            if fq is None:
-                continue
-            fq = float(fq)
-            setattr(attr, fq_attr, fq)
-            updates[fq_attr] = fq
-
-        if updates and persist:
-            self.save_attributes()
-
-        return updates
 
     # ------------------------------------------------------------------
     # Pulse helpers
@@ -657,12 +787,6 @@ class SessionManager:
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
-    def save_attributes(self) -> None:
-        """Persist cQED attributes to JSON."""
-        p = self.experiment_path / "config" / "cqed_params.json"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        self.attributes.save_json(p)
-
     def save_pulses(self, path: str | Path | None = None) -> Path:
         """Persist PulseOperationManager permanent store to pulses.json."""
         dst = Path(path) if path is not None else (self.experiment_path / "config" / "pulses.json")
@@ -699,7 +823,6 @@ class SessionManager:
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2, default=str)
 
-        self.save_attributes()
         _logger.info("Output saved to %s", path)
         return path
 
@@ -711,12 +834,156 @@ class SessionManager:
         if self._opened:
             _logger.warning("SessionManager.open() called again; closing previous session first.")
             self.close()
+        self._log_device_connectivity()
         self.config_engine.merge_pulses(self.pulse_mgr)
         self.hardware.open_qm()
         self._load_measure_config()
         self.validate_runtime_elements(auto_map=True, verbose=True)
+        self.log_elements_rf_summary()
         self._opened = True
         return self
+
+    def _log_device_connectivity(self) -> None:
+        """Log device connection attempts/success as part of open()."""
+        specs = sorted((getattr(self.devices, "specs", {}) or {}).keys())
+        if not specs:
+            _logger.debug("DEVICE_CONNECT no external device specs loaded")
+            return
+
+        _logger.debug("DEVICE_CONNECT targets=%s", specs)
+        connected: list[str] = []
+        failed: list[str] = []
+
+        for name in specs:
+            handle = (getattr(self.devices, "handles", {}) or {}).get(name)
+            inst = getattr(handle, "instance", None) if handle is not None else None
+            if inst is not None:
+                connected.append(name)
+                _logger.debug(
+                    "DEVICE_CONNECT success name=%s status=already_connected type=%s",
+                    name,
+                    type(inst).__name__,
+                )
+                continue
+
+            _logger.debug("DEVICE_CONNECT attempting name=%s", name)
+            inst = self.devices.get(name, connect=True)
+            if inst is None:
+                failed.append(name)
+                _logger.warning("DEVICE_CONNECT failed name=%s", name)
+            else:
+                connected.append(name)
+                _logger.debug(
+                    "DEVICE_CONNECT success name=%s status=connected_on_open type=%s",
+                    name,
+                    type(inst).__name__,
+                )
+
+        _logger.info(
+            "DEVICE_CONNECT summary connected=%d/%d failed=%s",
+            len(connected),
+            len(specs),
+            failed,
+        )
+
+    def log_elements_rf_summary(self) -> list[dict[str, Any]]:
+        """Log a concise resolved RF/LO summary for all active elements.
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            One row per element for programmatic consumption.
+        """
+        cfg = None
+        if getattr(self.hardware, "qm", None) is not None:
+            try:
+                cfg = self.hardware.qm.get_config()
+            except Exception:
+                cfg = None
+        if cfg is None:
+            cfg = self.config_engine.build_qm_config()
+
+        elements_cfg = (cfg.get("elements") or {})
+        base_hw = self.config_engine.hardware_base or {}
+        base_elements = (base_hw.get("elements") or {})
+        octaves = (base_hw.get("octaves") or {})
+
+        qubox = (self.config_engine.hardware_extras or {}).get("__qubox") or {}
+        roles = (((qubox.get("bindings") or {}).get("roles")) or {})
+        alias_map: dict[str, list[str]] = {}
+        for alias, element in roles.items():
+            if isinstance(alias, str) and isinstance(element, str):
+                alias_map.setdefault(element, []).append(alias)
+
+        rows: list[dict[str, Any]] = []
+        for element in sorted(elements_cfg.keys()):
+            if str(element).startswith("__"):
+                continue
+
+            el_cfg = elements_cfg.get(element) or {}
+            mix_inputs = el_cfg.get("mixInputs") or {}
+            single_input = el_cfg.get("singleInput") or {}
+
+            lo_freq = mix_inputs.get("lo_frequency")
+            if lo_freq is None:
+                lo_freq = single_input.get("lo_frequency")
+
+            if_freq = el_cfg.get("intermediate_frequency")
+
+            rf_out_path = None
+            rf_in_path = None
+            lo_gain_db = None
+
+            base_el = base_elements.get(element) if isinstance(base_elements, dict) else None
+            if isinstance(base_el, dict):
+                rf_inputs = base_el.get("RF_inputs") or {}
+                rf_outputs = base_el.get("RF_outputs") or {}
+
+                out_port = rf_inputs.get("port")
+                if isinstance(out_port, (list, tuple)) and len(out_port) >= 2:
+                    octave_name = str(out_port[0])
+                    rf_port = int(out_port[1])
+                    rf_out_path = f"{octave_name}:RF_out:{rf_port}"
+
+                    octave_cfg = octaves.get(octave_name) if isinstance(octaves, dict) else None
+                    if isinstance(octave_cfg, dict):
+                        rf_outs = octave_cfg.get("RF_outputs") or {}
+                        rf_ch = rf_outs.get(rf_port)
+                        if rf_ch is None:
+                            rf_ch = rf_outs.get(str(rf_port))
+                        if isinstance(rf_ch, dict):
+                            lo_gain_db = rf_ch.get("gain")
+
+                in_port = rf_outputs.get("port")
+                if isinstance(in_port, (list, tuple)) and len(in_port) >= 2:
+                    rf_in_path = f"{in_port[0]}:RF_in:{in_port[1]}"
+
+            rows.append(
+                {
+                    "element": element,
+                    "aliases": sorted(alias_map.get(element, [])),
+                    "lo_output": rf_out_path,
+                    "lo_gain_db": lo_gain_db,
+                    "lo_frequency_hz": lo_freq,
+                    "if_frequency_hz": if_freq,
+                    "adc_path": rf_in_path,
+                }
+            )
+
+        _logger.info("Resolved RF/LO summary (%d elements)", len(rows))
+        for row in rows:
+            _logger.info(
+                "RF_SUMMARY element=%s aliases=%s lo_output=%s gain_db=%s lo_hz=%s if_hz=%s adc=%s",
+                row["element"],
+                row["aliases"],
+                row["lo_output"],
+                row["lo_gain_db"],
+                row["lo_frequency_hz"],
+                row["if_frequency_hz"],
+                row["adc_path"],
+            )
+
+        return rows
 
     def validate_runtime_elements(self, *, auto_map: bool = True, verbose: bool = True) -> dict[str, Any]:
         """Validate configured attributes against live QM element names.
@@ -725,7 +992,7 @@ class SessionManager:
         aliases when ``auto_map=True``.
         """
         qm_elements = set((self.hardware.elements or {}).keys())
-        attr = self.attributes
+        attr = self.context_snapshot()
         requested = {
             "ro_el": getattr(attr, "ro_el", None),
             "qb_el": getattr(attr, "qb_el", None),
@@ -747,7 +1014,8 @@ class SessionManager:
             if low == "readout" and "resonator" in qm_elements:
                 candidate = "resonator"
             if candidate and auto_map:
-                setattr(attr, field, candidate)
+                if field == "ro_el":
+                    self.set_runtime_setting("active_readout_element", candidate, persist=False)
                 mapped[field] = candidate
                 notes.append(f"{field}: '{name}' -> '{candidate}'")
             else:
@@ -784,7 +1052,7 @@ class SessionManager:
         demod: str | None = None,
         threshold: float | None = None,
         weight_len: int | None = None,
-        apply_to_attributes: bool = True,
+        apply_to_runtime_context: bool = True,
         persist_measure_config: bool = True,
     ) -> dict[str, Any]:
         """Override active readout op/weights at runtime via ``measureMacro``."""
@@ -829,8 +1097,8 @@ class SessionManager:
             patch.add("SetMeasureDiscrimination", threshold=float(threshold))
             self.orchestrator.apply_patch(patch, dry_run=False)
 
-        if apply_to_attributes:
-            self.attributes.ro_el = element
+        if apply_to_runtime_context:
+            self.set_runtime_setting("active_readout_element", element, persist=False)
 
         dst = None
         if persist_measure_config:
@@ -843,7 +1111,7 @@ class SessionManager:
             "operation": operation,
             "pulse": pulse_info.pulse,
             "weights": selected_weights,
-            "attributes_ro_el": self.attributes.ro_el,
+            "active_readout_element": self.get_runtime_setting("active_readout_element", element),
             "measure_config_path": str(dst) if dst else None,
             "qm_config_entry": f"elements.{element}.operations.{operation} -> {pulse_info.pulse}",
         }
@@ -868,7 +1136,7 @@ class SessionManager:
         # macro reflects any CalibrationStore updates that may have occurred
         # after the last measureConfig.json save.
         cal = getattr(self, "calibration", None)
-        ro_el = getattr(getattr(self, "attributes", None), "ro_el", None)
+        ro_el = getattr(self.context_snapshot(), "ro_el", None)
         if cal is not None and ro_el is not None:
             try:
                 measureMacro.sync_from_calibration(cal, ro_el)

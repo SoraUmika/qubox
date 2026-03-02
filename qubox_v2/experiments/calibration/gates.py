@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from ..experiment_base import ExperimentBase
 from ..result import AnalysisResult, FitResult, ProgramBuildResult
 from ...analysis import post_process as pp
+from ...analysis.analysis_tools import project_complex_to_line_real
 from ...analysis.fitting import fit_and_wrap, build_fit_legend
 from ...analysis.cQED_models import rb_survival_model
 from ...analysis.algorithms import random_sequences
@@ -60,8 +61,15 @@ class AllXY(ExperimentBase):
         prefix: str = "",
         qb_detuning: int = 0,
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
+        qb_therm = self.resolve_override_or_attr(
+            value=qb_therm_clks,
+            attr_name="qb_therm_clks",
+            owner="AllXY",
+            cast=int,
+        )
 
         # Build rotation sequences
         if gate_indices is not None:
@@ -73,7 +81,7 @@ class AllXY(ExperimentBase):
             ops = [(f"{prefix}{g1}", f"{prefix}{g2}") for (g1, g2) in ops]
 
         prog = cQED_programs.all_xy(
-            attr.qb_el, ops, attr.qb_therm_clks, n_avg,
+            attr.qb_el, ops, qb_therm, n_avg,
         )
         return ProgramBuildResult(
             program=prog,
@@ -85,6 +93,7 @@ class AllXY(ExperimentBase):
                 "prefix": prefix,
                 "qb_detuning": qb_detuning,
                 "n_avg": n_avg,
+                "qb_therm_clks": qb_therm,
             },
             resolved_frequencies={
                 attr.ro_el: self._resolve_readout_frequency(),
@@ -102,12 +111,14 @@ class AllXY(ExperimentBase):
         prefix: str = "",
         qb_detuning: int = 0,
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             gate_indices=gate_indices,
             prefix=prefix,
             qb_detuning=qb_detuning,
             n_avg=n_avg,
+            qb_therm_clks=qb_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -119,17 +130,20 @@ class AllXY(ExperimentBase):
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
         # Legacy parity: interpret measured boolean stream as P_e and report
         # corrected sigma_z = P_g - P_e (|g> -> +1, |e> -> -1).
+        confusion = kw.get("confusion", None)
+        if confusion is None:
+            confusion = self.get_confusion_matrix()
+
         Pe = result.output.get("Pe")
         used_confusion = False
+        projection_meta = None
+        analysis_path = "projected_fallback"
         if Pe is not None:
             Pe = result.output._format(Pe)
             pe_states = np.asarray(Pe, dtype=float)
+            analysis_path = "discriminated"
 
             # Optional confusion-matrix correction (legacy parity).
-            confusion = kw.get("confusion", None)
-            if confusion is None:
-                confusion = self.get_confusion_matrix()
-
             if confusion is not None:
                 states = pp.ro_state_correct_proc(
                     {"Pe": pe_states},
@@ -144,12 +158,18 @@ class AllXY(ExperimentBase):
         else:
             # Fallback if Pe stream is unavailable.
             S = result.output.extract("S")
-            mag = np.abs(S)
-            if mag.max() != mag.min():
-                pe_states = (mag - mag.min()) / (mag.max() - mag.min())
+            projected, proj_center, proj_direction = project_complex_to_line_real(S)
+            if projected.max() != projected.min():
+                pe_states = (projected - projected.min()) / (projected.max() - projected.min())
             else:
-                pe_states = mag
+                pe_states = projected
             states = 1.0 - 2.0 * np.asarray(pe_states, dtype=float)
+            projection_meta = {
+                "center_real": float(np.real(proj_center)),
+                "center_imag": float(np.imag(proj_center)),
+                "direction_real": float(np.real(proj_direction)),
+                "direction_imag": float(np.imag(proj_direction)),
+            }
 
         ideal = self._ALLXY_IDEAL
         if len(states) == len(ideal):
@@ -163,8 +183,12 @@ class AllXY(ExperimentBase):
             "observable": "sigma_z",
             "state_mapping": {"g": +1.0, "e": -1.0},
             "used_confusion_correction": bool(used_confusion),
+            "analysis_path": analysis_path,
         }
-        return AnalysisResult.from_run(result, metrics=metrics)
+        metadata = {}
+        if projection_meta is not None:
+            metadata["signal_projection"] = projection_meta
+        return AnalysisResult.from_run(result, metrics=metrics, metadata=metadata)
 
     def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
         states = analysis.metrics.get("states", None)
@@ -172,11 +196,12 @@ class AllXY(ExperimentBase):
             S = analysis.data.get("S")
             if S is None:
                 return None
-            mag = np.abs(S)
-            if mag.max() != mag.min():
-                states = (mag - mag.min()) / (mag.max() - mag.min())
+            projected, _, _ = project_complex_to_line_real(S)
+            if projected.max() != projected.min():
+                pe_states = (projected - projected.min()) / (projected.max() - projected.min())
             else:
-                states = mag
+                pe_states = projected
+            states = 1.0 - 2.0 * np.asarray(pe_states, dtype=float)
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(12, 5))
@@ -232,6 +257,7 @@ class DRAGCalibration(ExperimentBase):
         x90: str = "ge_x90",
         y180: str = "ge_y180",
         y90: str = "ge_y90",
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         """Run the Yale DRAG calibration sweep.
 
@@ -340,11 +366,18 @@ class DRAGCalibration(ExperimentBase):
         else:
             x180_op, x90_op, y180_op, y90_op = "x180", "x90", "y180", "y90"
 
+        qb_therm = self.resolve_override_or_attr(
+            value=qb_therm_clks,
+            attr_name="qb_therm_clks",
+            owner="DRAGCalibration",
+            cast=int,
+        )
+
         # Build QUA program using temporary ops
         prog = cQED_programs.drag_calibration_YALE(
             attr.qb_el, amps,
             x180_op, x90_op, y180_op, y90_op,
-            attr.qb_therm_clks, n_avg,
+            qb_therm, n_avg,
         )
         return ProgramBuildResult(
             program=prog,
@@ -365,6 +398,7 @@ class DRAGCalibration(ExperimentBase):
                 "x90": x90,
                 "y180": y180,
                 "y90": y90,
+                "qb_therm_clks": qb_therm,
             },
             resolved_frequencies={
                 attr.ro_el: self._resolve_readout_frequency(),
@@ -388,6 +422,7 @@ class DRAGCalibration(ExperimentBase):
         x90: str = "ge_x90",
         y180: str = "ge_y180",
         y90: str = "ge_y90",
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             amps=amps,
@@ -398,6 +433,7 @@ class DRAGCalibration(ExperimentBase):
             x90=x90,
             y180=y180,
             y90=y90,
+            qb_therm_clks=qb_therm_clks,
         )
         result = self.run_program(
             build.program,
@@ -612,8 +648,15 @@ class RandomizedBenchmarking(ExperimentBase):
         primitive_prefix: str = "",
         max_sequences_per_compile: int = 10,
         guard_clks: int = 18,
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         attr = self.attr
+        qb_therm = self.resolve_override_or_attr(
+            value=qb_therm_clks,
+            attr_name="qb_therm_clks",
+            owner="RandomizedBenchmarking",
+            cast=int,
+        )
         self.set_standard_frequencies()
 
         CLIFF_SEQS = self._CLIFFORD_1Q_SEQS
@@ -733,7 +776,7 @@ class RandomizedBenchmarking(ExperimentBase):
                 prog = cQED_programs.randomized_benchmarking(
                     qb_el=attr.qb_el,
                     sequences_ids=batch_sequences_ids,
-                    qb_therm_clks=attr.qb_therm_clks,
+                    qb_therm_clks=qb_therm,
                     n_avg=n_avg,
                     primitives_by_id=primitives_by_id,
                     primitive_clks=int(primitive_clks),

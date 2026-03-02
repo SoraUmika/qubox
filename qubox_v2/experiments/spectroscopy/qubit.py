@@ -31,6 +31,15 @@ _TRANSITION_FREQ_MAP: dict[str, tuple[str, str]] = {
 }
 
 
+def _resolve_qb_therm_clks(exp: ExperimentBase, value: int | None, owner: str) -> int:
+    return int(exp.resolve_override_or_attr(
+        value=value,
+        attr_name="qb_therm_clks",
+        owner=owner,
+        cast=int,
+    ))
+
+
 class QubitSpectroscopy(ExperimentBase):
     """Single-LO qubit spectroscopy scan over IF frequencies."""
 
@@ -44,17 +53,19 @@ class QubitSpectroscopy(ExperimentBase):
         qb_len: int,
         n_avg: int = 1000,
         transition: str = "ge",
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
         lo_qb = self.get_qubit_lo()
         if_freqs = create_if_frequencies(attr.qb_el, rf_begin, rf_end, df, lo_freq=lo_qb)
+        qb_therm = _resolve_qb_therm_clks(self, qb_therm_clks, "QubitSpectroscopy")
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
 
         prog = cQED_programs.qubit_spectroscopy(
             pulse, if_freqs, qb_gain, qb_len,
-            attr.qb_therm_clks, n_avg,
+            qb_therm, n_avg,
             qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
         )
@@ -71,6 +82,7 @@ class QubitSpectroscopy(ExperimentBase):
                 "pulse": pulse, "rf_begin": rf_begin, "rf_end": rf_end,
                 "df": df, "qb_gain": qb_gain, "qb_len": qb_len,
                 "n_avg": n_avg, "transition": transition,
+                "qb_therm_clks": qb_therm,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -88,11 +100,12 @@ class QubitSpectroscopy(ExperimentBase):
         qb_len: int,
         n_avg: int = 1000,
         transition: str = "ge",
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             pulse=pulse, rf_begin=rf_begin, rf_end=rf_end, df=df,
             qb_gain=qb_gain, qb_len=qb_len, n_avg=n_avg,
-            transition=transition,
+            transition=transition, qb_therm_clks=qb_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -134,11 +147,12 @@ class QubitSpectroscopy(ExperimentBase):
             metrics["f0_MHz"] = float(fit.params["f0"] / 1e6)
 
         if update_calibration and fit.params:
+            cqed_field = "ef_freq" if freq_field == "ef_freq" else "qubit_freq"
             metadata.setdefault("proposed_patch_ops", []).append(
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"frequencies.{self.attr.qb_el}.{freq_field}",
+                        "path": f"cqed_params.transmon.{cqed_field}",
                         "value": float(fit.params["f0"]),
                     },
                 }
@@ -204,9 +218,11 @@ class QubitSpectroscopyCoarse(ExperimentBase):
         qb_len: int,
         n_avg: int = 1000,
         transition: str = "ge",
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         attr = self.attr
         lo_list = make_lo_segments(rf_begin, rf_end)
+        qb_therm = _resolve_qb_therm_clks(self, qb_therm_clks, "QubitSpectroscopyCoarse")
 
         seg_results: list[RunResult] = []
         all_freqs: list[np.ndarray] = []
@@ -217,7 +233,7 @@ class QubitSpectroscopyCoarse(ExperimentBase):
 
             prog = cQED_programs.qubit_spectroscopy(
                 pulse, ifs, qb_gain, qb_len,
-                attr.qb_therm_clks, n_avg,
+                qb_therm, n_avg,
                 qb_el=attr.qb_el,
                 bindings=self._bindings_or_none,
             )
@@ -274,11 +290,12 @@ class QubitSpectroscopyCoarse(ExperimentBase):
             metrics["f0_MHz"] = float(fit.params["f0"] / 1e6)
 
         if update_calibration and fit.params:
+            cqed_field = "ef_freq" if freq_field == "ef_freq" else "qubit_freq"
             metadata.setdefault("proposed_patch_ops", []).append(
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"frequencies.{self.attr.qb_el}.{freq_field}",
+                        "path": f"cqed_params.transmon.{cqed_field}",
                         "value": float(fit.params["f0"]),
                     },
                 }
@@ -339,10 +356,12 @@ class QubitSpectroscopyEF(ExperimentBase):
         qb_len: int,
         n_avg: int = 1000,
         ge_prep_pulse: str = "ge_x180",
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
         lo_qb = self.get_qubit_lo()
         if_freqs = create_if_frequencies(attr.qb_el, rf_begin, rf_end, df, lo_freq=lo_qb)
+        qb_therm = _resolve_qb_therm_clks(self, qb_therm_clks, "QubitSpectroscopyEF")
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
@@ -351,7 +370,7 @@ class QubitSpectroscopyEF(ExperimentBase):
         prog = cQED_programs.qubit_spectroscopy_ef(
             pulse, if_freqs,
             qb_if,
-            qb_gain, qb_len, ge_prep_pulse, attr.qb_therm_clks, n_avg,
+            qb_gain, qb_len, ge_prep_pulse, qb_therm, n_avg,
             qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
         )
@@ -368,6 +387,7 @@ class QubitSpectroscopyEF(ExperimentBase):
                 "pulse": pulse, "rf_begin": rf_begin, "rf_end": rf_end,
                 "df": df, "qb_gain": qb_gain, "qb_len": qb_len,
                 "n_avg": n_avg, "ge_prep_pulse": ge_prep_pulse,
+                "qb_therm_clks": qb_therm,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -385,11 +405,12 @@ class QubitSpectroscopyEF(ExperimentBase):
         qb_len: int,
         n_avg: int = 1000,
         ge_prep_pulse: str = "ge_x180",
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             pulse=pulse, rf_begin=rf_begin, rf_end=rf_end, df=df,
             qb_gain=qb_gain, qb_len=qb_len, n_avg=n_avg,
-            ge_prep_pulse=ge_prep_pulse,
+            ge_prep_pulse=ge_prep_pulse, qb_therm_clks=qb_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -437,7 +458,7 @@ class QubitSpectroscopyEF(ExperimentBase):
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"frequencies.{self.attr.qb_el}.ef_freq",
+                        "path": "cqed_params.transmon.ef_freq",
                         "value": float(fit.params["f0"]),
                     },
                 }

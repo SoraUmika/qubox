@@ -202,7 +202,7 @@ cells.append(make_cell("code", """\
 # Open QM connection and build element table
 session.open()
 
-attr = session.attributes
+attr = session.context_snapshot()
 print(f"Resonator: {attr.ro_fq / 1e9:.4f} GHz")
 print(f"Qubit:     {attr.qb_fq / 1e9:.4f} GHz")
 print(f"Storage:   {attr.st_fq / 1e9:.4f} GHz")
@@ -292,7 +292,7 @@ override_info = session.override_readout_operation(
     demod=READOUT_OVERRIDE_DEMOD,
     threshold=READOUT_OVERRIDE_THRESHOLD,
     weight_len=READOUT_OVERRIDE_WEIGHT_LEN,
-    apply_to_attributes=True,
+    apply_to_runtime_context=True,
     persist_measure_config=True,
     drive_frequency=attr.ro_fq,
 )
@@ -301,7 +301,7 @@ print("\\nRuntime readout override applied:")
 print(f"  element:            {override_info['element']}")
 print(f"  operation:          {override_info['operation']}")
 print(f"  pulse:              {override_info['pulse']}")
-print(f"  attributes.ro_el:   {override_info['attributes_ro_el']}")
+print(f"  active_ro_element:  {override_info['active_readout_element']}")
 print(f"  QM mapping:         {override_info['qm_config_entry']}")
 print(f"  measureConfig path: {override_info['measure_config_path']}")"""))
 

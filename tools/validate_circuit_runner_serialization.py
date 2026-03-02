@@ -11,6 +11,7 @@ import numpy as np
 from qm import generate_qua_script
 from qm.qua import dual_demod
 
+from qubox_v2.calibration import CalibrationStore
 from qubox_v2.programs import api as cQED_programs
 from qubox_v2.programs.macros.measure import measureMacro
 from qubox_v2.hardware.config_engine import ConfigEngine
@@ -42,8 +43,11 @@ class ValidationCase:
 class LocalSessionShim:
     config_engine: Any
     pulse_mgr: Any
-    attributes: Any
     bindings: Any
+    _context_snapshot: Any
+
+    def context_snapshot(self) -> Any:
+        return self._context_snapshot
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -145,8 +149,10 @@ def _load_local_session(*, repo_root: Path, sample_id: str, cooldown_id: str) ->
     pulse_mgr = PulseOperationManager.from_json(pulses_path)
     cfg_engine.merge_pulses(pulse_mgr, include_volatile=True)
 
-    attrs = cQED_attributes.from_json(cqed_path)
-    bindings = bindings_from_hardware_config(cfg_engine.hardware, attrs)
+    ctx = cQED_attributes.from_json(cqed_path)
+    calibration = CalibrationStore(cooldown_cfg / "calibration.json")
+    _overlay_calibration_context(ctx, calibration)
+    bindings = bindings_from_hardware_config(cfg_engine.hardware, ctx)
 
     if measure_cfg_path.exists():
         measureMacro.load_json(str(measure_cfg_path))
@@ -154,9 +160,49 @@ def _load_local_session(*, repo_root: Path, sample_id: str, cooldown_id: str) ->
     return LocalSessionShim(
         config_engine=cfg_engine,
         pulse_mgr=pulse_mgr,
-        attributes=attrs,
         bindings=bindings,
+        _context_snapshot=ctx,
     )
+
+
+def _overlay_calibration_context(ctx: cQED_attributes, calibration: CalibrationStore) -> None:
+    resonator = calibration.get_cqed_params("resonator")
+    transmon = calibration.get_cqed_params("transmon")
+    storage = calibration.get_cqed_params("storage")
+
+    if resonator is not None:
+        if resonator.resonator_freq is not None:
+            ctx.ro_fq = resonator.resonator_freq
+        if resonator.kappa is not None:
+            ctx.ro_kappa = resonator.kappa
+        if resonator.ro_therm_clks is not None:
+            setattr(ctx, "ro_therm_clks", resonator.ro_therm_clks)
+
+    if transmon is not None:
+        if transmon.qubit_freq is not None:
+            ctx.qb_fq = transmon.qubit_freq
+        if transmon.anharmonicity is not None:
+            ctx.anharmonicity = transmon.anharmonicity
+        if transmon.qb_therm_clks is not None:
+            setattr(ctx, "qb_therm_clks", transmon.qb_therm_clks)
+
+    if storage is not None:
+        if storage.storage_freq is not None:
+            ctx.st_fq = storage.storage_freq
+        if storage.chi is not None:
+            ctx.st_chi = storage.chi
+        if storage.chi2 is not None:
+            ctx.st_chi2 = storage.chi2
+        if storage.chi3 is not None:
+            ctx.st_chi3 = storage.chi3
+        if storage.kerr is not None:
+            ctx.st_K = storage.kerr
+        if storage.kerr2 is not None:
+            ctx.st_K2 = storage.kerr2
+        if storage.fock_freqs is not None:
+            ctx.fock_fqs = np.asarray(storage.fock_freqs, dtype=float)
+        if storage.st_therm_clks is not None:
+            setattr(ctx, "st_therm_clks", storage.st_therm_clks)
 
 
 def _prepare_ge_measure_macro(session: LocalSessionShim, *, measure_op: str, drive_frequency: float, ro_el: str) -> tuple[tuple[str, str, str], Any]:
@@ -208,16 +254,17 @@ def run_validation(
         sample_id=sample_id,
         cooldown_id=cooldown_id,
     )
-    qb_therm_clks = int(getattr(session.attributes, "qb_therm_clks", 250_000) or 250_000)
+    ctx = session.context_snapshot()
+    qb_therm_clks = int(getattr(ctx, "qb_therm_clks", 250_000) or 250_000)
 
     runner = CircuitRunner(session)
     cases: list[ValidationCase] = []
 
     # --- 1) Power Rabi ---
     op = "x180"
-    pulse_info = session.pulse_mgr.get_pulseOp_by_element_op(session.attributes.qb_el, op)
+    pulse_info = session.pulse_mgr.get_pulseOp_by_element_op(ctx.qb_el, op)
     if pulse_info is None:
-        raise RuntimeError(f"PowerRabi validation requires op={op!r} on element={session.attributes.qb_el!r}")
+        raise RuntimeError(f"PowerRabi validation requires op={op!r} on element={ctx.qb_el!r}")
 
     gains = np.arange(-0.15, 0.15 + 1e-12, 0.05, dtype=float)
     pr_legacy_prog = cQED_programs.power_rabi(
@@ -227,11 +274,11 @@ def run_validation(
         op,
         None,
         64,
-        qb_el=session.attributes.qb_el,
+        qb_el=ctx.qb_el,
         bindings=session.bindings,
     )
     pr_circuit, pr_sweep = make_power_rabi_circuit(
-        qb_el=session.attributes.qb_el,
+        qb_el=ctx.qb_el,
         qb_therm_clks=qb_therm_clks,
         pulse_clock_len=round(int(pulse_info.length) / 4),
         n_avg=64,
@@ -268,11 +315,11 @@ def run_validation(
         waits_clks,
         qb_therm_clks,
         64,
-        qb_el=session.attributes.qb_el,
+        qb_el=ctx.qb_el,
         bindings=session.bindings,
     )
     t1_circuit, t1_sweep = make_t1_circuit(
-        qb_el=session.attributes.qb_el,
+        qb_el=ctx.qb_el,
         qb_therm_clks=qb_therm_clks,
         n_avg=64,
         waits_clks=waits_clks,
@@ -301,10 +348,10 @@ def run_validation(
     )
 
     # --- 3) Readout GE discrimination ---
-    ro_el = session.attributes.ro_el
-    qb_el = session.attributes.qb_el
+    ro_el = ctx.ro_el
+    qb_el = ctx.qb_el
     measure_op = "readout"
-    drive_frequency = float(getattr(session.attributes, "ro_fq", 0.0) or 0.0)
+    drive_frequency = float(getattr(ctx, "ro_fq", 0.0) or 0.0)
     base_weight_keys, _ = _prepare_ge_measure_macro(
         session,
         measure_op=measure_op,

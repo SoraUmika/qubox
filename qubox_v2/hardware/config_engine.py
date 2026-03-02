@@ -228,9 +228,18 @@ class ConfigEngine:
         self.pulse_overlay = {k: deepcopy(cfg.get(k, {})) for k in PULSE_KEYS}
 
         elems = cfg.get("elements") or {}
+        base_elements = set((self.hardware_base.get("elements") or {}).keys())
         ops_patch: dict = {}
         for el, el_cfg in elems.items():
             if not isinstance(el_cfg, dict):
+                continue
+            if str(el).startswith("__"):
+                continue
+            if el not in base_elements:
+                _logger.warning(
+                    "Skipping pulse operation overlay for non-hardware element '%s'",
+                    el,
+                )
                 continue
             ops = el_cfg.get("operations")
             if isinstance(ops, dict) and ops:

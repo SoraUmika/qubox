@@ -167,7 +167,7 @@ class _FakeCalibrationResult:
 def test_t2_ramsey_rule_converts_ns_to_seconds():
     """T2RamseyRule must store T2_ramsey in seconds (T2_star is in ns)."""
     patch_rules = _get_patch_rules()
-    rule = patch_rules.T2RamseyRule(element="qb")
+    rule = patch_rules.T2RamseyRule(alias="transmon")
     # T2_star comes from the fit in nanoseconds (e.g. 50 µs = 50000 ns)
     result = _FakeCalibrationResult(
         kind="t2_ramsey",
@@ -181,7 +181,7 @@ def test_t2_ramsey_rule_converts_ns_to_seconds():
         for u in patch.updates
     }
 
-    t2_s = updates.get("SetCalibration:coherence.qb.T2_ramsey")
+    t2_s = updates.get("SetCalibration:cqed_params.transmon.T2_ramsey")
     assert t2_s is not None, "Missing SetCalibration for T2_ramsey"
     assert t2_s == pytest.approx(50e-6, rel=1e-9), (
         f"Expected ~50e-6 s, got {t2_s}. "
@@ -192,7 +192,7 @@ def test_t2_ramsey_rule_converts_ns_to_seconds():
 def test_t2_echo_rule_converts_ns_to_seconds():
     """T2EchoRule must store T2_echo in seconds (T2_echo param is in ns)."""
     patch_rules = _get_patch_rules()
-    rule = patch_rules.T2EchoRule(element="qb")
+    rule = patch_rules.T2EchoRule(alias="transmon")
     # T2_echo comes from the fit in nanoseconds (e.g. 80 µs = 80000 ns)
     result = _FakeCalibrationResult(
         kind="t2_echo",
@@ -206,7 +206,7 @@ def test_t2_echo_rule_converts_ns_to_seconds():
         for u in patch.updates
     }
 
-    t2_s = updates.get("SetCalibration:coherence.qb.T2_echo")
+    t2_s = updates.get("SetCalibration:cqed_params.transmon.T2_echo")
     assert t2_s is not None, "Missing SetCalibration for T2_echo"
     assert t2_s == pytest.approx(80e-6, rel=1e-9), (
         f"Expected ~80e-6 s, got {t2_s}. "
@@ -217,7 +217,7 @@ def test_t2_echo_rule_converts_ns_to_seconds():
 def test_t2_ramsey_rule_us_field_unchanged():
     """T2_star_us convenience field must pass through without conversion."""
     patch_rules = _get_patch_rules()
-    rule = patch_rules.T2RamseyRule(element="qb")
+    rule = patch_rules.T2RamseyRule(alias="transmon")
     result = _FakeCalibrationResult(
         kind="t2_ramsey",
         params={"T2_star": 50_000.0, "T2_star_us": 50.0},
@@ -229,14 +229,14 @@ def test_t2_ramsey_rule_us_field_unchanged():
         u.op + ":" + u.payload.get("path", ""): u.payload.get("value")
         for u in patch.updates
     }
-    t2_us = updates.get("SetCalibration:coherence.qb.T2_star_us")
+    t2_us = updates.get("SetCalibration:cqed_params.transmon.T2_star_us")
     assert t2_us == pytest.approx(50.0), "T2_star_us must be stored as µs without conversion"
 
 
 def test_t2_echo_rule_us_field_unchanged():
     """T2_echo_us convenience field must pass through without conversion."""
     patch_rules = _get_patch_rules()
-    rule = patch_rules.T2EchoRule(element="qb")
+    rule = patch_rules.T2EchoRule(alias="transmon")
     result = _FakeCalibrationResult(
         kind="t2_echo",
         params={"T2_echo": 80_000.0, "T2_echo_us": 80.0},
@@ -248,7 +248,7 @@ def test_t2_echo_rule_us_field_unchanged():
         u.op + ":" + u.payload.get("path", ""): u.payload.get("value")
         for u in patch.updates
     }
-    t2_us = updates.get("SetCalibration:coherence.qb.T2_echo_us")
+    t2_us = updates.get("SetCalibration:cqed_params.transmon.T2_echo_us")
     assert t2_us == pytest.approx(80.0), "T2_echo_us must be stored as µs without conversion"
 
 

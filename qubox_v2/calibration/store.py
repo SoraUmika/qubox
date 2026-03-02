@@ -34,6 +34,7 @@ from ..core.persistence_policy import sanitize_mapping_for_json
 from .models import (
     CalibrationContext,
     CalibrationData,
+    CQEDParams,
     CoherenceParams,
     DiscriminationParams,
     ElementFrequencies,
@@ -47,6 +48,60 @@ from .models import (
 from .transitions import resolve_pulse_name
 
 _logger = get_logger(__name__)
+_SUPPORTED_CALIBRATION_VERSIONS = {"5.0.0", "5.1.0"}
+
+
+def _infer_cqed_alias(key: str, alias_index: dict[str, str] | None = None) -> str:
+    alias_index = alias_index or {}
+    if key in alias_index:
+        return key
+
+    reverse_alias = {v: k for k, v in alias_index.items()}
+    if key in reverse_alias:
+        return reverse_alias[key]
+
+    lowered = str(key).lower()
+    if any(token in lowered for token in ("resonator", "readout", "rr")):
+        return "resonator"
+    if any(token in lowered for token in ("transmon", "qubit", "qb")):
+        return "transmon"
+    if any(token in lowered for token in ("storage", "st")):
+        return "storage"
+    return key
+
+
+def _migrate_legacy_to_cqed_params(raw: dict[str, Any]) -> dict[str, Any]:
+    migrated = dict(raw)
+    alias_index = dict(migrated.get("alias_index", {}) or {})
+    cqed = dict(migrated.get("cqed_params", {}) or {})
+
+    for element_key, freq_payload in dict(migrated.get("frequencies", {}) or {}).items():
+        alias = _infer_cqed_alias(str(element_key), alias_index)
+        entry = dict(cqed.get(alias, {}) or {})
+        if isinstance(freq_payload, dict):
+            for field in (
+                "lo_freq", "if_freq", "rf_freq", "resonator_freq", "qubit_freq", "storage_freq", "ef_freq",
+                "anharmonicity", "fock_freqs", "chi", "chi2", "chi3", "kappa", "kerr", "kerr2",
+            ):
+                if field in freq_payload and freq_payload[field] is not None:
+                    entry[field] = freq_payload[field]
+        cqed[alias] = entry
+
+    for element_key, coh_payload in dict(migrated.get("coherence", {}) or {}).items():
+        alias = _infer_cqed_alias(str(element_key), alias_index)
+        entry = dict(cqed.get(alias, {}) or {})
+        if isinstance(coh_payload, dict):
+            for field in (
+                "T1", "T1_us", "T2_ramsey", "T2_star_us", "T2_echo", "T2_echo_us",
+                "qb_therm_clks", "ro_therm_clks", "st_therm_clks",
+            ):
+                if field in coh_payload and coh_payload[field] is not None:
+                    entry[field] = coh_payload[field]
+        cqed[alias] = entry
+
+    migrated["cqed_params"] = cqed
+    migrated["version"] = "5.1.0"
+    return migrated
 
 
 class CalibrationStore:
@@ -95,11 +150,12 @@ class CalibrationStore:
             with open(self._path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
             version_str = str(raw.get("version", ""))
-            if version_str != "5.0.0":
+            if version_str not in _SUPPORTED_CALIBRATION_VERSIONS:
                 raise ValueError(
                     f"Unsupported calibration schema version '{version_str}' in {self._path}. "
-                    "Only v5.0.0 is supported. Migrate calibration.json to v5.0.0 before loading."
+                    "Supported versions: v5.0.0, v5.1.0. Migrate calibration.json before loading."
                 )
+            raw = _migrate_legacy_to_cqed_params(raw)
             return CalibrationData.model_validate(raw)
         # Write defaults to disk immediately so the file actually exists.
         # Cannot call self.save() here because self._data is not yet assigned.
@@ -114,7 +170,7 @@ class CalibrationStore:
                 created=datetime.now().isoformat(),
             )
         data = CalibrationData(
-            version="5.0.0",
+            version="5.1.0",
             context=ctx_block,
             created=datetime.now().isoformat(),
         )
@@ -144,6 +200,28 @@ class CalibrationStore:
         if physical_id:
             return store.get(physical_id)
         return None
+
+    def _resolve_cqed_alias(self, key: str) -> str:
+        if key in self._data.cqed_params:
+            return key
+        return _infer_cqed_alias(key, self._data.alias_index)
+
+    def get_cqed_params(self, alias: str) -> CQEDParams | None:
+        resolved = self._resolve_cqed_alias(alias)
+        return self._data.cqed_params.get(resolved)
+
+    def set_cqed_params(self, alias: str, params: CQEDParams | None = None, **kw) -> None:
+        resolved = self._resolve_cqed_alias(alias)
+        if params is None:
+            existing = self._data.cqed_params.get(resolved)
+            if existing:
+                merged = existing.model_dump()
+                merged.update({k: v for k, v in kw.items() if v is not None})
+                params = CQEDParams(**merged)
+            else:
+                params = CQEDParams(**kw)
+        self._data.cqed_params[resolved] = params
+        self._touch()
 
     # ------------------------------------------------------------------
     # Discrimination
@@ -187,39 +265,55 @@ class CalibrationStore:
     # Frequencies
     # ------------------------------------------------------------------
     def get_frequencies(self, element: str) -> ElementFrequencies | None:
+        cqed = self.get_cqed_params(element)
+        if cqed is not None:
+            freq_fields = set(ElementFrequencies.model_fields.keys())
+            payload = {
+                key: value
+                for key, value in cqed.model_dump().items()
+                if key in freq_fields and value is not None
+            }
+            if payload:
+                return ElementFrequencies(**payload)
         return self._dual_lookup(self._data.frequencies, element)
 
     def set_frequencies(self, element: str, freqs: ElementFrequencies | None = None, **kw) -> None:
-        physical_id = self._resolve_key(element)
         if freqs is None:
-            existing = self._dual_lookup(self._data.frequencies, element)
+            existing = self.get_frequencies(element)
             if existing:
                 merged = existing.model_dump()
                 merged.update({k: v for k, v in kw.items() if v is not None})
                 freqs = ElementFrequencies(**merged)
             else:
                 freqs = ElementFrequencies(**kw)
-        self._data.frequencies[physical_id] = freqs
-        self._touch()
+        self.set_cqed_params(element, **freqs.model_dump(exclude_none=True))
 
     # ------------------------------------------------------------------
     # Coherence
     # ------------------------------------------------------------------
     def get_coherence(self, element: str) -> CoherenceParams | None:
+        cqed = self.get_cqed_params(element)
+        if cqed is not None:
+            coherence_fields = set(CoherenceParams.model_fields.keys())
+            payload = {
+                key: value
+                for key, value in cqed.model_dump().items()
+                if key in coherence_fields and value is not None
+            }
+            if payload:
+                return CoherenceParams(**payload)
         return self._dual_lookup(self._data.coherence, element)
 
     def set_coherence(self, element: str, params: CoherenceParams | None = None, **kw) -> None:
-        physical_id = self._resolve_key(element)
         if params is None:
-            existing = self._dual_lookup(self._data.coherence, element)
+            existing = self.get_coherence(element)
             if existing:
                 merged = existing.model_dump()
                 merged.update({k: v for k, v in kw.items() if v is not None})
                 params = CoherenceParams(**merged)
             else:
                 params = CoherenceParams(**kw)
-        self._data.coherence[physical_id] = params
-        self._touch()
+        self.set_cqed_params(element, **params.model_dump(exclude_none=True))
 
     # ------------------------------------------------------------------
     # Pulse calibrations
@@ -340,6 +434,7 @@ class CalibrationStore:
         sections = [
             ("discrimination", self._data.discrimination),
             ("readout_quality", self._data.readout_quality),
+            ("cqed_params", self._data.cqed_params),
             ("frequencies", self._data.frequencies),
             ("coherence", self._data.coherence),
             ("pulse_calibrations", self._data.pulse_calibrations),
@@ -392,7 +487,7 @@ class CalibrationStore:
         This is used by patch/orchestrator flows that stage batched mutations
         before persisting.
         """
-        self._data = CalibrationData.model_validate(raw)
+        self._data = CalibrationData.model_validate(_migrate_legacy_to_cqed_params(raw))
         self._touch()
 
     # ------------------------------------------------------------------
@@ -417,7 +512,7 @@ class CalibrationStore:
         # No context block on disk (legacy v3 file) — skip
         if stored is None:
             raise ContextMismatchError(
-                f"Calibration file {self._path} has no context block; v5.0.0 context is required."
+                f"Calibration file {self._path} has no context block; v5.x context is required."
             )
 
         # Sample mismatch
@@ -458,7 +553,7 @@ class CalibrationStore:
             config_hash=getattr(context, "config_hash", "") or "",
             created=datetime.now().isoformat(),
         )
-        self._data.version = "5.0.0"
+        self._data.version = "5.1.0"
         self._touch()
 
     # ------------------------------------------------------------------

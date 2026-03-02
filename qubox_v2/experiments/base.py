@@ -119,8 +119,8 @@ class ExperimentRunner:
             autoload=load_devices,
         )
 
-        # ---- 6. Experiment attributes ----
-        self.attributes = self._load_attributes()
+        # ---- 6. Experiment context snapshot ----
+        self._context_snapshot = self._load_context_snapshot()
 
         # ---- 7. Post-selection (opt-in) ----
         self.post_sel_config: PostSelectionConfig | None = None
@@ -147,13 +147,17 @@ class ExperimentRunner:
         p = self.experiment_path / "config" / "pulses.json"
         return p if p.exists() else None
 
-    def _load_attributes(self) -> cQED_attributes:
-        """Load or create experiment attributes."""
+    def _load_context_snapshot(self) -> cQED_attributes:
+        """Load or create the legacy-compatible experiment context snapshot."""
         try:
             return cQED_attributes.load(self.experiment_path)
         except FileNotFoundError:
             _logger.info("No cqed_params.json found — using defaults")
             return cQED_attributes()
+
+    def context_snapshot(self) -> cQED_attributes:
+        """Return the current experiment context snapshot."""
+        return self._context_snapshot
 
     # ------------------------------------------------------------------
     # Pulse helpers
@@ -187,9 +191,9 @@ class ExperimentRunner:
         target_folder: str | Path | None = None,
         *,
         tag: str = "",
-        include_attributes: bool = True,
+        include_context_snapshot: bool = True,
     ) -> Path:
-        """Save experiment output (data + optional attributes) to disk."""
+        """Save experiment output (data + optional context snapshot) to disk."""
         if target_folder is None:
             target_folder = self.experiment_path / "data"
         target_folder = Path(target_folder)
@@ -217,17 +221,17 @@ class ExperimentRunner:
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2, default=str)
 
-        if include_attributes:
-            self.save_attributes()
+        if include_context_snapshot:
+            self.save_context_snapshot()
 
         _logger.info("Output saved to %s", path)
         return path
 
-    def save_attributes(self) -> None:
-        """Persist current cQED attributes to JSON."""
+    def save_context_snapshot(self) -> None:
+        """Persist the current legacy-compatible context snapshot to JSON."""
         p = self.experiment_path / "config" / "cqed_params.json"
         p.parent.mkdir(parents=True, exist_ok=True)
-        self.attributes.save_json(p)
+        self._context_snapshot.save_json(p)
 
     # ------------------------------------------------------------------
     # Teardown

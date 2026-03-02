@@ -187,7 +187,7 @@ class CalibrationOrchestrator:
 
             elif op == "SetMeasureWeights":
                 from ..programs.macros.measure import measureMacro
-                element = str(payload.get("element", self.session.attributes.ro_el))
+                element = str(payload.get("element", self.session.context_snapshot().ro_el))
                 operation = str(payload.get("operation", "readout"))
                 weights = payload.get("weights")
                 info = self.session.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
@@ -244,17 +244,11 @@ class CalibrationOrchestrator:
             self.session.save_pulses()
 
             sync_ok = True
-            try:
-                self.session.refresh_attribute_frequencies_from_calibration(persist=True)
-            except Exception as exc:
-                _logger.warning("refresh_attribute_frequencies_from_calibration failed: %s", exc, exc_info=True)
-                sync_ok = False
-
             # Sync measureMacro from CalibrationStore after every commit
             # so discrimination/quality params stay in sync.
             try:
                 from ..programs.macros.measure import measureMacro
-                ro_el = getattr(self.session.attributes, "ro_el", None)
+                ro_el = getattr(self.session.context_snapshot(), "ro_el", None)
                 if ro_el is not None:
                     measureMacro.sync_from_calibration(self.session.calibration, ro_el)
             except Exception as exc:
@@ -355,6 +349,10 @@ class CalibrationOrchestrator:
         if len(parts) >= 3 and parts[0] == "readout_quality":
             element, field = parts[1], parts[2]
             self.session.calibration.set_readout_quality(element, **{field: value})
+            return
+        if len(parts) >= 3 and parts[0] == "cqed_params":
+            alias, field = parts[1], parts[2]
+            self.session.calibration.set_cqed_params(alias, **{field: value})
             return
 
         # Fallback: generic dict update + reload

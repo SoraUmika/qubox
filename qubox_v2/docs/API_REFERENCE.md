@@ -55,6 +55,17 @@ Use `CalibrationOrchestrator` for patch lifecycle and persistence:
 
 Do not perform ad-hoc calibration writes inside experiment `run()` paths.
 
+### Physical-parameter write targets
+
+- Canonical physical calibration writes use `SetCalibration` paths under:
+	- `cqed_params.resonator.*`
+	- `cqed_params.transmon.*`
+	- `cqed_params.storage.*`
+- Typical fields: `resonator_freq`, `qubit_freq`, `ef_freq`, `kappa`, `T1`,
+	`T1_us`, `T2_ramsey`, `T2_star_us`, `T2_echo`, `T2_echo_us`.
+- `frequencies` and `coherence` remain load-compatible legacy maps and are
+	migrated to `cqed_params` during calibration-store load.
+
 ## Readout/discrimination output conventions
 
 - GE/readout discrimination pipelines expose complex blobs as `S_g` / `S_e`

@@ -148,7 +148,7 @@ def register_rotations_from_ref_iq(
     Register rotations derived from a reference IQ waveform (assumed to be x180).
 
     Uses the same waveform math as gates_legacy.QubitRotation but without requiring
-    Gate.attributes or Gate.mgr to be set.  The core formula is:
+    Gate.context_snapshot() or Gate.mgr to be set.  The core formula is:
 
         w0 = pad_to_4(ref_I + 1j*ref_Q)
         phi_eff = phi + d_alpha

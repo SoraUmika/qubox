@@ -13,9 +13,19 @@ from ..result import AnalysisResult, FitResult, ProgramBuildResult
 from ...analysis import post_process as pp
 from ...analysis.fitting import fit_and_wrap, build_fit_legend
 from ...analysis.cQED_models import T2_ramsey_model, T2_echo_model
+from ...analysis.analysis_tools import project_complex_to_line_real
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
 from ...programs.macros.measure import measureMacro
+
+
+def _resolve_qb_therm_clks(exp: ExperimentBase, value: int | None, owner: str) -> int:
+    return int(exp.resolve_override_or_attr(
+        value=value,
+        attr_name="qb_therm_clks",
+        owner=owner,
+        cast=int,
+    ))
 
 
 class T2Ramsey(ExperimentBase):
@@ -33,6 +43,7 @@ class T2Ramsey(ExperimentBase):
         delay_begin: int = 4,
         r90: str = "x90",
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
         *,
         qb_detune_MHz: float | None = None,
     ) -> ProgramBuildResult:
@@ -45,12 +56,13 @@ class T2Ramsey(ExperimentBase):
             raise ValueError("qb_detune exceeds maximum IF bandwidth")
 
         delay_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=4)
+        qb_therm_clks = _resolve_qb_therm_clks(self, qb_therm_clks, "T2Ramsey")
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency(detune=qb_detune)
 
         prog = cQED_programs.T2_ramsey(
-            r90, delay_clks, attr.qb_therm_clks, n_avg,
+            r90, delay_clks, qb_therm_clks, n_avg,
             qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
         )
@@ -67,6 +79,7 @@ class T2Ramsey(ExperimentBase):
             params={
                 "qb_detune": qb_detune, "delay_end": delay_end, "dt": dt,
                 "delay_begin": delay_begin, "r90": r90, "n_avg": n_avg,
+                "qb_therm_clks": qb_therm_clks,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -82,12 +95,14 @@ class T2Ramsey(ExperimentBase):
         delay_begin: int = 4,
         r90: str = "x90",
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
         *,
         qb_detune_MHz: float | None = None,
     ) -> RunResult:
         build = self.build_program(
             qb_detune=qb_detune, delay_end=delay_end, dt=dt,
             delay_begin=delay_begin, r90=r90, n_avg=n_avg,
+            qb_therm_clks=qb_therm_clks,
             qb_detune_MHz=qb_detune_MHz,
         )
         result = self.run_program(
@@ -100,7 +115,7 @@ class T2Ramsey(ExperimentBase):
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
         delays = result.output.extract("delays")
         S = result.output.extract("S")
-        ydata = np.real(S)
+        ydata, proj_center, proj_direction = project_complex_to_line_real(S)
         qb_detune = result.output.extract("qb_detune")
 
         apply_frequency_correction = bool(kw.pop("apply_frequency_correction", False))
@@ -150,14 +165,14 @@ class T2Ramsey(ExperimentBase):
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"coherence.{self.attr.qb_el}.T2_ramsey",
+                        "path": "cqed_params.transmon.T2_ramsey",
                         "value": float(fit.params["T2"]),
                     },
                 },
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"coherence.{self.attr.qb_el}.T2_star_us",
+                        "path": "cqed_params.transmon.T2_star_us",
                         "value": float(fit.params["T2"] / 1e3),
                     },
                 },
@@ -177,11 +192,18 @@ class T2Ramsey(ExperimentBase):
                     {
                         "op": "SetCalibration",
                         "payload": {
-                            "path": f"frequencies.{self.attr.qb_el}.qubit_freq",
+                            "path": "cqed_params.transmon.qubit_freq",
                             "value": corrected_qb,
                         },
                     }
                 )
+
+        metadata["signal_projection"] = {
+            "center_real": float(np.real(proj_center)),
+            "center_imag": float(np.imag(proj_center)),
+            "direction_real": float(np.real(proj_direction)),
+            "direction_imag": float(np.imag(proj_direction)),
+        }
 
         analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics, metadata=metadata)
 
@@ -193,7 +215,7 @@ class T2Ramsey(ExperimentBase):
         if delays is None or S is None:
             return None
 
-        ydata = np.real(S)
+        ydata, _, _ = project_complex_to_line_real(S)
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 5))
         else:
@@ -218,7 +240,7 @@ class T2Ramsey(ExperimentBase):
                     label=legend)
 
         ax.set_xlabel("Delay (us)")
-        ax.set_ylabel("Re(S)")
+        ax.set_ylabel("Projected Signal (a.u.)")
         ax.set_title("T2 Ramsey")
         ax.legend(
             bbox_to_anchor=(1.05, 1), loc='upper left',
@@ -244,15 +266,17 @@ class T2Echo(ExperimentBase):
         r180: str = "x180",
         r90: str = "x90",
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
         half_wait_clks = create_clks_array(delay_begin, delay_end, dt, time_per_clk=8)
+        qb_therm_clks = _resolve_qb_therm_clks(self, qb_therm_clks, "T2Echo")
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
 
         prog = cQED_programs.T2_echo(
-            r180, r90, half_wait_clks, attr.qb_therm_clks, n_avg,
+            r180, r90, half_wait_clks, qb_therm_clks, n_avg,
             qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
         )
@@ -269,6 +293,7 @@ class T2Echo(ExperimentBase):
                 "delay_end": delay_end, "dt": dt,
                 "delay_begin": delay_begin, "r180": r180,
                 "r90": r90, "n_avg": n_avg,
+                "qb_therm_clks": qb_therm_clks,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -285,10 +310,12 @@ class T2Echo(ExperimentBase):
         r180: str = "x180",
         r90: str = "x90",
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             delay_end=delay_end, dt=dt, delay_begin=delay_begin,
             r180=r180, r90=r90, n_avg=n_avg,
+            qb_therm_clks=qb_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -301,7 +328,7 @@ class T2Echo(ExperimentBase):
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
         delays = result.output.extract("delays")
         S = result.output.extract("S")
-        ydata = np.real(S)
+        ydata, proj_center, proj_direction = project_complex_to_line_real(S)
 
         p0_time_unit = str(kw.pop("p0_time_unit", "us")).lower()
 
@@ -338,18 +365,25 @@ class T2Echo(ExperimentBase):
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"coherence.{self.attr.qb_el}.T2_echo",
+                        "path": "cqed_params.transmon.T2_echo",
                         "value": float(fit.params["T2_echo"]),
                     },
                 },
                 {
                     "op": "SetCalibration",
                     "payload": {
-                        "path": f"coherence.{self.attr.qb_el}.T2_echo_us",
+                        "path": "cqed_params.transmon.T2_echo_us",
                         "value": float(fit.params["T2_echo"] / 1e3),
                     },
                 },
             ])
+
+        metadata["signal_projection"] = {
+            "center_real": float(np.real(proj_center)),
+            "center_imag": float(np.imag(proj_center)),
+            "direction_real": float(np.real(proj_direction)),
+            "direction_imag": float(np.imag(proj_direction)),
+        }
 
         analysis = AnalysisResult.from_run(result, fit=fit, metrics=metrics, metadata=metadata)
 
@@ -361,7 +395,7 @@ class T2Echo(ExperimentBase):
         if delays is None or S is None:
             return None
 
-        ydata = np.real(S)
+        ydata, _, _ = project_complex_to_line_real(S)
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 5))
         else:
@@ -384,7 +418,7 @@ class T2Echo(ExperimentBase):
                     label=legend)
 
         ax.set_xlabel("Delay (us)")
-        ax.set_ylabel("Re(S)")
+        ax.set_ylabel("Projected Signal (a.u.)")
         ax.set_title("T2 Echo")
         ax.legend(
             bbox_to_anchor=(1.05, 1), loc='upper left',
@@ -419,6 +453,7 @@ class ResidualPhotonRamsey(ExperimentBase):
         test_ro_amp: float = 1.0,
         measure_ro_op: str = "readout_long",
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
         **kw,
     ) -> ProgramBuildResult:
         attr = self.attr
@@ -446,6 +481,12 @@ class ResidualPhotonRamsey(ExperimentBase):
         t_relax_clks = int(round(t_relax_ns / 4.0))
         t_buffer_clks = int(round(t_buffer_ns / 4.0))
         delay_clks = create_clks_array(t_R_begin, t_R_end, dt, time_per_clk=4)
+        qb_therm = self.resolve_override_or_attr(
+            value=qb_therm_clks,
+            attr_name="qb_therm_clks",
+            owner="ResidualPhotonRamsey",
+            cast=int,
+        )
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency(detune=qb_detuning)
@@ -454,7 +495,7 @@ class ResidualPhotonRamsey(ExperimentBase):
             test_ro_op, delay_clks,
             t_relax_clks, t_buffer_clks,
             prep_e, test_ro_amp,
-            r90, r180, attr.qb_therm_clks, n_avg,
+            r90, r180, qb_therm, n_avg,
             qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
         )
@@ -473,6 +514,7 @@ class ResidualPhotonRamsey(ExperimentBase):
                 "t_relax_ns": t_relax_ns, "t_buffer_ns": t_buffer_ns,
                 "r90": r90, "r180": r180, "prep_e": prep_e,
                 "test_ro_amp": test_ro_amp, "n_avg": n_avg,
+                "qb_therm_clks": qb_therm,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -495,6 +537,7 @@ class ResidualPhotonRamsey(ExperimentBase):
         test_ro_amp: float = 1.0,
         measure_ro_op: str = "readout_long",
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
         **kw,
     ) -> RunResult:
         build = self.build_program(
@@ -503,7 +546,7 @@ class ResidualPhotonRamsey(ExperimentBase):
             t_relax_ns=t_relax_ns, t_buffer_ns=t_buffer_ns,
             r90=r90, r180=r180, prep_e=prep_e,
             test_ro_amp=test_ro_amp, measure_ro_op=measure_ro_op,
-            n_avg=n_avg, **kw,
+            n_avg=n_avg, qb_therm_clks=qb_therm_clks, **kw,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -515,14 +558,14 @@ class ResidualPhotonRamsey(ExperimentBase):
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
         delays = result.output.extract("delays")
         S = result.output.extract("S")
-        mag = np.abs(S)
+        ydata, proj_center, proj_direction = project_complex_to_line_real(S)
 
-        A_guess = float((mag.max() - mag.min()) / 2)
+        A_guess = float((ydata.max() - ydata.min()) / 2)
         T2_guess = float(delays[-1]) / 3
-        offset_guess = float(mag.mean())
+        offset_guess = float(ydata.mean())
         auto_p0 = [A_guess, T2_guess, 1.0, 0.0, 0.0, offset_guess]
 
-        fit = fit_and_wrap(delays, mag, T2_ramsey_model,
+        fit = fit_and_wrap(delays, ydata, T2_ramsey_model,
                            p0 if p0 is not None else auto_p0,
                            model_name="residual_photon_ramsey", **kw)
 
@@ -530,7 +573,19 @@ class ResidualPhotonRamsey(ExperimentBase):
         if fit.params:
             metrics["T2"] = fit.params["T2"]
 
-        return AnalysisResult.from_run(result, fit=fit, metrics=metrics)
+        return AnalysisResult.from_run(
+            result,
+            fit=fit,
+            metrics=metrics,
+            metadata={
+                "signal_projection": {
+                    "center_real": float(np.real(proj_center)),
+                    "center_imag": float(np.imag(proj_center)),
+                    "direction_real": float(np.real(proj_direction)),
+                    "direction_imag": float(np.imag(proj_direction)),
+                }
+            },
+        )
 
     def plot(self, analysis: AnalysisResult, *, ax=None, **kwargs):
         delays = analysis.data.get("delays")
@@ -538,13 +593,13 @@ class ResidualPhotonRamsey(ExperimentBase):
         if delays is None or S is None:
             return None
 
-        mag = np.abs(S)
+        ydata, _, _ = project_complex_to_line_real(S)
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 5))
         else:
             fig = ax.figure
 
-        ax.scatter(delays / 1e3, mag, s=5, label="Data")
+        ax.scatter(delays / 1e3, ydata, s=5, label="Data")
         if analysis.fit and analysis.fit.params:
             p = analysis.fit.params
             x_fit = np.linspace(delays.min(), delays.max(), 500)
@@ -553,7 +608,7 @@ class ResidualPhotonRamsey(ExperimentBase):
                     label=build_fit_legend(analysis.fit))
 
         ax.set_xlabel("Delay (us)")
-        ax.set_ylabel("Magnitude")
+        ax.set_ylabel("Projected Signal (a.u.)")
         ax.set_title("Residual Photon Ramsey")
         ax.legend(
             bbox_to_anchor=(1.05, 1), loc='upper left',

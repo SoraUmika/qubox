@@ -47,7 +47,8 @@ class DisplacementHardware(GateHardware):
         P = d.get("params", {})
         target = d.get("target", None)
         if target is None:
-            attr = getattr(hw_ctx, "attributes", None)
+            snapshot = getattr(hw_ctx, "context_snapshot", None)
+            attr = snapshot() if callable(snapshot) else None
             target = getattr(attr, "st_el", "storage") if attr is not None else "storage"
 
         obj = cls(alpha=complex(float(P["re"]), float(P["im"])), target=target)
@@ -57,7 +58,7 @@ class DisplacementHardware(GateHardware):
 
     def waveforms(self, *, hw_ctx) -> tuple[np.ndarray, np.ndarray, int, bool | str]:
         mgr = hw_ctx.mgr
-        attr = hw_ctx.attributes
+        attr = hw_ctx.context_snapshot()
 
         L = int(getattr(attr, "b_coherent_len"))
         marker = True

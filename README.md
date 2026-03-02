@@ -560,7 +560,7 @@ class SessionManager:
 | `get_therm_clks` | `(channel: str, default: int \| None = None) -> int \| None` | `int \| None` | Pure read |
 | `get_displacement_reference` | `() -> dict[str, Any]` | `dict` | Pure read |
 | `validate_runtime_elements` | `(*, auto_map: bool = True, verbose: bool = True) -> dict[str, Any]` | `dict` | May auto-map missing elements |
-| `override_readout_operation` | `(*, element, operation, weights, drive_frequency, demod, threshold, weight_len, apply_to_attributes, persist_measure_config) -> dict[str, Any]` | `dict` | Modifies live readout op, optionally persists |
+| `override_readout_operation` | `(*, element, operation, weights, drive_frequency, demod, threshold, weight_len, apply_to_runtime_context, persist_measure_config) -> dict[str, Any]` | `dict` | Modifies live readout op, optionally persists |
 
 **Context Manager:**
 
@@ -1446,7 +1446,7 @@ the `"module:Class"` format, supporting QCoDeS and InstrumentServer backends.
 | `hardware.json` | **Disk** (source of truth) | Manual edits only |
 | `pulse_specs.json` | **Disk** (source of truth) | Written via `set_pulse_definition()` |
 | `calibration.json` | **Disk** (source of truth) | Only via `CalibrationStore`; serialized with `exclude_none=True` |
-| `cqed_params.json` | **Disk** (legacy compat) | Written by `save_attributes()`; read-only in v2 path |
+| `cqed_params.json` | **Disk** (legacy compat) | Legacy fallback only; SessionManager does not mutate it in the v2 path |
 | `measureConfig.json` | **Disk** | Written by measureMacro lifecycle |
 | `devices.json` | **Disk** | Manual edits; written by `DeviceManager.save()` |
 | `pulses.json` | **Disk** (deprecated) | Transitional compatibility; will be removed |
@@ -2222,7 +2222,7 @@ override_info = session.override_readout_operation(
     demod="dual_demod.full",
     threshold=None,                   # use calibrated threshold
     weight_len=None,
-    apply_to_attributes=True,
+    apply_to_runtime_context=True,
     persist_measure_config=True,
     drive_frequency=attr.ro_fq,
 )
@@ -2245,7 +2245,7 @@ print(f"Readout override: {override_info['element']} / {override_info['operation
   `core/persistence_policy.py:35-68` — drops arrays > 8192 elements and
   arrays whose key matches raw-like patterns (`raw`, `shot`, `buffer`,
   `acq`, etc.).
-- **Side effect**: Also calls `save_attributes()` → writes `cqed_params.json`.
+- **Side effect**: Does not mutate `cqed_params.json`; runtime provenance is captured in metadata/artifacts.
 
 ### 12.2 Persistence Policy
 
@@ -3805,7 +3805,7 @@ session = SessionManager(
     cluster_name="Cluster_2",
 )
 session.open()
-attr = session.attributes
+attr = session.context_snapshot()
 
 # ── Cell 3: Register Pulses ──
 ref_I, ref_Q = drag_gaussian_pulse_waveforms(
@@ -4248,7 +4248,7 @@ def from_binding(cls, ro: ReadoutBinding, *, r180: str = "x180", **overrides) ->
 Convenience method to derive bindings directly from physics attributes:
 
 ```python
-attr = session.attributes
+attr = session.context_snapshot()
 bindings = attr.to_bindings(session.config_engine.hardware)
 ```
 
@@ -5185,7 +5185,7 @@ implementation at time of writing.  They are listed here for transparency.*
    declarative source of truth.  The transition is in progress.
 
 3. **`cqed_params.json`**: Unversioned legacy file.  Read-only in v2 but
-   still written by `save_attributes()` for backward compatibility.
+   preserved only as a legacy compatibility input; the v2 session path does not write it.
 
 ---
 

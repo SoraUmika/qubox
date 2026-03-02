@@ -33,8 +33,17 @@ class FockResolvedStateTomography(ExperimentBase):
         rym90: str = "yn90",
         qb_if: float | None = None,
         n_avg: int = 1000,
+        therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
+        resolved_therm = self.resolve_param(
+            "qb_therm_clks",
+            override=therm_clks,
+            calibration_value=self._calibration_cqed_value("transmon", "qb_therm_clks"),
+            calibration_path="cqed_params.transmon.qb_therm_clks",
+            owner="FockResolvedStateTomography",
+            cast=int,
+        )
 
         prog = cQED_programs.fock_resolved_state_tomography(
             attr.qb_el, attr.st_el,
@@ -44,7 +53,7 @@ class FockResolvedStateTomography(ExperimentBase):
             sel_r180=sel_r180,
             rxp90=rxp90, rym90=rym90,
             qb_if=qb_if,
-            therm_clks=attr.qb_therm_clks,
+            therm_clks=resolved_therm,
             n_avg=n_avg,
         )
         return ProgramBuildResult(
@@ -61,6 +70,7 @@ class FockResolvedStateTomography(ExperimentBase):
                 "rym90": rym90,
                 "qb_if": qb_if,
                 "n_avg": n_avg,
+                "qb_therm_clks": resolved_therm,
             },
             resolved_frequencies={
                 attr.ro_el: self._resolve_readout_frequency(),
@@ -83,6 +93,7 @@ class FockResolvedStateTomography(ExperimentBase):
         rym90: str = "yn90",
         qb_if: float | None = None,
         n_avg: int = 1000,
+        therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             fock_fqs=fock_fqs,
@@ -93,6 +104,7 @@ class FockResolvedStateTomography(ExperimentBase):
             rym90=rym90,
             qb_if=qb_if,
             n_avg=n_avg,
+            therm_clks=therm_clks,
         )
         result = self.run_program(
             build.program,

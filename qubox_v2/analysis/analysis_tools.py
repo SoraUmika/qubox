@@ -27,6 +27,58 @@ def compute_probabilities(values: Sequence[bool] | np.ndarray) -> Mapping[str, f
     p_true = count_true / total
     return {"P(True)": p_true, "P(False)": 1.0 - p_true}
 
+
+def project_complex_to_line_real(S: np.ndarray):
+    """Project complex IQ samples onto their dominant real axis.
+
+    Parameters
+    ----------
+    S : array-like of complex
+        Complex demodulated samples.
+
+    Returns
+    -------
+    tuple
+        ``(S_proj, center, direction)`` where:
+        - ``S_proj`` is a float array with the same shape as ``S``
+        - ``center`` is the complex center used for projection
+        - ``direction`` is a unit complex number defining the projection axis
+    """
+    arr = np.asarray(S)
+    if arr.size == 0:
+        return np.asarray(arr, dtype=float), 0.0 + 0.0j, 1.0 + 0.0j
+
+    vec = arr.reshape(-1).astype(np.complex128, copy=False)
+    finite = np.isfinite(vec.real) & np.isfinite(vec.imag)
+    if not np.any(finite):
+        return np.full(arr.shape, np.nan, dtype=float), 0.0 + 0.0j, 1.0 + 0.0j
+
+    valid = vec[finite]
+    center = np.mean(valid)
+    centered = valid - center
+
+    if centered.size < 2:
+        direction = 1.0 + 0.0j
+    else:
+        xy = np.column_stack([centered.real, centered.imag])
+        cov = np.cov(xy, rowvar=False)
+        try:
+            vals, vecs = np.linalg.eigh(cov)
+            principal = vecs[:, int(np.argmax(vals))]
+            direction = complex(float(principal[0]), float(principal[1]))
+        except Exception:
+            direction = 1.0 + 0.0j
+
+    nrm = abs(direction)
+    if not np.isfinite(nrm) or nrm == 0:
+        direction = 1.0 + 0.0j
+    else:
+        direction /= nrm
+
+    proj_flat = np.full(vec.shape, np.nan, dtype=float)
+    proj_flat[finite] = np.real((vec[finite] - center) * np.conj(direction))
+    return proj_flat.reshape(arr.shape), center, direction
+
 def complex_encoder(obj):
     """Encode complex numbers and numpy arrays as JSON-safe dicts."""
     # 1) Python / NumPy complex scalars

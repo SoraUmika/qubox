@@ -30,16 +30,23 @@ class StorageWignerTomography(ExperimentBase):
         base_alpha: float = 10.0,
         r90_pulse: str = "x90",
         n_avg: int = 200,
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
         x_arr = np.asarray(x_vals)
         p_arr = np.asarray(p_vals)
+        qb_therm = self.resolve_override_or_attr(
+            value=qb_therm_clks,
+            attr_name="qb_therm_clks",
+            owner="StorageWignerTomography",
+            cast=int,
+        )
 
         prog = cQED_programs.storage_wigner_tomography(
             attr.qb_el, attr.st_el,
             gates, x_arr, p_arr,
             base_alpha, r90_pulse,
-            attr.qb_therm_clks, n_avg,
+            qb_therm, n_avg,
         )
         return ProgramBuildResult(
             program=prog,
@@ -54,6 +61,7 @@ class StorageWignerTomography(ExperimentBase):
                 "base_alpha": base_alpha,
                 "r90_pulse": r90_pulse,
                 "n_avg": n_avg,
+                "qb_therm_clks": qb_therm,
                 "x_len": int(len(x_arr)),
                 "p_len": int(len(p_arr)),
             },
@@ -76,6 +84,7 @@ class StorageWignerTomography(ExperimentBase):
         base_alpha: float = 10.0,
         r90_pulse: str = "x90",
         n_avg: int = 200,
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             gates=gates,
@@ -84,6 +93,7 @@ class StorageWignerTomography(ExperimentBase):
             base_alpha=base_alpha,
             r90_pulse=r90_pulse,
             n_avg=n_avg,
+            qb_therm_clks=qb_therm_clks,
         )
         result = self.run_program(
             build.program,
@@ -167,9 +177,18 @@ class SNAPOptimization(ExperimentBase):
         n_avg: int = 100,
         qb_x180: str = "x180",
         post_meas_wait_clks: int = 0,
+        therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
         fock_probe = np.asarray(fock_probe_fqs)
+        resolved_therm = self.resolve_param(
+            "qb_therm_clks",
+            override=therm_clks,
+            calibration_value=self._calibration_cqed_value("transmon", "qb_therm_clks"),
+            calibration_path="cqed_params.transmon.qb_therm_clks",
+            owner="SNAPOptimization",
+            cast=int,
+        )
 
         prog = cQED_programs.SQR_state_tomography(
             attr.qb_el, attr.st_el,
@@ -180,7 +199,7 @@ class SNAPOptimization(ExperimentBase):
             sel_rym90=sel_rym90,
             qb_x180=qb_x180,
             post_meas_wait_clks=post_meas_wait_clks,
-            therm_clks=attr.qb_therm_clks,
+            therm_clks=resolved_therm,
             n_avg=n_avg,
         )
         return ProgramBuildResult(
@@ -195,6 +214,7 @@ class SNAPOptimization(ExperimentBase):
                 "sel_rym90": sel_rym90,
                 "qb_x180": qb_x180,
                 "post_meas_wait_clks": post_meas_wait_clks,
+                "qb_therm_clks": resolved_therm,
                 "fock_probe_len": int(len(fock_probe)),
             },
             resolved_frequencies={
@@ -220,6 +240,7 @@ class SNAPOptimization(ExperimentBase):
         n_avg: int = 100,
         qb_x180: str = "x180",
         post_meas_wait_clks: int = 0,
+        therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             snap_gate=snap_gate,
@@ -231,6 +252,7 @@ class SNAPOptimization(ExperimentBase):
             n_avg=n_avg,
             qb_x180=qb_x180,
             post_meas_wait_clks=post_meas_wait_clks,
+            therm_clks=therm_clks,
         )
         result = self.run_program(
             build.program,

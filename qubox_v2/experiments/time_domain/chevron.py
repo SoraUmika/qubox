@@ -23,10 +23,17 @@ class TimeRabiChevron(ExperimentBase):
         pulse: str = "x180",
         pulse_gain: float = 1.0,
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
         dfs = np.arange(-if_span / 2, if_span / 2 + 0.1, df, dtype=int)
         pulse_clks = create_clks_array(4, max_pulse_duration, dt, time_per_clk=4)
+        qb_therm = self.resolve_override_or_attr(
+            value=qb_therm_clks,
+            attr_name="qb_therm_clks",
+            owner="TimeRabiChevron",
+            cast=int,
+        )
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
@@ -35,7 +42,7 @@ class TimeRabiChevron(ExperimentBase):
 
         prog = cQED_programs.time_rabi_chevron(
             pulse, pulse_gain,
-            qb_if, dfs, pulse_clks, attr.qb_therm_clks, n_avg,
+            qb_if, dfs, pulse_clks, qb_therm, n_avg,
             ro_el=attr.ro_el, qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
         )
@@ -53,6 +60,7 @@ class TimeRabiChevron(ExperimentBase):
                 "if_span": if_span, "df": df,
                 "max_pulse_duration": max_pulse_duration, "dt": dt,
                 "pulse": pulse, "pulse_gain": pulse_gain, "n_avg": n_avg,
+                "qb_therm_clks": qb_therm,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -69,11 +77,13 @@ class TimeRabiChevron(ExperimentBase):
         pulse: str = "x180",
         pulse_gain: float = 1.0,
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             if_span=if_span, df=df,
             max_pulse_duration=max_pulse_duration, dt=dt,
             pulse=pulse, pulse_gain=pulse_gain, n_avg=n_avg,
+            qb_therm_clks=qb_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -121,10 +131,17 @@ class PowerRabiChevron(ExperimentBase):
         pulse: str = "x180",
         pulse_duration: int = 100,
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
         dfs = np.arange(-if_span / 2, if_span / 2 + 0.1, df, dtype=int)
         gains = np.arange(-max_gain, max_gain + 1e-12, dg, dtype=float)
+        qb_therm = self.resolve_override_or_attr(
+            value=qb_therm_clks,
+            attr_name="qb_therm_clks",
+            owner="PowerRabiChevron",
+            cast=int,
+        )
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
@@ -133,7 +150,7 @@ class PowerRabiChevron(ExperimentBase):
 
         prog = cQED_programs.power_rabi_chevron(
             pulse, int(pulse_duration / 4),
-            qb_if, dfs, gains, attr.qb_therm_clks, n_avg,
+            qb_if, dfs, gains, qb_therm, n_avg,
             ro_el=attr.ro_el, qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
         )
@@ -151,6 +168,7 @@ class PowerRabiChevron(ExperimentBase):
                 "if_span": if_span, "df": df,
                 "max_gain": max_gain, "dg": dg,
                 "pulse": pulse, "pulse_duration": pulse_duration, "n_avg": n_avg,
+                "qb_therm_clks": qb_therm,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -167,11 +185,13 @@ class PowerRabiChevron(ExperimentBase):
         pulse: str = "x180",
         pulse_duration: int = 100,
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             if_span=if_span, df=df,
             max_gain=max_gain, dg=dg,
             pulse=pulse, pulse_duration=pulse_duration, n_avg=n_avg,
+            qb_therm_clks=qb_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -218,10 +238,17 @@ class RamseyChevron(ExperimentBase):
         dt: int,
         r90: str = "x90",
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
         dfs = np.arange(-if_span / 2, if_span / 2 + 0.1, df, dtype=int)
         delay_clks = create_clks_array(4, max_delay_duration, dt, time_per_clk=4)
+        qb_therm = self.resolve_override_or_attr(
+            value=qb_therm_clks,
+            attr_name="qb_therm_clks",
+            owner="RamseyChevron",
+            cast=int,
+        )
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
@@ -230,7 +257,7 @@ class RamseyChevron(ExperimentBase):
 
         prog = cQED_programs.ramsey_chevron(
             r90,
-            qb_if, dfs, delay_clks, attr.qb_therm_clks, n_avg,
+            qb_if, dfs, delay_clks, qb_therm, n_avg,
             ro_el=attr.ro_el, qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
         )
@@ -248,6 +275,7 @@ class RamseyChevron(ExperimentBase):
                 "if_span": if_span, "df": df,
                 "max_delay_duration": max_delay_duration, "dt": dt,
                 "r90": r90, "n_avg": n_avg,
+                "qb_therm_clks": qb_therm,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -263,11 +291,13 @@ class RamseyChevron(ExperimentBase):
         dt: int,
         r90: str = "x90",
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             if_span=if_span, df=df,
             max_delay_duration=max_delay_duration, dt=dt,
             r90=r90, n_avg=n_avg,
+            qb_therm_clks=qb_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,

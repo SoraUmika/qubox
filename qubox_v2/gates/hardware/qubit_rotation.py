@@ -85,7 +85,8 @@ class QubitRotationHardware(GateHardware):
         P = d.get("params", {})
         target = d.get("target", None)
         if target is None:
-            attr = getattr(hw_ctx, "attributes", None)
+            snapshot = getattr(hw_ctx, "context_snapshot", None)
+            attr = snapshot() if callable(snapshot) else None
             target = getattr(attr, "qb_el", "qubit") if attr is not None else "qubit"
 
         # Support legacy serialized keys
@@ -109,7 +110,7 @@ class QubitRotationHardware(GateHardware):
     # --------------------
     def waveforms(self, *, hw_ctx) -> tuple[np.ndarray, np.ndarray, int, bool | str]:
         mgr = hw_ctx.mgr
-        att = hw_ctx.attributes
+        att = hw_ctx.context_snapshot()
 
         dt = float(getattr(att, "dt_s", 1e-9))
 

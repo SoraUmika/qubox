@@ -54,14 +54,14 @@ class PiAmpRule:
 class T1Rule:
     """Build T1 patch ops including optional qb_therm_clks."""
 
-    element: str
+    alias: str = "transmon"
 
     def __call__(self, result: CalibrationResult) -> Patch | None:
         if result.kind != "t1":
             return None
 
         params = result.params or {}
-        patch = Patch(reason="T1Rule", provenance={"kind": result.kind, "element": self.element})
+        patch = Patch(reason="T1Rule", provenance={"kind": result.kind, "alias": self.alias})
         t1_s = None
         if "T1_s" in params:
             t1_s = float(params["T1_s"])
@@ -74,11 +74,11 @@ class T1Rule:
             t1_s = float(params["T1_ns"]) * 1e-9
 
         if t1_s is not None:
-            patch.add("SetCalibration", path=f"coherence.{self.element}.T1", value=t1_s)
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T1", value=t1_s)
         if "T1_us" in params:
-            patch.add("SetCalibration", path=f"coherence.{self.element}.T1_us", value=params["T1_us"])
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T1_us", value=params["T1_us"])
         if "qb_therm_clks" in params:
-            patch.add("SetCalibration", path=f"coherence.{self.element}.qb_therm_clks", value=params["qb_therm_clks"])
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.qb_therm_clks", value=params["qb_therm_clks"])
         return patch if patch.updates else None
 
 
@@ -86,20 +86,20 @@ class T1Rule:
 class T2RamseyRule:
     """Build Ramsey coherence patch ops with optional frequency correction."""
 
-    element: str
+    alias: str = "transmon"
 
     def __call__(self, result: CalibrationResult) -> Patch | None:
         if result.kind != "t2_ramsey":
             return None
 
         params = result.params or {}
-        patch = Patch(reason="T2RamseyRule", provenance={"kind": result.kind, "element": self.element})
+        patch = Patch(reason="T2RamseyRule", provenance={"kind": result.kind, "alias": self.alias})
         if "T2_star" in params:
-            patch.add("SetCalibration", path=f"coherence.{self.element}.T2_ramsey", value=float(params["T2_star"]) * 1e-9)
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_ramsey", value=float(params["T2_star"]) * 1e-9)
         if "T2_star_us" in params:
-            patch.add("SetCalibration", path=f"coherence.{self.element}.T2_star_us", value=params["T2_star_us"])
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_star_us", value=params["T2_star_us"])
         if "qb_freq_corrected_Hz" in params:
-            patch.add("SetCalibration", path=f"frequencies.{self.element}.qubit_freq", value=params["qb_freq_corrected_Hz"])
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.qubit_freq", value=params["qb_freq_corrected_Hz"])
         return patch if patch.updates else None
 
 
@@ -107,18 +107,18 @@ class T2RamseyRule:
 class T2EchoRule:
     """Build T2 echo metric patch ops (no required extra mutations)."""
 
-    element: str
+    alias: str = "transmon"
 
     def __call__(self, result: CalibrationResult) -> Patch | None:
         if result.kind != "t2_echo":
             return None
 
         params = result.params or {}
-        patch = Patch(reason="T2EchoRule", provenance={"kind": result.kind, "element": self.element})
+        patch = Patch(reason="T2EchoRule", provenance={"kind": result.kind, "alias": self.alias})
         if "T2_echo" in params:
-            patch.add("SetCalibration", path=f"coherence.{self.element}.T2_echo", value=float(params["T2_echo"]) * 1e-9)
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_echo", value=float(params["T2_echo"]) * 1e-9)
         if "T2_echo_us" in params:
-            patch.add("SetCalibration", path=f"coherence.{self.element}.T2_echo_us", value=params["T2_echo_us"])
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_echo_us", value=params["T2_echo_us"])
         return patch if patch.updates else None
 
 
@@ -126,7 +126,7 @@ class T2EchoRule:
 class FrequencyRule:
     """Build qubit/storage spectroscopy frequency patch ops."""
 
-    element: str
+    alias: str
     kind: str
     metric_key: str
     field: str = "qubit_freq"
@@ -138,10 +138,10 @@ class FrequencyRule:
         params = result.params or {}
         if self.metric_key not in params:
             return None
-        patch = Patch(reason="FrequencyRule", provenance={"kind": result.kind, "element": self.element})
-        patch.add("SetCalibration", path=f"frequencies.{self.element}.{self.field}", value=params[self.metric_key])
+        patch = Patch(reason="FrequencyRule", provenance={"kind": result.kind, "alias": self.alias})
+        patch.add("SetCalibration", path=f"cqed_params.{self.alias}.{self.field}", value=params[self.metric_key])
         if "kappa" in params:
-            patch.add("SetCalibration", path=f"frequencies.{self.element}.kappa", value=params["kappa"])
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.kappa", value=params["kappa"])
         return patch
 
 
@@ -288,18 +288,15 @@ class PulseTrainRule:
 
 
 def default_patch_rules(session) -> dict[str, list[Any]]:
-    qb_el = getattr(session.attributes, "qb_el", "qb")
-    ro_el = getattr(session.attributes, "ro_el", "rr")
-    st_el = getattr(session.attributes, "st_el", "st")
-
     pi_rule = PiAmpRule(session=session)
-    t1_rule = T1Rule(element=qb_el)
-    t2r_rule = T2RamseyRule(element=qb_el)
-    t2e_rule = T2EchoRule(element=qb_el)
-    qb_freq_rule = FrequencyRule(element=qb_el, kind="qubit_freq", metric_key="f0")
-    ef_freq_rule = FrequencyRule(element=qb_el, kind="ef_freq", metric_key="f0", field="ef_freq")
-    ro_freq_rule = FrequencyRule(element=ro_el, kind="resonator_freq", metric_key="f0", field="resonator_freq")
-    st_freq_rule = FrequencyRule(element=st_el, kind="storage_freq", metric_key="f_storage")
+    t1_rule = T1Rule(alias="transmon")
+    t2r_rule = T2RamseyRule(alias="transmon")
+    t2e_rule = T2EchoRule(alias="transmon")
+    qb_freq_rule = FrequencyRule(alias="transmon", kind="qubit_freq", metric_key="f0")
+    ef_freq_rule = FrequencyRule(alias="transmon", kind="ef_freq", metric_key="f0", field="ef_freq")
+    ro_freq_rule = FrequencyRule(alias="resonator", kind="resonator_freq", metric_key="f0", field="resonator_freq")
+    st_freq_rule = FrequencyRule(alias="storage", kind="storage_freq", metric_key="f_storage")
+    ro_el = getattr(session.context_snapshot(), "ro_el", "rr")
     drag_rule = DragAlphaRule()
     disc_rule = DiscriminationRule(element=ro_el)
     quality_rule = ReadoutQualityRule(element=ro_el)
