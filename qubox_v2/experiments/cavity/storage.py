@@ -26,6 +26,19 @@ from ...programs import api as cQED_programs
 logger = logging.getLogger(__name__)
 
 
+def _resolve_storage_therm_clks(
+    exp: ExperimentBase,
+    value: int | None,
+    owner: str,
+) -> int:
+    return exp.resolve_override_or_attr(
+        value=value,
+        attr_name="st_therm_clks",
+        owner=owner,
+        cast=int,
+    )
+
+
 class StorageSpectroscopy(ExperimentBase):
     """Storage resonator frequency sweep with selective qubit rotation."""
 
@@ -322,10 +335,13 @@ class NumSplittingSpectroscopy(ExperimentBase):
         state_prep: Any = None,
         n_avg: int = 1000,
         *,
+        st_therm_clks: int | None = None,
         allow_default_state_prep: bool = False,
     ) -> ProgramBuildResult:
         attr = self.attr
-        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+        st_therm_clks = _resolve_storage_therm_clks(
+            self, st_therm_clks, "NumSplittingSpectroscopy"
+        )
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
@@ -371,6 +387,7 @@ class NumSplittingSpectroscopy(ExperimentBase):
             params={
                 "rf_centers": list(rf_centers), "rf_spans": list(rf_spans),
                 "df": df, "sel_r180": sel_r180, "n_avg": n_avg,
+                "st_therm_clks": st_therm_clks,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -387,11 +404,13 @@ class NumSplittingSpectroscopy(ExperimentBase):
         state_prep: Any = None,
         n_avg: int = 1000,
         *,
+        st_therm_clks: int | None = None,
         allow_default_state_prep: bool = False,
     ) -> RunResult:
         build = self.build_program(
             rf_centers=rf_centers, rf_spans=rf_spans, df=df,
             sel_r180=sel_r180, state_prep=state_prep, n_avg=n_avg,
+            st_therm_clks=st_therm_clks,
             allow_default_state_prep=allow_default_state_prep,
         )
         result = self.run_program(
@@ -454,9 +473,10 @@ class StorageRamsey(ExperimentBase):
         disp_pulse: str = "const_alpha",
         sel_r180: str = "sel_x180",
         n_avg: int = 200,
+        st_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
-        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+        st_therm_clks = _resolve_storage_therm_clks(self, st_therm_clks, "StorageRamsey")
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
@@ -480,6 +500,7 @@ class StorageRamsey(ExperimentBase):
             params={
                 "st_detune": st_detune, "disp_pulse": disp_pulse,
                 "sel_r180": sel_r180, "n_avg": n_avg,
+                "st_therm_clks": st_therm_clks,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -494,10 +515,12 @@ class StorageRamsey(ExperimentBase):
         disp_pulse: str = "const_alpha",
         sel_r180: str = "sel_x180",
         n_avg: int = 200,
+        st_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             delay_ticks=delay_ticks, st_detune=st_detune,
             disp_pulse=disp_pulse, sel_r180=sel_r180, n_avg=n_avg,
+            st_therm_clks=st_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -573,9 +596,10 @@ class StorageChiRamsey(ExperimentBase):
         disp_pulse: str = "const_alpha",
         x90_pulse: str = "x90",
         n_avg: int = 200,
+        st_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
-        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+        st_therm_clks = _resolve_storage_therm_clks(self, st_therm_clks, "StorageChiRamsey")
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
@@ -607,6 +631,7 @@ class StorageChiRamsey(ExperimentBase):
             params={
                 "fock_fq": fock_fq, "disp_pulse": disp_pulse,
                 "x90_pulse": x90_pulse, "n_avg": n_avg,
+                "st_therm_clks": st_therm_clks,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -621,10 +646,12 @@ class StorageChiRamsey(ExperimentBase):
         disp_pulse: str = "const_alpha",
         x90_pulse: str = "x90",
         n_avg: int = 200,
+        st_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             fock_fq=fock_fq, delay_ticks=delay_ticks,
             disp_pulse=disp_pulse, x90_pulse=x90_pulse, n_avg=n_avg,
+            st_therm_clks=st_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -724,9 +751,12 @@ class StoragePhaseEvolution(ExperimentBase):
         disp_eps_pulse: str = "disp_epsilon",
         sel_r180_pulse: str = "sel_x180",
         n_avg: int = 200,
+        st_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
-        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+        st_therm_clks = _resolve_storage_therm_clks(
+            self, st_therm_clks, "StoragePhaseEvolution"
+        )
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
@@ -756,6 +786,7 @@ class StoragePhaseEvolution(ExperimentBase):
                 "disp_alpha_pulse": disp_alpha_pulse,
                 "disp_eps_pulse": disp_eps_pulse,
                 "sel_r180_pulse": sel_r180_pulse, "n_avg": n_avg,
+                "st_therm_clks": st_therm_clks,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -772,12 +803,13 @@ class StoragePhaseEvolution(ExperimentBase):
         disp_eps_pulse: str = "disp_epsilon",
         sel_r180_pulse: str = "sel_x180",
         n_avg: int = 200,
+        st_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             fock_probe_fqs=fock_probe_fqs, snap_list=snap_list,
             delay_clks=delay_clks, disp_alpha_pulse=disp_alpha_pulse,
             disp_eps_pulse=disp_eps_pulse, sel_r180_pulse=sel_r180_pulse,
-            n_avg=n_avg,
+            n_avg=n_avg, st_therm_clks=st_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,

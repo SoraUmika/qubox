@@ -24,6 +24,19 @@ from ...tools.generators import validate_displacement_ops
 logger = logging.getLogger(__name__)
 
 
+def _resolve_storage_therm_clks(
+    exp: ExperimentBase,
+    value: int | None,
+    owner: str,
+) -> int:
+    return exp.resolve_override_or_attr(
+        value=value,
+        attr_name="st_therm_clks",
+        owner=owner,
+        cast=int,
+    )
+
+
 class FockResolvedSpectroscopy(ExperimentBase):
     """Fock-resolved spectroscopy with post-selection.
 
@@ -39,10 +52,13 @@ class FockResolvedSpectroscopy(ExperimentBase):
         sel_r180: str = "sel_x180",
         calibrate_ref_r180_S: bool = True,
         n_avg: int = 100,
+        st_therm_clks: int | None = None,
         allow_default_state_prep: bool = False,
     ) -> ProgramBuildResult:
         attr = self.attr
-        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+        st_therm_clks = _resolve_storage_therm_clks(
+            self, st_therm_clks, "FockResolvedSpectroscopy"
+        )
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
@@ -83,6 +99,7 @@ class FockResolvedSpectroscopy(ExperimentBase):
                 "sel_r180": sel_r180,
                 "calibrate_ref_r180_S": calibrate_ref_r180_S,
                 "n_avg": n_avg,
+                "st_therm_clks": st_therm_clks,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -98,12 +115,14 @@ class FockResolvedSpectroscopy(ExperimentBase):
         sel_r180: str = "sel_x180",
         calibrate_ref_r180_S: bool = True,
         n_avg: int = 100,
+        st_therm_clks: int | None = None,
         allow_default_state_prep: bool = False,
     ) -> RunResult:
         build = self.build_program(
             probe_fqs=probe_fqs, state_prep=state_prep,
             sel_r180=sel_r180, calibrate_ref_r180_S=calibrate_ref_r180_S,
-            n_avg=n_avg, allow_default_state_prep=allow_default_state_prep,
+            n_avg=n_avg, st_therm_clks=st_therm_clks,
+            allow_default_state_prep=allow_default_state_prep,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -202,9 +221,10 @@ class FockResolvedT1(ExperimentBase):
         delay_begin: int = 4,
         sel_r180: str = "sel_x180",
         n_avg: int = 1000,
+        st_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
-        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+        st_therm_clks = _resolve_storage_therm_clks(self, st_therm_clks, "FockResolvedT1")
 
         if fock_fqs is None:
             if attr.fock_fqs is None:
@@ -256,6 +276,7 @@ class FockResolvedT1(ExperimentBase):
             params={
                 "delay_end": delay_end, "dt": dt, "delay_begin": delay_begin,
                 "sel_r180": sel_r180, "n_avg": n_avg,
+                "st_therm_clks": st_therm_clks,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -272,11 +293,12 @@ class FockResolvedT1(ExperimentBase):
         delay_begin: int = 4,
         sel_r180: str = "sel_x180",
         n_avg: int = 1000,
+        st_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             fock_fqs=fock_fqs, fock_disps=fock_disps,
             delay_end=delay_end, dt=dt, delay_begin=delay_begin,
-            sel_r180=sel_r180, n_avg=n_avg,
+            sel_r180=sel_r180, n_avg=n_avg, st_therm_clks=st_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -404,9 +426,12 @@ class FockResolvedRamsey(ExperimentBase):
         delay_begin: int = 4,
         sel_r90: str = "sel_x90",
         n_avg: int = 1000,
+        st_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
-        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+        st_therm_clks = _resolve_storage_therm_clks(
+            self, st_therm_clks, "FockResolvedRamsey"
+        )
 
         if fock_fqs is None:
             if attr.fock_fqs is None:
@@ -461,6 +486,7 @@ class FockResolvedRamsey(ExperimentBase):
             params={
                 "delay_end": delay_end, "dt": dt, "delay_begin": delay_begin,
                 "sel_r90": sel_r90, "n_avg": n_avg,
+                "st_therm_clks": st_therm_clks,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -478,11 +504,12 @@ class FockResolvedRamsey(ExperimentBase):
         delay_begin: int = 4,
         sel_r90: str = "sel_x90",
         n_avg: int = 1000,
+        st_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             fock_fqs=fock_fqs, detunings=detunings, disps=disps,
             delay_end=delay_end, dt=dt, delay_begin=delay_begin,
-            sel_r90=sel_r90, n_avg=n_avg,
+            sel_r90=sel_r90, n_avg=n_avg, st_therm_clks=st_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,
@@ -609,9 +636,12 @@ class FockResolvedPowerRabi(ExperimentBase):
         sel_qb_pulse: str = "sel_x180",
         disp_n_list: list[str] | None = None,
         n_avg: int = 1000,
+        st_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
-        st_therm_clks = self.get_therm_clks("st", fallback=0) or 0
+        st_therm_clks = _resolve_storage_therm_clks(
+            self, st_therm_clks, "FockResolvedPowerRabi"
+        )
 
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
@@ -663,6 +693,7 @@ class FockResolvedPowerRabi(ExperimentBase):
             experiment_name="FockResolvedPowerRabi",
             params={
                 "sel_qb_pulse": sel_qb_pulse, "n_avg": n_avg,
+                "st_therm_clks": st_therm_clks,
             },
             resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
             bindings_snapshot=self._serialize_bindings(),
@@ -677,11 +708,12 @@ class FockResolvedPowerRabi(ExperimentBase):
         sel_qb_pulse: str = "sel_x180",
         disp_n_list: list[str] | None = None,
         n_avg: int = 1000,
+        st_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             fock_fqs=fock_fqs, gains=gains,
             sel_qb_pulse=sel_qb_pulse, disp_n_list=disp_n_list,
-            n_avg=n_avg,
+            n_avg=n_avg, st_therm_clks=st_therm_clks,
         )
         result = self.run_program(
             build.program, n_total=build.n_total,

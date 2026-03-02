@@ -360,6 +360,112 @@ W_TARGET = 1.0
 print("Manual calibration controls set.")"""))
 
 # ── 15 Mixer cal code ───────────────────────────────────
+cells.append(make_cell("markdown", """\
+### 3.1 Auto Calibration (Octave Built-In)
+
+Uses QM's built-in Octave mixer calibration for all active elements.
+Run this once after `session.open()` and before experiment sections.
+
+**NEEDS_RUN**: Requires QOP connection and Octave hardware."""))
+
+cells.append(make_cell("code", """\
+hw = session.hw
+
+# Optional LO overrides (set APPLY_LO_OVERRIDES=True to enable)
+APPLY_LO_OVERRIDES = True
+PERSIST_LO_OVERRIDES = True
+LO_GAIN_OVERRIDE_DB = None                 # global fallback (dB)
+EXTERNAL_LO_POWER_OVERRIDE_DBM = None      # e.g. 13.0 (external-LO elements only)
+LO_GAIN_OVERRIDE_MAP = {}                  # per-element gain override (dB)
+EXTERNAL_LO_POWER_OVERRIDE_MAP = {}        # per-element external-LO power override
+
+elements = hw.get_active_mixer_elements()
+if not elements:
+    raise RuntimeError("No active mixer elements found in live QM config.")
+
+el_los = hw.get_element_lo(elements)
+el_ifs = hw.get_element_if(elements)
+
+print("Mixer calibration targets (active elements):")
+for el, lo, if_fq in zip(elements, el_los, el_ifs):
+    print(f"  {el:20s}  LO={lo/1e9:.4f} GHz  IF={if_fq/1e6:.2f} MHz")
+
+applied_gain = {}
+applied_ext_lo_power = {}
+
+if APPLY_LO_OVERRIDES:
+    for el in elements:
+        gain_db = LO_GAIN_OVERRIDE_MAP.get(el, LO_GAIN_OVERRIDE_DB)
+        if gain_db is not None:
+            gain_db = float(gain_db)
+            hw.set_octave_gain(el, gain_db)
+
+            rf_out = hw._element_octave_rf_out(el) if hasattr(hw, "_element_octave_rf_out") else None
+            if rf_out is not None:
+                oct_name, rf_port = rf_out
+                session.config_engine.hw_set_octave_rf_output(
+                    octave=oct_name,
+                    rf_out=int(rf_port),
+                    gain=gain_db,
+                )
+            applied_gain[el] = gain_db
+
+        pwr_dbm = EXTERNAL_LO_POWER_OVERRIDE_MAP.get(el, EXTERNAL_LO_POWER_OVERRIDE_DBM)
+        if pwr_dbm is not None:
+            pwr_dbm = float(pwr_dbm)
+            try:
+                hw.set_external_lo_power(el, pwr_dbm)
+                applied_ext_lo_power[el] = pwr_dbm
+            except Exception as exc:
+                print(f"[warn] Skipping external LO power override for {el}: {exc}")
+
+    if applied_ext_lo_power:
+        def _patch_external_lo_power(hw_base, hw_extras):
+            qubox = hw_extras.setdefault("__qubox", {})
+            if not isinstance(qubox, dict):
+                qubox = {}
+                hw_extras["__qubox"] = qubox
+            power_map = qubox.setdefault("external_lo_power_dbm", {})
+            for name, value in applied_ext_lo_power.items():
+                power_map[str(name)] = float(value)
+
+        session.config_engine.patch_hardware(_patch_external_lo_power)
+
+    if PERSIST_LO_OVERRIDES and (applied_gain or applied_ext_lo_power):
+        session.config_engine.save_hardware()
+
+    if applied_gain:
+        print("\\nApplied LO gain overrides (dB):")
+        for el, val in applied_gain.items():
+            print(f"  {el:20s}  gain={val:.2f}")
+    if applied_ext_lo_power:
+        print("\\nApplied external LO power overrides (dBm):")
+        for el, val in applied_ext_lo_power.items():
+            print(f"  {el:20s}  power={val:.2f}")
+    if PERSIST_LO_OVERRIDES and (applied_gain or applied_ext_lo_power):
+        print("Persisted LO override updates to hardware.json and devices.json (when external LO was applied).")
+
+auto_results = hw.calibrate_element(
+    el=None,
+    method="auto",
+    save_to_db=True,
+    auto_sa_validate=True,
+    auto_sa_device_name="sa124b",
+)
+
+print("\\nAuto calibration complete.")
+if hasattr(auto_results, "__iter__") and not isinstance(auto_results, (str, bytes, dict)):
+    for r in auto_results:
+        print(f"  {r}")
+else:
+    print(f"  {auto_results}")"""))
+
+cells.append(make_cell("markdown", """\
+### 3.2 Manual IQ Calibration Run
+
+Use the SA124B-driven manual mixer calibration path when the built-in auto
+calibration needs refinement for a specific element."""))
+
 cells.append(make_cell("code", """\
 hw = session.hw
 
@@ -1243,7 +1349,7 @@ print(f"measureMacro confusion loaded: {measureMacro._ro_quality_params.get('con
 fq_entry = session.calibration.get_frequencies(attr.qb_el)
 cal_qb_fq = None if fq_entry is None else getattr(fq_entry, "qubit_freq", None)
 attr_qb_fq = getattr(attr, "qb_fq", None)
-print("\nQubit frequency binding check:")
+print("\\nQubit frequency binding check:")
 print(f"  calibration frequencies.{attr.qb_el}.qubit_freq = {cal_qb_fq}")
 print(f"  runtime attr.qb_fq                               = {attr_qb_fq}")
 if cal_qb_fq is not None and attr_qb_fq is not None:

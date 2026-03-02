@@ -9,22 +9,25 @@ import pytest
 from qubox_v2.analysis.cQED_attributes import cQED_attributes
 from qubox_v2.calibration.store import CalibrationStore
 from qubox_v2.experiments.calibration.gates import AllXY
+from qubox_v2.experiments.calibration.readout import IQBlob
+from qubox_v2.experiments.cavity.storage import NumSplittingSpectroscopy
 from qubox_v2.experiments.spectroscopy.qubit import QubitSpectroscopy
 from qubox_v2.experiments.spectroscopy.resonator import ResonatorSpectroscopy
 from qubox_v2.experiments.time_domain.coherence import T2Ramsey
 from qubox_v2.experiments.time_domain.rabi import PowerRabi
+from qubox_v2.programs.circuit_runner import CircuitRunner, Gate, QuantumCircuit
 
 
 class _FakeHW:
     def __init__(self) -> None:
-        self.elements = {"qubit": {}, "resonator": {}}
+        self.elements = {"qubit": {}, "resonator": {}, "storage": {}}
         self._fq: dict[str, float] = {}
 
     def set_element_fq(self, element: str, fq: float) -> None:
         self._fq[element] = float(fq)
 
     def get_element_lo(self, element: str) -> float:
-        return {"qubit": 6.0e9, "resonator": 8.8e9}.get(element, 0.0)
+        return {"qubit": 6.0e9, "resonator": 8.8e9, "storage": 7.2e9}.get(element, 0.0)
 
     def get_element_if(self, element: str) -> float:
         return self._fq.get(element, 0.0) - self.get_element_lo(element)
@@ -35,6 +38,12 @@ class _FakePulseInfo:
         self.length = length
         self.I_wf = np.ones(length)
         self.Q_wf = np.zeros(length)
+        self.op = "readout"
+        self.int_weights_mapping = {
+            "cos": "cos",
+            "sin": "sin",
+            "minus_sin": "minus_sin",
+        }
 
 
 class _FakePulseMgr:
@@ -58,7 +67,7 @@ class _FakeCtx:
         self.experiment_path = Path(".")
 
     def context_snapshot(self) -> cQED_attributes:
-        return cQED_attributes(qb_el="qubit", ro_el="resonator")
+        return cQED_attributes(qb_el="qubit", ro_el="resonator", st_el="storage")
 
 
 def _make_ctx(
@@ -66,12 +75,15 @@ def _make_ctx(
     *,
     qb_therm_clks: int | None = 4321,
     ro_therm_clks: int | None = 2468,
+    st_therm_clks: int | None = 1357,
     qubit_freq: float = 6.15e9,
     resonator_freq: float = 8.6e9,
+    storage_freq: float = 7.15e9,
 ) -> _FakeCtx:
     store = CalibrationStore(tmp_path / "calibration.json")
     store.set_cqed_params("transmon", qubit_freq=qubit_freq, qb_therm_clks=qb_therm_clks)
     store.set_cqed_params("resonator", resonator_freq=resonator_freq, ro_therm_clks=ro_therm_clks, lo_freq=8.8e9)
+    store.set_cqed_params("storage", storage_freq=storage_freq, st_therm_clks=st_therm_clks)
     store.save()
     return _FakeCtx(store)
 
@@ -195,3 +207,45 @@ def test_qubit_spectroscopy_uses_calibration_when_no_override(tmp_path, monkeypa
 
     assert build.params["qb_therm_clks"] == 2222
     assert build.resolved_parameter_sources["qb_therm_clks"]["source"] == "calibration"
+
+
+def test_num_splitting_uses_storage_calibration_when_no_override(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "qubox_v2.experiments.cavity.storage.cQED_programs.num_splitting_spectroscopy",
+        lambda *args, **kwargs: ("num_split", args, kwargs),
+    )
+    exp = NumSplittingSpectroscopy(_make_ctx(tmp_path, st_therm_clks=7777))
+
+    build = exp.build_program(
+        rf_centers=[6.11e9],
+        rf_spans=[1.0e6],
+        df=0.5e6,
+        n_avg=4,
+        state_prep=lambda: None,
+    )
+
+    assert build.params["st_therm_clks"] == 7777
+    assert build.resolved_parameter_sources["st_therm_clks"]["source"] == "calibration"
+
+
+def test_iq_blob_missing_calibration_raises_clear_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "qubox_v2.experiments.calibration.readout.cQED_programs.iq_blobs",
+        lambda *args, **kwargs: ("iq_blobs", args, kwargs),
+    )
+    exp = IQBlob(_make_ctx(tmp_path, qb_therm_clks=None))
+
+    with pytest.raises(ValueError, match="qb_therm_clks"):
+        exp.build_program(n_runs=8)
+
+
+def test_circuit_runner_xy_pair_requires_resolved_qb_therm_clks(tmp_path):
+    runner = CircuitRunner(_make_ctx(tmp_path))
+    circuit = QuantumCircuit(
+        name="xy_pair",
+        gates=(Gate(name="xy", target="qubit"),),
+        metadata={"qb_el": "qubit", "n_avg": 8},
+    )
+
+    with pytest.raises(ValueError, match="qb_therm_clks"):
+        runner.compile(circuit)

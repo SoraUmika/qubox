@@ -39,6 +39,32 @@ _DEFAULT_GAUSSIANITY_WARN = 2.0
 _MIN_SAMPLES_DISC = 100
 
 
+def _resolve_qubit_therm_clks(
+    exp: ExperimentBase,
+    value: int | None,
+    owner: str,
+) -> int:
+    return exp.resolve_override_or_attr(
+        value=value,
+        attr_name="qb_therm_clks",
+        owner=owner,
+        cast=int,
+    )
+
+
+def _resolve_readout_therm_clks(
+    exp: ExperimentBase,
+    value: int | None,
+    owner: str,
+) -> int:
+    return exp.resolve_override_or_attr(
+        value=value,
+        attr_name="ro_therm_clks",
+        owner=owner,
+        cast=int,
+    )
+
+
 def _stable_hash(payload: Mapping[str, Any]) -> str:
     try:
         encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
@@ -116,9 +142,10 @@ class IQBlob(ExperimentBase):
         self,
         r180: str = "x180",
         n_runs: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
-        qb_therm_clks = self.get_therm_clks("qb", fallback=0) or 0
+        qb_therm_clks = _resolve_qubit_therm_clks(self, qb_therm_clks, "IQBlob")
 
         prog = cQED_programs.iq_blobs(
             attr.ro_el, attr.qb_el, r180, qb_therm_clks, n_runs,
@@ -128,7 +155,11 @@ class IQBlob(ExperimentBase):
             n_total=n_runs,
             processors=(pp.proc_default,),
             experiment_name="IQBlob",
-            params={"r180": r180, "n_runs": n_runs},
+            params={
+                "r180": r180,
+                "n_runs": n_runs,
+                "qb_therm_clks": qb_therm_clks,
+            },
             resolved_frequencies={
                 attr.ro_el: self._resolve_readout_frequency(),
                 attr.qb_el: self._resolve_qubit_frequency(),
@@ -143,8 +174,13 @@ class IQBlob(ExperimentBase):
         self,
         r180: str = "x180",
         n_runs: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
-        build = self.build_program(r180=r180, n_runs=n_runs)
+        build = self.build_program(
+            r180=r180,
+            n_runs=n_runs,
+            qb_therm_clks=qb_therm_clks,
+        )
         return self.run_program(
             build.program,
             n_total=build.n_total,
@@ -230,9 +266,12 @@ class ReadoutGERawTrace(ExperimentBase):
         r180: str = "x180",
         ro_depl_clks: int = 10000,
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
-        qb_therm_clks = self.get_therm_clks("qb", fallback=0) or 0
+        qb_therm_clks = _resolve_qubit_therm_clks(
+            self, qb_therm_clks, "ReadoutGERawTrace"
+        )
 
         prog = cQED_programs.readout_ge_raw_trace(
             attr.qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg,
@@ -247,6 +286,7 @@ class ReadoutGERawTrace(ExperimentBase):
                 "r180": r180,
                 "ro_depl_clks": ro_depl_clks,
                 "n_avg": n_avg,
+                "qb_therm_clks": qb_therm_clks,
             },
             resolved_frequencies={
                 attr.ro_el: float(ro_freq),
@@ -263,12 +303,14 @@ class ReadoutGERawTrace(ExperimentBase):
         r180: str = "x180",
         ro_depl_clks: int = 10000,
         n_avg: int = 1000,
+        qb_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             ro_freq=ro_freq,
             r180=r180,
             ro_depl_clks=ro_depl_clks,
             n_avg=n_avg,
+            qb_therm_clks=qb_therm_clks,
         )
         return self.run_program(
             build.program,
@@ -327,10 +369,13 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
         ro_depl_clks: int | None = None,
         n_avg: int = 100,
         process_in_sim: bool = False,
+        ro_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
         self.measure_macro.set_drive_frequency(drive_frequency)
-        ro_therm_clks = self.get_therm_clks("ro", fallback=0) or 0
+        ro_therm_clks = _resolve_readout_therm_clks(
+            self, ro_therm_clks, "ReadoutGEIntegratedTrace"
+        )
 
         resolved_weights = weights
         if isinstance(weights, (list, tuple)) and len(weights) == 3 and all(isinstance(w, str) for w in weights):
@@ -382,7 +427,7 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
 
         prog = cQED_programs.readout_ge_integrated_trace(
             attr.qb_el, resolved_weights, num_div, div_clks,
-            r180, ro_depl_clks or ro_therm_clks, n_avg,
+            r180, ro_depl_clks if ro_depl_clks is not None else ro_therm_clks, n_avg,
         )
 
         # Legacy parity: post-processing to create g_trace/e_trace from II/IQ/QI/QQ
@@ -430,6 +475,7 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
                 "num_div": num_div,
                 "r180": r180,
                 "ro_depl_clks": ro_depl_clks,
+                "ro_therm_clks": ro_therm_clks,
                 "n_avg": n_avg,
                 "process_in_sim": bool(process_in_sim),
             },
@@ -454,6 +500,7 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
         ro_depl_clks: int | None = None,
         n_avg: int = 100,
         process_in_sim: bool = False,
+        ro_therm_clks: int | None = None,
     ) -> RunResult:
         build = self.build_program(
             ro_op=ro_op,
@@ -464,6 +511,7 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
             ro_depl_clks=ro_depl_clks,
             n_avg=n_avg,
             process_in_sim=process_in_sim,
+            ro_therm_clks=ro_therm_clks,
         )
         return self.run_program(
             build.program,

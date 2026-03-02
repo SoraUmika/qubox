@@ -422,7 +422,12 @@ class CircuitRunner:
     def _compile_xy_pair(self, circuit: QuantumCircuit, sweep: SweepSpec | None) -> CircuitBuildResult:
         params = dict(circuit.metadata)
         qb_el = params["qb_el"]
-        qb_therm_clks = int(params.get("qb_therm_clks", 250_000))
+        if "qb_therm_clks" not in params:
+            raise ValueError(
+                "CircuitRunner.xy_pair requires 'qb_therm_clks' in circuit metadata. "
+                "Resolve it from calibration or pass it explicitly before compiling."
+            )
+        qb_therm_clks = int(params["qb_therm_clks"])
         n_avg = int(params.get("n_avg", 64))
 
         op_a = str(params.get("op_a", "x180"))

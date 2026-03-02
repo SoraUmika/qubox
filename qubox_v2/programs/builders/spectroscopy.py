@@ -134,7 +134,7 @@ def resonator_power_spectroscopy(
             Q_st.buffer(len(gains)).buffer(len(if_frequencies)).average().save("Q")
     return resonator_spec_2D
 
-def qubit_spectroscopy(sat_pulse, if_frequencies, qb_gain, qb_len, qb_therm_clks:int=4, n_avg:int=1, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+def qubit_spectroscopy(sat_pulse, if_frequencies, qb_gain, qb_len, qb_therm_clks: int, n_avg: int = 1, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
     """
     Perform spectroscopy on the qubit by sweeping drive IF and measuring readout response.
 
@@ -144,7 +144,7 @@ def qubit_spectroscopy(sat_pulse, if_frequencies, qb_gain, qb_len, qb_therm_clks
         if_frequencies : Python array/list of IFs to sweep for the qubit drive
         qb_gain        : Gain for the qubit drive pulse
         qb_len         : Duration (in clock cycles) of the qubit drive pulse
-        qb_therm_clks  : Number of clock cycles to wait for qubit thermalization (default=4)
+        qb_therm_clks  : Number of clock cycles to wait for qubit thermalization
         n_avg          : Number of averaging iterations (default=1)
     """
     if bindings is not None:

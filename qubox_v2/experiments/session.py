@@ -306,8 +306,7 @@ class SessionManager:
             Explicit RF frequency override.  If *None*, resolved from
             calibration store or sample attributes.
         therm_clks : int | None
-            Thermalization wait override.  If *None*, resolved from
-            ``attr.<alias>_therm_clks`` or default 250 000.
+            Thermalization wait override. If *None*, resolved from calibration.
         """
         from ..core.bindings import DriveTarget
 
@@ -317,19 +316,19 @@ class SessionManager:
         if alias in ("qubit", "qb") or alias == getattr(ctx, "qb_el", None):
             ob = b.qubit
             element = ctx.qb_el or alias
-            default_therm = getattr(ctx, "qb_therm_clks", 250_000) or 250_000
+            resolved_therm = self.get_therm_clks("qb")
             cal_field = "qubit_freq"
         elif alias in ("storage", "st") or alias == getattr(ctx, "st_el", None):
             ob = b.storage
             if ob is None:
                 raise ValueError(f"No storage binding available for alias '{alias}'.")
             element = ctx.st_el or alias
-            default_therm = getattr(ctx, "st_therm_clks", 500_000) or 500_000
+            resolved_therm = self.get_therm_clks("st")
             cal_field = "storage_freq"
         elif alias in b.extras:
             ob = b.extras[alias]
             element = alias
-            default_therm = 250_000
+            resolved_therm = None
             cal_field = None
         else:
             raise ValueError(
@@ -358,10 +357,15 @@ class SessionManager:
                     if v is not None:
                         rf_freq = float(v)
 
-        therm = therm_clks if therm_clks is not None else int(default_therm)
+        therm = therm_clks if therm_clks is not None else resolved_therm
+        if therm is None and alias not in b.extras:
+            raise ValueError(
+                f"Missing thermalization clocks for alias '{alias}'. "
+                f"Provide therm_clks=... explicitly or add the matching calibration entry."
+            )
 
         return DriveTarget.from_output_binding(
-            ob, element=element, rf_freq=rf_freq, therm_clks=therm,
+            ob, element=element, rf_freq=rf_freq, therm_clks=None if therm is None else int(therm),
         )
 
     def readout_handle(

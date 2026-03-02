@@ -61,7 +61,6 @@ class QubitSpectroscopy(ExperimentBase):
         qb_therm = _resolve_qb_therm_clks(self, qb_therm_clks, "QubitSpectroscopy")
 
         ro_fq = self._resolve_readout_frequency()
-        qb_fq = self._resolve_qubit_frequency()
 
         prog = cQED_programs.qubit_spectroscopy(
             pulse, if_freqs, qb_gain, qb_len,
@@ -84,7 +83,7 @@ class QubitSpectroscopy(ExperimentBase):
                 "n_avg": n_avg, "transition": transition,
                 "qb_therm_clks": qb_therm,
             },
-            resolved_frequencies={attr.ro_el: ro_fq, attr.qb_el: qb_fq},
+            resolved_frequencies={attr.ro_el: ro_fq},
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.qubit_spectroscopy",
             sweep_axes={"frequencies": lo_qb + if_freqs},

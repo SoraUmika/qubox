@@ -314,14 +314,14 @@ class DriveTarget:
         LO frequency in Hz.
     rf_freq : float
         Target RF frequency in Hz.
-    therm_clks : int
-        Thermalization wait in clock cycles (default 250 000).
+    therm_clks : int | None
+        Thermalization wait in clock cycles.
     """
 
     element: str
     lo_freq: float
     rf_freq: float
-    therm_clks: int = 250_000
+    therm_clks: int | None = None
 
     @property
     def if_freq(self) -> float:
@@ -335,7 +335,7 @@ class DriveTarget:
         *,
         element: str,
         rf_freq: float | None = None,
-        therm_clks: int = 250_000,
+        therm_clks: int | None = None,
     ) -> "DriveTarget":
         """Construct a DriveTarget from an existing OutputBinding.
 
@@ -347,7 +347,7 @@ class DriveTarget:
             Ephemeral QM element name.
         rf_freq : float | None
             If *None*, computed from ``lo + IF`` on the binding.
-        therm_clks : int
+        therm_clks : int | None
             Thermalization wait (clock cycles).
         """
         lo = binding.lo_frequency or 0.0
