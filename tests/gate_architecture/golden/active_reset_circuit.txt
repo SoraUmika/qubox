@@ -1,0 +1,7 @@
+circuit: active_reset
+00 | Measure_iq_param_readout_0 | type=measure_iq | targets=readout | params={"kind":"iq","measure_key":"active_reset_m0","operation":"readout"} | tags=active_reset
+01 | Qubit_rotation_thetapi_qubit_1 | type=qubit_rotation | targets=qubit | params={"angle":"pi","op":"x180"} | condition=active_reset_m0.state | tags=active_reset,real_time
+blocks:
+- ActiveReset: type=protocol gates=[00,02) lanes=qubit,readout mode=real_time_branching_requested
+measurement_schema:
+- active_reset_m0: kind=iq op=readout derive=state->active_reset_m0.state:I_threshold threshold={"calibration":{"field":"threshold","key":"readout","namespace":"discrimination"},"default":0.0} sense=greater rotation={"calibration":{"field":"angle","key":"readout","namespace":"discrimination"},"default":0.0} streams=[I->active_reset_m0.I:fixed[shots]/save_all, Q->active_reset_m0.Q:fixed[shots]/save_all]

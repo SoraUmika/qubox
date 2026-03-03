@@ -1,0 +1,34 @@
+{
+  "records": [
+    {
+      "derived_state_name": null,
+      "derived_state_output": null,
+      "key": "ramsey_readout",
+      "kind": "iq",
+      "metadata": {},
+      "operation": "readout",
+      "state_rule": null,
+      "streams": [
+        {
+          "aggregate": "save_all",
+          "name": "I",
+          "output_name": "ramsey_readout.I",
+          "qua_type": "fixed",
+          "shape": [
+            "shots"
+          ]
+        },
+        {
+          "aggregate": "save_all",
+          "name": "Q",
+          "output_name": "ramsey_readout.Q",
+          "qua_type": "fixed",
+          "shape": [
+            "shots"
+          ]
+        }
+      ],
+      "with_state": false
+    }
+  ]
+}

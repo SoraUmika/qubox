@@ -1,0 +1,9 @@
+diagram: ramsey
+step    |00                  |01                  |02                  |03                  |
+Ramsey  |[Ramsey-------------|--------------------|--------------------|-------------------]|
+qubit   |QRot x90            |Idle 12 clks        |QRot x90            |                    |
+readout |                    |                    |                    |MeasureIQ ramsey_...|
+blocks:
+- Ramsey: type=protocol gates=[00,04) lanes=qubit,readout
+measurement_schema:
+- ramsey_readout: kind=iq op=readout streams=[I->ramsey_readout.I:fixed[shots]/save_all, Q->ramsey_readout.Q:fixed[shots]/save_all]

@@ -87,6 +87,7 @@
 25. [Roleless Experiment Primitives (v2.1)](#25-roleless-experiment-primitives-v21)
 26. [Program Build & Simulation (v2.2)](#26-program-build--simulation-v22)
 27. [HardwareDefinition Builder (v2.3)](#27-hardwaredefinition-builder-v23)
+28. [Gate → Protocol → Circuit Architecture (v2.4)](#28-gate--protocol--circuit-architecture-v24)
 
 **Appendices:**
 
@@ -5103,6 +5104,507 @@ session = SessionManager.from_sample(..., hardware=hw_def)
 
 ---
 
+## 28. Gate → Protocol → Circuit Architecture (v2.4)
+
+> **Modules**: `qubox_v2.programs.circuit_runner`,
+> `qubox_v2.programs.circuit_compiler`, `qubox_v2.programs.circuit_protocols`,
+> `qubox_v2.programs.circuit_display`, `qubox_v2.programs.circuit_execution`,
+> `qubox_v2.programs.circuit_postprocess`, `qubox_v2.programs.measurement`
+
+The v2.4 API introduces a gate-driven circuit pipeline that sits alongside
+the legacy program-builder flows.  Experiments are expressed as ordered
+sequences of **intent gates** (`Gate`), grouped into a **`QuantumCircuit`**
+with an explicit **`MeasurementSchema`**.  A protocol layer builds circuits
+from high-level descriptions (Ramsey, Echo, Active Reset), and the v2
+compiler lowers them to QUA programs.
+
+### 28.1 Design Principles
+
+1. **Single IR** — `Gate` is the sole intent gate; `QuantumCircuit` is the
+   sole circuit type.  Aliases `IntentGate = Gate` and `Circuit =
+   QuantumCircuit` exist for back-compat.
+2. **IQ-only measurement** — `compile_v2` emits IQ acquisition at QUA
+   program time.  State derivation is a post-run analysis step via
+   `StateRule` + `derive_state()`, never baked into the QUA program.
+3. **Protocol purity** — Protocol builders (`RamseyProtocol.build()`, etc.)
+   are zero-side-effect factories that return fully-formed circuits.
+4. **Cluster safety** — Only `Cluster_1` is accepted for execution.
+   `Cluster_2` is rejected immediately.  Default mode is dry-run (compile +
+   diagram only).
+5. **Display honesty** — Analysis-only blocks render with `[analysis-only]`
+   annotations.  Conditional gates that cannot compile to real-time QUA
+   branches are documented honestly in diagrams and raise at compile time.
+
+### 28.2 Canonical IR Types
+
+**Module**: `qubox_v2.programs.circuit_runner`
+
+#### `Gate`
+
+```python
+@dataclass(frozen=True)
+class Gate:
+    name: str
+    target: str | tuple[str, ...]
+    params: dict[str, Any] = field(default_factory=dict)
+    duration_clks: int | None = None
+    tags: tuple[str, ...] = ()
+    instance_name: str | None = None
+    condition: GateCondition | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+```
+
+| Property | Return | Description |
+|----------|--------|-------------|
+| `gate_type` | `str` | Normalised name: `measure_iq` for any measure variant, `idle` for `wait`, else lowercase `name` |
+| `targets` | `tuple[str, ...]` | Always-tuple form of `target` |
+| `resolved_name(index)` | `str` | `instance_name` if set, else `f"{name}_{index}"` |
+
+#### `QuantumCircuit`
+
+```python
+@dataclass(frozen=True)
+class QuantumCircuit:
+    name: str
+    gates: tuple[Gate, ...]
+    metadata: dict[str, Any] = field(default_factory=dict)
+    measurement_schema: MeasurementSchema | None = None
+    blocks: tuple[CircuitBlock, ...] = ()
+```
+
+| Method | Signature | Return |
+|--------|-----------|--------|
+| `with_stable_gate_names()` | `() -> QuantumCircuit` | Copy with `instance_name` set on every gate |
+| `to_text()` | `() -> str` | Compact text listing |
+| `lane_names()` | `() -> list[str]` | Unique targets in gate order |
+| `to_diagram_text(cell_width=20)` | `() -> str` | Full ASCII diagram |
+| `draw(…)` | `(figsize, save_path, include_gate_names) -> Figure` | Matplotlib timeline |
+| `display(…)` | Same as `draw()` | Alias |
+| `draw_logical(…)` | Same as `draw()` | Alias |
+| `draw_pulses(runner)` | `(runner, **kw) -> Figure` | Delegates to `CircuitRunner.visualize_pulses()` |
+
+#### `ParameterSource`
+
+```python
+@dataclass(frozen=True)
+class ParameterSource:
+    calibration: CalibrationReference | None = None
+    override: Any = _UNSET
+    attr_fallback: str | None = None
+    default: Any = _UNSET
+    required: bool = False
+```
+
+Resolution order: **override → calibration → cQED_attributes → default → error**.
+
+#### `CalibrationReference`
+
+```python
+@dataclass(frozen=True)
+class CalibrationReference:
+    namespace: str   # "pulse_calibration", "cqed_params", "frequencies", etc.
+    key: str         # Element or calibration key
+    field: str       # Attribute name on the calibration object
+```
+
+#### `MeasurementSchema` & `MeasurementRecord`
+
+```python
+@dataclass(frozen=True)
+class MeasurementRecord:
+    key: str
+    kind: str = "iq"
+    operation: str = "readout"
+    with_state: bool = False
+    streams: tuple[StreamSpec, ...] = ()
+    state_rule: StateRule | None = None
+    derived_state_name: str = "state"
+
+    def output_name(self, stream_name: str) -> str:
+        return f"{self.key}.{stream_name}"
+
+    def state_output_name(self) -> str:
+        return f"{self.key}.{self.derived_state_name}"
+
+@dataclass(frozen=True)
+class MeasurementSchema:
+    records: tuple[MeasurementRecord, ...] = ()
+
+    def validate(self) -> MeasurementSchema  # raises ValueError on violations
+    def to_payload(self) -> dict[str, Any]
+```
+
+Validation rules enforced by `validate()`:
+- Record keys must be unique.
+- `StreamSpec.qua_type` must be in `{"fixed", "int", "bool"}`.
+- `StreamSpec.aggregate` must be in `{"save", "save_all", "average", "buffer"}`.
+- IQ records (`kind="iq"`) must have both `I` and `Q` streams.
+- `with_state=True` is rejected (compilation never produces real-time state).
+
+#### `StreamSpec`
+
+```python
+@dataclass(frozen=True)
+class StreamSpec:
+    name: str
+    qua_type: str = "fixed"
+    shape: tuple[str, ...] = ("shots",)
+    aggregate: str = "save_all"
+```
+
+#### Supporting Types
+
+| Type | Fields |
+|------|--------|
+| `GateCondition` | `measurement_key`, `source`, `comparator` (`"truthy"`, `"=="`, `">"`, `"<"`), `value` |
+| `ConditionalGate` | `gate: Gate`, `condition: GateCondition` — helper, calls `to_gate()` |
+| `CircuitBlock` | `label`, `start`, `stop`, `block_type` (`"protocol"`, `"repeat"`, …), `lanes`, `metadata` |
+
+### 28.3 Protocol Builders
+
+**Module**: `qubox_v2.programs.circuit_protocols`
+
+#### `RamseyProtocol`
+
+```python
+class RamseyProtocol:
+    def __init__(
+        self,
+        qubit: str = "qubit",
+        readout: str = "readout",
+        tau_clks: int = 10,
+        r90_op: str = "x90",
+        measure_operation: str = "readout",
+        n_shots: int = 100,
+    ): ...
+
+    def build(self) -> QuantumCircuit:
+        """X90 → Idle(τ) → X90 → MeasureIQ"""
+```
+
+#### `EchoProtocol`
+
+```python
+class EchoProtocol:
+    def __init__(
+        self,
+        qubit: str = "qubit",
+        readout: str = "readout",
+        tau_clks: int = 10,
+        r90_op: str = "x90",
+        r180_op: str = "x180",
+        measure_operation: str = "readout",
+        n_shots: int = 100,
+    ): ...
+
+    def build(self) -> QuantumCircuit:
+        """X90 → Idle(τ/2) → X180 → Idle(τ/2) → X90 → MeasureIQ"""
+```
+
+#### `ActiveResetProtocol`
+
+```python
+class ActiveResetProtocol:
+    def __init__(
+        self,
+        qubit: str = "qubit",
+        readout: str = "readout",
+        pi_op: str = "x180",
+        measure_operation: str = "readout",
+        iterations: int = 3,
+        n_shots: int = 100,
+        enable_real_time_branching: bool = False,
+        state_rule: StateRule | None = None,
+    ): ...
+
+    def build(self) -> QuantumCircuit:
+        """
+        Default (analysis-only): MeasureIQ with StateRule metadata.
+        State derived post-run via derive_state().
+
+        enable_real_time_branching=True: Adds ConditionalGate(pi_op)
+        that correctly raises RuntimeError at compile time because
+        compile_v2 cannot emit real-time QUA branches on derived state.
+        """
+```
+
+#### Convenience Wrappers
+
+```python
+def make_ramsey_circuit(**kwargs) -> QuantumCircuit
+def make_echo_circuit(**kwargs) -> QuantumCircuit
+def make_active_reset_circuit(**kwargs) -> QuantumCircuit
+```
+
+### 28.4 Compiler
+
+**Module**: `qubox_v2.programs.circuit_compiler`
+
+```python
+class CircuitRunnerV2:
+    def __init__(self, session: Any): ...
+
+    def compile(
+        self, circuit: QuantumCircuit, n_shots: int | None = None
+    ) -> ProgramBuildResult:
+        """
+        Lower an intent circuit to a QUA program.
+
+        Returns ProgramBuildResult with:
+        - program: QUA program object
+        - processors: tuple of post-run processors (state derivation)
+        - metadata: diagram_text, measurement_schema, instruction_trace,
+                    resolution_report_text, post_processing, compiler_warnings
+        - resolved_frequencies: {element: freq_hz}
+        - resolved_parameter_sources: {gate.param: {value, source, reference}}
+        """
+```
+
+**Supported gate types**:
+
+| `gate_type` | Lowering | Notes |
+|-------------|----------|-------|
+| `measure_iq` | `measureMacro.measure()` → IQ streams | Configures readout pulse via `_configure_measure_macro()` |
+| `idle` / `wait` | `wait(clks, target)` | |
+| `frame_update` | `update_frequency()` | Only `kind="if_hz"` currently supported |
+| `play` / `play_pulse` | `play(op, target)` | Supports `amplitude`, `duration_clks`, `detune`, `condition` |
+| `qubit_rotation` / `X` / `Y` | Policy-dispatched | `implementation_policy` selects: `"op"` (named op), `"hardware_reference"` (`QubitRotationHardware`), `"gaussian"` / `"drag_gaussian"` / `"square"` (waveform synthesis) |
+| `displacement` | `DisplacementHardware.build()` | |
+| `sqr` | `SQRHardware.build()` | |
+
+**Parameter resolution**:
+
+The compiler resolves each `ParameterSource` field through:
+1. `override` (if set)
+2. `CalibrationReference` lookup: `namespace` → calibration store method → `getattr(obj, field)`
+3. `attr_fallback` → `getattr(cQED_attributes, fallback_name)`
+4. `default`
+5. Raise `ValueError` if required
+
+**Legacy bridge** (in `CircuitRunner`):
+
+```python
+# Both delegate to CircuitRunnerV2(session).compile()
+runner.compile_v2(circuit, n_shots=None)
+runner.compile_program(circuit, n_shots=None)
+```
+
+### 28.5 Target Aliases
+
+The compiler resolves symbolic target names to physical element names via
+`cQED_attributes`:
+
+| Alias | Resolves To |
+|-------|-------------|
+| `"qubit"`, `"qb"` | `attr.qb_el` |
+| `"readout"`, `"ro"`, `"resonator"` | `attr.ro_el` |
+| `"storage"`, `"st"` | `attr.st_el` |
+
+Any other target name is passed through unchanged.
+
+### 28.6 Display & Diagrams
+
+**Module**: `qubox_v2.programs.circuit_display`
+
+```python
+def circuit_to_diagram_text(
+    circuit: QuantumCircuit, *, cell_width: int = 20
+) -> str
+
+def draw_circuit(
+    circuit: QuantumCircuit,
+    figsize: tuple[float, float] | None = None,
+    save_path: str | None = None,
+    include_gate_names: bool = False,
+) -> matplotlib.figure.Figure
+```
+
+The text diagram includes:
+- **Gate order** header row
+- **Lane rows** per target element
+- **Protocol block** rows (e.g. `[Ramsey]`)
+- **Analysis** rows for `state_rule` derivations
+- **Branch** rows for conditional gates
+- **Warnings** for analysis-only blocks
+- **Measurement schema** summary
+
+### 28.7 Execution
+
+**Module**: `qubox_v2.programs.circuit_execution`
+
+```python
+SAFE_OPX_CLUSTER = "Cluster_1"
+
+@dataclass
+class CompiledCircuitExecution:
+    build: ProgramBuildResult
+    diagram_text: str
+    cluster_name: str
+    dry_run: bool
+    connection: Any | None = None
+    run_result: Any | None = None
+
+def run_compiled_circuit(
+    session: Any,
+    circuit: QuantumCircuit,
+    cluster: str = SAFE_OPX_CLUSTER,
+    run_on_opx: bool = False,
+    n_shots: int | None = None,
+    execution_kwargs: dict[str, Any] | None = None,
+) -> CompiledCircuitExecution
+```
+
+**Safety guardrails**:
+
+| Scenario | Behavior |
+|----------|----------|
+| `cluster != "Cluster_1"` | Immediate `ValueError` — no compilation |
+| `run_on_opx=False` (default) | Compile + diagram only; `run_result` is `None` |
+| `run_on_opx=True`, cluster matches | Compile → open QM → execute → return result |
+| Ambiguous / missing cluster | `RuntimeError` before any compilation |
+
+### 28.8 Post-Run State Derivation
+
+**Module**: `qubox_v2.programs.circuit_postprocess`,
+`qubox_v2.programs.measurement`
+
+```python
+# StateRule defines how to derive boolean state from IQ data
+@dataclass(frozen=True)
+class StateRule:
+    kind: str = "I_threshold"
+    threshold: Any = 0.0
+    sense: str = "greater"         # "greater" or "less"
+    rotation_angle: Any | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+# Apply a rule to IQ data
+def derive_state(iq: Any, rule: StateRule) -> np.ndarray:
+    """
+    iq: dict with 'I'/'Q' keys, (I, Q) tuple, or complex ndarray
+    Returns boolean ndarray.
+    """
+```
+
+The compiler attaches a state-derivation processor to
+`ProgramBuildResult.processors` for every `MeasurementRecord` that has a
+`state_rule`.  After the QUA job completes, call each processor on the
+output dict to populate `<key>.state` from `<key>.I` / `<key>.Q`.
+
+### 28.9 Usage Examples
+
+**Build and display a Ramsey circuit (no hardware):**
+
+```python
+from qubox_v2.programs.circuit_protocols import RamseyProtocol
+from qubox_v2.programs.circuit_execution import run_compiled_circuit
+
+circuit = RamseyProtocol(tau_clks=12, n_shots=64).build()
+
+# Display the circuit diagram
+print(circuit.to_diagram_text())
+circuit.draw(include_gate_names=True)
+
+# Compile (dry-run, no hardware)
+execution = run_compiled_circuit(session, circuit, run_on_opx=False)
+print(execution.diagram_text)
+```
+
+**Build an Echo circuit and inspect the resolution report:**
+
+```python
+from qubox_v2.programs.circuit_protocols import EchoProtocol
+from qubox_v2.programs.circuit_compiler import CircuitRunnerV2
+
+circuit = EchoProtocol(tau_clks=20, n_shots=100).build()
+build = CircuitRunnerV2(session).compile(circuit)
+
+print(build.metadata["resolution_report_text"])
+print(build.metadata["instruction_trace"])
+print(build.resolved_frequencies)
+```
+
+**Active Reset with post-run state derivation:**
+
+```python
+import numpy as np
+from qubox_v2.programs.circuit_protocols import ActiveResetProtocol
+from qubox_v2.programs.circuit_compiler import CircuitRunnerV2
+
+circuit = ActiveResetProtocol(iterations=1, n_shots=100).build()
+build = CircuitRunnerV2(session).compile(circuit)
+
+# After QUA job completes, apply the state-derivation processor:
+raw_output = job.result_handles  # ... fetch IQ data
+processor = build.processors[0]
+derived = processor({
+    "active_reset_m0.I": np.array([...]),
+    "active_reset_m0.Q": np.array([...]),
+})
+# derived["active_reset_m0.state"] is a boolean ndarray
+```
+
+**Use ParameterSource for calibration-aware gates:**
+
+```python
+from qubox_v2.programs.circuit_runner import (
+    Gate, QuantumCircuit, ParameterSource, CalibrationReference,
+    MeasurementSchema,
+)
+
+gate = Gate(
+    name="qubit_rotation",
+    target="qubit",
+    params={
+        "implementation_policy": "drag_gaussian",
+        "amplitude": ParameterSource(
+            calibration=CalibrationReference("pulse_calibration", "ge_ref_r180", "amplitude"),
+            override=0.19,  # Override takes precedence
+        ),
+        "length": ParameterSource(
+            calibration=CalibrationReference("pulse_calibration", "ge_ref_r180", "length"),
+        ),
+    },
+)
+circuit = QuantumCircuit(
+    name="custom",
+    gates=(gate,),
+    metadata={"n_shots": 100},
+    measurement_schema=MeasurementSchema(),
+)
+```
+
+### 28.10 Imports Quick Reference
+
+```python
+# IR types
+from qubox_v2.programs.circuit_runner import (
+    Gate, QuantumCircuit, ParameterSource, CalibrationReference,
+    GateCondition, ConditionalGate, CircuitBlock,
+    MeasurementSchema, MeasurementRecord, StreamSpec,
+)
+
+# Protocol builders
+from qubox_v2.programs.circuit_protocols import (
+    RamseyProtocol, EchoProtocol, ActiveResetProtocol,
+    make_ramsey_circuit, make_echo_circuit, make_active_reset_circuit,
+)
+
+# Compiler
+from qubox_v2.programs.circuit_compiler import CircuitRunnerV2
+
+# Execution
+from qubox_v2.programs.circuit_execution import run_compiled_circuit
+
+# Post-processing
+from qubox_v2.programs.measurement import StateRule, derive_state
+
+# Display (usually accessed via QuantumCircuit methods)
+from qubox_v2.programs.circuit_display import circuit_to_diagram_text, draw_circuit
+```
+
+---
+
 ## Appendix A: Utility Functions
 
 ### `qubox_v2.experiments.experiment_base`
@@ -5241,6 +5743,18 @@ from qubox_v2.tools.waveforms import (
 # Gate classes
 from qubox_v2.gates.gate import Gate
 
+# Circuit architecture (v2.4)
+from qubox_v2.programs.circuit_runner import (
+    Gate as IntentGate, QuantumCircuit, ParameterSource, CalibrationReference,
+    MeasurementSchema, MeasurementRecord, StreamSpec,
+)
+from qubox_v2.programs.circuit_protocols import (
+    RamseyProtocol, EchoProtocol, ActiveResetProtocol,
+)
+from qubox_v2.programs.circuit_compiler import CircuitRunnerV2
+from qubox_v2.programs.circuit_execution import run_compiled_circuit
+from qubox_v2.programs.measurement import StateRule, derive_state
+
 # Result types
 from qubox_v2.experiments.result import AnalysisResult, FitResult
 
@@ -5270,6 +5784,11 @@ class MyExp(ExperimentBase):
     def run(self, **kw): ...
     def analyze(self, result, **kw): ...
     def plot(self, analysis, **kw): ...
+
+# Pattern 4: Gate → Protocol → Circuit (v2.4)
+circuit = RamseyProtocol(tau_clks=12, n_shots=64).build()
+print(circuit.to_diagram_text())
+execution = run_compiled_circuit(session, circuit, run_on_opx=False)
 ```
 
 ### ExperimentBase Accessor Quick Reference

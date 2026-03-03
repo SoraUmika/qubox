@@ -1710,3 +1710,77 @@ three additional classes to `_build_impl()` + `build_program()` execution flow:
 - `qubox_v2/experiments/calibration/readout.py`
 - `docs/circuit_runner_serialization_validation.md` (regenerated)
 - `docs/CHANGELOG.md` — This entry
+---
+
+### 2026-03-03 â€” Gate/Protocol/Circuit Hardening: Post-Processing Split, Honest Display, Schema Validation
+
+**Classification: Moderate**
+
+Hardened the new gate-driven circuit pipeline so compile-time behavior,
+analysis-time behavior, display semantics, and OPX cluster guard behavior are
+explicitly separated and regression-locked.
+
+**Summary:**
+
+1. **State derivation moved out of compilation**
+   - `compile_v2` no longer derives boolean state inside QUA lowering.
+   - Measurement compilation remains IQ-only.
+   - Resolved `StateRule` metadata is now attached as post-processing via
+     `ProgramBuildResult.processors`.
+   - Added `qubox_v2/programs/circuit_postprocess.py` to apply
+     `derive_state()` after execution.
+
+2. **Active-reset display and branching behavior hardened**
+   - Analysis-only active reset is now labeled explicitly in diagram text and
+     block metadata.
+   - Text diagrams now include explicit analysis sections describing
+     `MeasureIQ -> derive_state(...) -> external/next-shot conditional action`.
+   - Real-time branch requests remain visible in the IR/display, but
+     `compile_v2` now raises a loud error instead of silently pretending to
+     lower post-processed state into QUA branching.
+
+3. **Measurement schema invariants added**
+   - Added `MeasurementSchema.validate()`.
+   - Enforced unique record keys, required IQ streams, valid shapes and
+     aggregates, namespaced output uniqueness, and truthful state-output claims.
+   - Measurement outputs are now saved with deterministic namespaced keys such
+     as `ramsey_readout.I` and `active_reset_m0.Q`.
+
+4. **Cluster guard audit completed**
+   - Confirmed legacy cluster selection remains in the legacy session / QMM
+     construction path and was not modified.
+   - Confirmed new guarded circuit execution keeps cluster selection local to
+     `qubox_v2/programs/circuit_execution.py`.
+   - `Cluster_2` requests hard-fail immediately in the guarded runner tests.
+
+5. **Documentation and reporting added**
+   - Updated `architecture_design.md` to document:
+     - IQ-only compilation contract
+     - analysis-time state derivation
+     - measurement schema validation
+     - legacy versus new cluster selection locations
+   - Added `test_case_report.md` summarizing the feature-area tests and run
+     commands.
+
+6. **Golden and regression coverage expanded**
+   - Updated gate-architecture goldens for namespaced stream outputs and
+     analysis-only active-reset snapshots.
+   - Added tests for:
+     - schema validation failures
+     - post-processing state derivation
+     - loud failure on unsupported real-time derived-state branching
+     - Cluster_2 hard-fail behavior
+
+**Files affected:**
+
+- `qubox_v2/programs/circuit_runner.py`
+- `qubox_v2/programs/circuit_protocols.py`
+- `qubox_v2/programs/circuit_compiler.py`
+- `qubox_v2/programs/circuit_display.py`
+- `qubox_v2/programs/circuit_postprocess.py` (new)
+- `tests/gate_architecture/conftest.py`
+- `tests/gate_architecture/test_gate_architecture.py`
+- `tests/gate_architecture/golden/*`
+- `architecture_design.md`
+- `test_case_report.md` (new)
+- `docs/CHANGELOG.md` â€” This entry

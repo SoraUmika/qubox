@@ -1,0 +1,21 @@
+circuit: ramsey
+frequencies:
+- qubit: 6050000000
+- readout: 8100000000
+gates:
+- [00] Qubit_rotation_thetapi/2_qubit_0 type=qubit_rotation targets=qubit
+  base_frequency=6050000000.0 source=calibration
+  op=x90 source=override
+- [01] Idle_param_qubit_1 type=idle targets=qubit
+  duration_clks=12 source=override
+- [02] Qubit_rotation_thetapi/2_qubit_2 type=qubit_rotation targets=qubit
+  base_frequency=6050000000.0 source=calibration
+  op=x90 source=override
+- [03] Measure_iq_param_readout_3 type=measure_iq targets=readout
+  drive_frequency=8100000000.0 source=calibration
+  operation=readout source=override
+trace:
+- play target=qubit params={'operation': 'x90'}
+- wait target=qubit params={'duration_clks': 12}
+- play target=qubit params={'operation': 'x90'}
+- measure target=readout params={'kind': 'iq', 'measure_key': 'ramsey_readout', 'operation': 'readout', 'streams': ['ramsey_readout.I', 'ramsey_readout.Q'], 'with_state': False}

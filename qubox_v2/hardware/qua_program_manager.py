@@ -117,6 +117,10 @@ class QuaProgramManager:
             return None
         return self._config_engine.hardware_base
 
+    @property
+    def cluster_name(self) -> str:
+        return self._cluster_name
+
     def load_hardware(self, path: str | Path) -> None:
         """Load hardware.json and (re-)create the config engine."""
         path = Path(path)

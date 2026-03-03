@@ -661,25 +661,24 @@ class TestMultiProgramExperiment:
     """P2.1: MultiProgramExperiment base class."""
 
     def _load_module(self):
-        # Stub ExperimentBase if not yet available
         eb_name = "qubox_v2.experiments.experiment_base"
-        if eb_name not in sys.modules:
-            stub = types.ModuleType(eb_name)
+        stub = types.ModuleType(eb_name)
 
-            class _StubExperimentBase:
-                def __init__(self, ctx=None):
-                    self._ctx = ctx
+        class _StubExperimentBase:
+            def __init__(self, ctx=None):
+                self._ctx = ctx
 
-                @property
-                def name(self):
-                    return type(self).__name__
+            @property
+            def name(self):
+                return type(self).__name__
 
-                @property
-                def hw(self):
-                    return self._ctx
+            @property
+            def hw(self):
+                return self._ctx
 
-            stub.ExperimentBase = _StubExperimentBase
-            sys.modules[eb_name] = stub
+        stub.ExperimentBase = _StubExperimentBase
+        sys.modules[eb_name] = stub
+        sys.modules.pop("qubox_v2.experiments.multi_program", None)
 
         return _load_as_submodule(
             "experiments/multi_program.py",

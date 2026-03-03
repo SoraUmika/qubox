@@ -1,0 +1,131 @@
+diagram_text:
+diagram: active_reset
+step                       |00                  |
+ActiveReset [analysis-only]|[ActiveReset [ana...|
+readout                    |MeasureIQ active_...|
+qubit                      |                    |
+ActiveReset:analysis       |derive_state -> a...|
+blocks:
+- ActiveReset [analysis-only]: type=protocol gates=[00,01) lanes=qubit,readout
+analysis:
+- ActiveReset: MeasureIQ active_reset_m0 -> derive_state(active_reset_m0.state) -> external/next-shot conditional action
+warnings:
+- Active reset is analysis-only in compile_v2: MeasureIQ is emitted at program time, then derive_state and next-shot conditional action happen after the run. Set enable_real_time_branching=True to request a real-time branch.
+measurement_schema:
+- active_reset_m0: kind=iq op=readout derive=state->active_reset_m0.state:I_threshold threshold={"calibration":{"field":"threshold","key":"readout","namespace":"discrimination"},"default":0.0} sense=greater rotation={"calibration":{"field":"angle","key":"readout","namespace":"discrimination"},"default":0.0} streams=[I->active_reset_m0.I:fixed[shots]/save_all, Q->active_reset_m0.Q:fixed[shots]/save_all]
+
+measurement_schema:
+{
+  "records": [
+    {
+      "derived_state_name": "state",
+      "derived_state_output": "active_reset_m0.state",
+      "key": "active_reset_m0",
+      "kind": "iq",
+      "metadata": {
+        "protocol": "active_reset"
+      },
+      "operation": "readout",
+      "state_rule": {
+        "kind": "I_threshold",
+        "metadata": {
+          "source": "CalibrationStore.discrimination"
+        },
+        "rotation_angle": {
+          "calibration": {
+            "field": "angle",
+            "key": "readout",
+            "namespace": "discrimination"
+          },
+          "default": 0.0
+        },
+        "sense": "greater",
+        "threshold": {
+          "calibration": {
+            "field": "threshold",
+            "key": "readout",
+            "namespace": "discrimination"
+          },
+          "default": 0.0
+        }
+      },
+      "streams": [
+        {
+          "aggregate": "save_all",
+          "name": "I",
+          "output_name": "active_reset_m0.I",
+          "qua_type": "fixed",
+          "shape": [
+            "shots"
+          ]
+        },
+        {
+          "aggregate": "save_all",
+          "name": "Q",
+          "output_name": "active_reset_m0.Q",
+          "qua_type": "fixed",
+          "shape": [
+            "shots"
+          ]
+        }
+      ],
+      "with_state": false
+    }
+  ]
+}
+
+instruction_trace:
+[
+  {
+    "op": "measure",
+    "params": {
+      "kind": "iq",
+      "measure_key": "active_reset_m0",
+      "operation": "readout",
+      "streams": [
+        "active_reset_m0.I",
+        "active_reset_m0.Q"
+      ],
+      "with_state": false
+    },
+    "target": "readout"
+  }
+]
+
+resolution_report:
+circuit: active_reset
+frequencies:
+- readout: 8100000000
+gates:
+- [00] Measure_iq_param_readout_0 type=measure_iq targets=readout
+  drive_frequency=8100000000.0 source=calibration
+  operation=readout source=override
+  state.kind=I_threshold source=override
+  state.rotation_angle=0.25 source=calibration ref=discrimination.readout.angle
+  state.sense=greater source=override
+  state.threshold=0.015 source=calibration ref=discrimination.readout.threshold
+trace:
+- measure target=readout params={'kind': 'iq', 'measure_key': 'active_reset_m0', 'operation': 'readout', 'streams': ['active_reset_m0.I', 'active_reset_m0.Q'], 'with_state': False}
+
+post_processing:
+[
+  {
+    "input_streams": [
+      "active_reset_m0.I",
+      "active_reset_m0.Q"
+    ],
+    "measure_key": "active_reset_m0",
+    "op": "derive_state",
+    "output": "active_reset_m0.state",
+    "rule": {
+      "kind": "I_threshold",
+      "metadata": {
+        "source": "CalibrationStore.discrimination"
+      },
+      "rotation_angle": 0.25,
+      "sense": "greater",
+      "threshold": 0.015
+    },
+    "timing": "post_run_analysis"
+  }
+]

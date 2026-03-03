@@ -1,0 +1,9 @@
+circuit: ramsey
+00 | Qubit_rotation_thetapi/2_qubit_0 | type=qubit_rotation | targets=qubit | params={"angle":"pi/2","op":"x90"}
+01 | Idle_param_qubit_1 | type=idle | targets=qubit | duration_clks=12
+02 | Qubit_rotation_thetapi/2_qubit_2 | type=qubit_rotation | targets=qubit | params={"angle":"pi/2","op":"x90"}
+03 | Measure_iq_param_readout_3 | type=measure_iq | targets=readout | params={"kind":"iq","measure_key":"ramsey_readout","operation":"readout"}
+blocks:
+- Ramsey: type=protocol gates=[00,04) lanes=qubit,readout
+measurement_schema:
+- ramsey_readout: kind=iq op=readout streams=[I->ramsey_readout.I:fixed[shots]/save_all, Q->ramsey_readout.Q:fixed[shots]/save_all]

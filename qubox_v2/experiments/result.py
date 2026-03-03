@@ -31,8 +31,16 @@ from typing import Any, Callable, Optional
 
 import numpy as np
 
-# Re-export for convenience
-from ..hardware.program_runner import RunResult  # noqa: F401
+# Re-export for convenience, but allow import in test environments without the QM SDK.
+try:
+    from ..hardware.program_runner import RunResult  # type: ignore[attr-defined]  # noqa: F401
+except Exception:  # pragma: no cover - exercised only in SDK-less test envs
+    @dataclass
+    class RunResult:  # type: ignore[no-redef]
+        mode: Any = None
+        output: Any = None
+        sim_samples: Any = None
+        metadata: dict | None = None
 
 
 @dataclass
@@ -193,6 +201,9 @@ class ProgramBuildResult:
 
     run_program_kwargs: dict[str, Any] = field(default_factory=dict)
     """Additional kwargs to forward to ``run_program()``."""
+
+    metadata: dict[str, Any] = field(default_factory=dict)
+    """Structured build metadata (e.g. circuit text, resolution reports, traces)."""
 
 
 @dataclass

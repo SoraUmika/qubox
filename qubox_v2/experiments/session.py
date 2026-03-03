@@ -136,6 +136,7 @@ class SessionManager:
         self.experiment_path.mkdir(parents=True, exist_ok=True)
 
         _logger.info("SessionManager initialising at %s", self.experiment_path)
+        self._cluster_name = cluster_name
 
         # --- 0. Process HardwareDefinition (notebook-first setup) ---
         if hardware is not None:
@@ -231,6 +232,10 @@ class SessionManager:
     def quaProgMngr(self):
         """Alias used by legacy experiment code."""
         return self.hardware
+
+    @property
+    def cluster_name(self) -> str | None:
+        return self._cluster_name
 
     @property
     def context(self):
