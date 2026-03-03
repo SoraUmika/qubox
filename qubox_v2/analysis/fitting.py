@@ -337,7 +337,13 @@ def fit_and_wrap(
     name = model_name or getattr(model, "__name__", "model")
 
     if popt is None:
-        return FitResult(model_name=name, params={}, metadata={"failed": True})
+        return FitResult(
+            model_name=name,
+            params={},
+            success=False,
+            reason="All fit attempts failed (curve_fit did not converge)",
+            metadata={"failed": True},
+        )
 
     # Extract parameter names from model signature
     sig = inspect.signature(model)
@@ -386,6 +392,8 @@ def fit_and_wrap(
     return FitResult(
         model_name=name,
         params=params,
+        success=True,
+        reason=None,
         uncertainties=uncertainties,
         r_squared=r_squared,
         residuals=residuals,

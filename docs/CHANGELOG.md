@@ -28,6 +28,80 @@ Each entry must include:
 
 ## Entries
 
+### 2026-03-02 — Workflow Safety Refactoring (v2.1.0)
+
+**Classification: Major**
+
+Comprehensive safety refactoring of the experiment workflow based on
+architecture review findings H1–H5.  Six coordinated changes across
+calibration, analysis, experiment, and core layers.
+
+**Summary:**
+
+1. **P0.1 — FitResult.success contract** (`experiments/result.py`,
+   `analysis/fitting.py`, `calibration/orchestrator.py`,
+   `analysis/calibration_algorithms.py`)
+   - `FitResult` gains `success: bool` and `reason: str | None` fields.
+   - `fit_and_wrap()` failure paths set `success=False`.
+   - `CalibrationOrchestrator.analyze()` short-circuits on `fit.success is False`.
+   - `fit_number_splitting()` / `fit_chi_ramsey()` emit `RuntimeWarning` on
+     fallback and flag `_fit_success` in return dicts.
+
+2. **P0.2 — Transactional apply_patch** (`calibration/orchestrator.py`,
+   `calibration/store.py`)
+   - `apply_patch()` default changed from `dry_run=False` → `dry_run=True`.
+   - Non-dry-run operations now take a CalibrationStore snapshot and roll back
+     on exception; failure raises `RuntimeError(…rolled back…)`.
+   - `CalibrationStore.create_in_memory_snapshot()` / `restore_in_memory_snapshot()`
+     added.
+
+3. **P0.3 — Remove heuristic unit conversions** (`calibration/patch_rules.py`)
+   - `T1Rule`: Removed `if t1_raw > 1e-3` heuristic; prefers `T1_s` then
+     `T1_ns`, bare `T1` emits `DeprecationWarning` if > 1 ms.
+   - `T2RamseyRule` / `T2EchoRule`: Prefer `_s` then `_ns` keys; bare keys
+     emit `DeprecationWarning`.
+
+4. **P1.1 — CalibrationStore as single source of truth**
+   (`analysis/cQED_attributes.py`)
+   - `verify_consistency(store)` detects drift between `cQED_attributes` and
+     `CalibrationStore`.
+   - `from_calibration_store(store, …)` classmethod builds a snapshot from
+     the store.
+   - `_CQED_FIELD_MAP` / `_PULSE_FIELD_MAP` ClassVar dicts for canonical
+     name mapping.
+
+5. **P1.2 — Session-scoped MeasurementConfig** (`core/measurement_config.py`,
+   NEW file)
+   - Frozen `@dataclass MeasurementConfig` with discrimination/quality params.
+   - Factory methods: `from_calibration_store()`,
+     `from_measure_macro_snapshot()`.
+   - `apply_to_measure_macro()` with `DeprecationWarning`.
+
+6. **P2.1 — MultiProgramExperiment** (`experiments/multi_program.py`, NEW file)
+   - `MultiProgramExperiment(ExperimentBase)` abstract base with
+     `build_programs()` and `run_all()` orchestrator.
+   - `MultiProgramResult` dataclass for combined results.
+
+**Tests:** 32 tests in `tests/test_workflow_safety_refactor.py` — all passing.
+
+**Files affected:**
+
+- `qubox_v2/experiments/result.py` — `FitResult` fields
+- `qubox_v2/analysis/fitting.py` — `fit_and_wrap()` success/failure
+- `qubox_v2/calibration/orchestrator.py` — analyze guard, transactional apply
+- `qubox_v2/analysis/calibration_algorithms.py` — warnings
+- `qubox_v2/calibration/store.py` — snapshot/restore
+- `qubox_v2/calibration/patch_rules.py` — T1/T2 rule rework
+- `qubox_v2/analysis/cQED_attributes.py` — verify_consistency, from_store
+- `qubox_v2/core/measurement_config.py` (NEW)
+- `qubox_v2/experiments/multi_program.py` (NEW)
+- `qubox_v2/tests/test_workflow_safety_refactor.py` (NEW)
+- `qubox_v2/docs/workflow_safety_refactor.md` (NEW)
+- `docs/CHANGELOG.md` — This entry
+- `README.md` — Version bump
+
+---
+
 ### 2026-02-27 — Generic Alias System (v2.3.1)
 
 **Classification: Minor**

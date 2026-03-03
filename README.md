@@ -1,9 +1,15 @@
 # qubox\_v2 — API Reference & Architecture Guide
 
-**Version**: 2.0.0
-**Date**: 2026-02-26
+**Version**: 2.1.0
+**Date**: 2026-03-02
 **Status**: Governing Document
 **Changelog**:
+- v2.1.0 — Workflow safety refactoring (P0.1–P2.1): FitResult.success
+  contract (no silent failures), transactional apply\_patch with rollback
+  and dry\_run=True default, heuristic unit conversion removal,
+  CalibrationStore as single source of truth (verify\_consistency,
+  from\_calibration\_store), session-scoped MeasurementConfig frozen
+  dataclass, MultiProgramExperiment base class.
 - v2.0.0 — Binding-driven API redesign: explicit `ChannelRef` / `OutputBinding`
   / `ReadoutBinding` / `ExperimentBindings` types replace implicit element-name
   coupling.  CalibrationStore schema v5.0.0 with `alias_index` and physical

@@ -37,13 +37,27 @@ from ..hardware.program_runner import RunResult  # noqa: F401
 
 @dataclass
 class FitResult:
-    """Fitted parameter set from curve-fitting an experiment."""
+    """Fitted parameter set from curve-fitting an experiment.
+
+    The *success* flag is the canonical way to check whether the fit
+    converged.  Downstream code (``CalibrationOrchestrator``, patch rules)
+    **must** inspect ``success`` before consuming ``params``.
+
+    .. versionchanged:: 2.1.0
+       Added *success* and *reason* fields (P0.1 — fit-outcome contract).
+    """
 
     model_name: str
     """Name of the fit model (e.g. 'lorentzian', 'exponential_decay')."""
 
     params: dict[str, float]
-    """Best-fit parameter values."""
+    """Best-fit parameter values.  Empty when ``success is False``."""
+
+    success: bool = True
+    """Whether the fit converged.  ``False`` means *params* is unreliable."""
+
+    reason: str | None = None
+    """Human-readable explanation when ``success is False``."""
 
     uncertainties: dict[str, float] = field(default_factory=dict)
     """Parameter uncertainties (1-sigma)."""

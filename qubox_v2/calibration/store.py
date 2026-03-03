@@ -410,6 +410,30 @@ class CalibrationStore:
         self._touch()
 
     # ------------------------------------------------------------------
+    # Transactional snapshot / restore (P0.2)
+    # ------------------------------------------------------------------
+    def create_in_memory_snapshot(self) -> dict[str, Any]:
+        """Capture the current in-memory state as a serialisable dict.
+
+        Use with :meth:`restore_in_memory_snapshot` for transaction-style
+        rollback in ``CalibrationOrchestrator.apply_patch``.
+
+        .. versionadded:: 2.1.0  (P0.2 — transactional patch apply)
+        """
+        return self._data.model_dump()
+
+    def restore_in_memory_snapshot(self, snapshot: dict[str, Any]) -> None:
+        """Restore in-memory state from a previous snapshot dict.
+
+        Does **not** touch disk — call :meth:`save` explicitly if needed.
+
+        .. versionadded:: 2.1.0  (P0.2 — transactional patch apply)
+        """
+        self._data = CalibrationData.model_validate(
+            _migrate_legacy_to_cqed_params(snapshot)
+        )
+
+    # ------------------------------------------------------------------
     # Bulk access
     # ------------------------------------------------------------------
     @property

@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 import logging
 import warnings
-from typing import Optional
+from typing import ClassVar, Optional
 from dataclasses import dataclass, asdict, field, fields
 import json
 from .analysis_tools import complex_encoder, complex_decoder
@@ -223,6 +223,172 @@ class cQED_attributes:
         """
         from ..core.bindings import bindings_from_hardware_config
         return bindings_from_hardware_config(hw, self)
+
+    # ------------------------------------------------------------------
+    # CalibrationStore bridge (P1.1 — single source of truth)
+    # ------------------------------------------------------------------
+    # Canonical name mapping: cQED_attributes → CQEDParams / PulseCalibration
+    _CQED_FIELD_MAP: ClassVar[dict[str, tuple[str, str]]] = {
+        # (alias_category, cqed_params_field)
+        "ro_fq":        ("resonator", "resonator_freq"),
+        "qb_fq":        ("transmon",  "qubit_freq"),
+        "st_fq":        ("storage",   "storage_freq"),
+        "ro_kappa":     ("resonator", "kappa"),
+        "anharmonicity":("transmon",  "anharmonicity"),
+        "st_chi":       ("storage",   "chi"),
+        "st_chi2":      ("storage",   "chi2"),
+        "st_chi3":      ("storage",   "chi3"),
+        "st_K":         ("storage",   "kerr"),
+        "st_K2":        ("storage",   "kerr2"),
+        "qb_T1_relax":  ("transmon",  "T1"),
+        "qb_T2_ramsey": ("transmon",  "T2_ramsey"),
+        "qb_T2_echo":   ("transmon",  "T2_echo"),
+    }
+
+    _PULSE_FIELD_MAP: ClassVar[dict[str, tuple[str, str]]] = {
+        # (pulse_name_in_store, pulse_calibration_field)
+        "ge_r180_amp":  ("ge_ref_r180", "amplitude"),
+        "ge_rlen":      ("ge_ref_r180", "length"),
+        "ge_rsigma":    ("ge_ref_r180", "sigma"),
+        "ef_r180_amp":  ("ef_ref_r180", "amplitude"),
+        "ef_rlen":      ("ef_ref_r180", "length"),
+        "ef_rsigma":    ("ef_ref_r180", "sigma"),
+    }
+
+    def verify_consistency(
+        self,
+        store: "Any",
+        *,
+        rtol: float = 1e-6,
+        raise_on_mismatch: bool = False,
+    ) -> list[str]:
+        """Compare this snapshot against a CalibrationStore.
+
+        Parameters
+        ----------
+        store : CalibrationStore
+            The single-source-of-truth calibration store.
+        rtol : float
+            Relative tolerance for numeric comparisons.
+        raise_on_mismatch : bool
+            If True, raise ``ValueError`` on the first mismatch.
+
+        Returns
+        -------
+        list[str]
+            Human-readable list of mismatches (empty = consistent).
+
+        .. versionadded:: 2.1.0  (P1.1 — CalibrationStore as single source of truth)
+        """
+        mismatches: list[str] = []
+
+        for attr_field, (alias, store_field) in self._CQED_FIELD_MAP.items():
+            attr_val = getattr(self, attr_field, None)
+            if attr_val is None:
+                continue
+            cqed = store.get_cqed_params(alias)
+            if cqed is None:
+                mismatches.append(
+                    f"{attr_field}: cQED_attributes={attr_val} but CalibrationStore "
+                    f"has no cqed_params for alias '{alias}'"
+                )
+                continue
+            store_val = getattr(cqed, store_field, None)
+            if store_val is None:
+                continue
+            if isinstance(attr_val, (int, float)) and isinstance(store_val, (int, float)):
+                if abs(attr_val - store_val) > rtol * max(abs(attr_val), abs(store_val), 1e-30):
+                    mismatches.append(
+                        f"{attr_field}: cQED_attributes={attr_val} vs "
+                        f"CalibrationStore.{alias}.{store_field}={store_val}"
+                    )
+            elif attr_val != store_val:
+                mismatches.append(
+                    f"{attr_field}: cQED_attributes={attr_val!r} vs "
+                    f"CalibrationStore.{alias}.{store_field}={store_val!r}"
+                )
+
+        for attr_field, (pulse_name, cal_field) in self._PULSE_FIELD_MAP.items():
+            attr_val = getattr(self, attr_field, None)
+            if attr_val is None:
+                continue
+            cal = store.get_pulse_calibration(pulse_name)
+            if cal is None:
+                mismatches.append(
+                    f"{attr_field}: cQED_attributes={attr_val} but CalibrationStore "
+                    f"has no pulse_calibration for '{pulse_name}'"
+                )
+                continue
+            store_val = getattr(cal, cal_field, None)
+            if store_val is None:
+                continue
+            if isinstance(attr_val, (int, float)) and isinstance(store_val, (int, float)):
+                if abs(attr_val - store_val) > rtol * max(abs(attr_val), abs(store_val), 1e-30):
+                    mismatches.append(
+                        f"{attr_field}: cQED_attributes={attr_val} vs "
+                        f"CalibrationStore.{pulse_name}.{cal_field}={store_val}"
+                    )
+            elif attr_val != store_val:
+                mismatches.append(
+                    f"{attr_field}: cQED_attributes={attr_val!r} vs "
+                    f"CalibrationStore.{pulse_name}.{cal_field}={store_val!r}"
+                )
+
+        if mismatches:
+            _logger.warning(
+                "cQED_attributes ↔ CalibrationStore divergence detected:\n  %s",
+                "\n  ".join(mismatches),
+            )
+            if raise_on_mismatch:
+                raise ValueError(
+                    f"{len(mismatches)} mismatch(es) between cQED_attributes and "
+                    f"CalibrationStore:\n  " + "\n  ".join(mismatches)
+                )
+        return mismatches
+
+    @classmethod
+    def from_calibration_store(
+        cls,
+        store: "Any",
+        *,
+        ro_el: str | None = None,
+        qb_el: str | None = None,
+        st_el: str | None = None,
+    ) -> "cQED_attributes":
+        """Build a read-only snapshot from a CalibrationStore.
+
+        This is the preferred way to create a ``cQED_attributes`` when
+        ``CalibrationStore`` is the single source of truth (P1.1).
+
+        .. versionadded:: 2.1.0
+        """
+        from typing import Any as _Any
+        kw: dict[str, _Any] = {"ro_el": ro_el, "qb_el": qb_el, "st_el": st_el}
+
+        # Pull cQED params
+        for attr_field, (alias, store_field) in cls._CQED_FIELD_MAP.items():
+            cqed = store.get_cqed_params(alias)
+            if cqed is not None:
+                val = getattr(cqed, store_field, None)
+                if val is not None:
+                    kw[attr_field] = val
+
+        # Pull pulse calibrations
+        for attr_field, (pulse_name, cal_field) in cls._PULSE_FIELD_MAP.items():
+            cal = store.get_pulse_calibration(pulse_name)
+            if cal is not None:
+                val = getattr(cal, cal_field, None)
+                if val is not None:
+                    kw[attr_field] = val
+
+        # fock_fqs from storage cqed_params
+        storage_cqed = store.get_cqed_params("storage")
+        if storage_cqed is not None:
+            fock = getattr(storage_cqed, "fock_freqs", None)
+            if fock is not None:
+                kw["fock_fqs"] = np.array(fock)
+
+        return cls(**kw)
 
     def get_fock_frequencies(self, fock_levels, from_chi: bool = True) -> np.ndarray:
         if not from_chi:

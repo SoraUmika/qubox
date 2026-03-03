@@ -9,6 +9,7 @@ Canonical home for functions previously in ``qubox_v2.calibration.algorithms``.
 """
 from __future__ import annotations
 
+import warnings
 from datetime import datetime
 from typing import Any
 
@@ -234,13 +235,22 @@ def fit_number_splitting(
             "chi": float(popt[1]),
             "chi2": float(popt[2]),
             "chi3": float(popt[3]),
+            "_fit_success": True,
         }
 
+    warnings.warn(
+        "fit_number_splitting: curve fit did not converge — returning initial "
+        "guesses.  Downstream code should check '_fit_success' before using "
+        "these values.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
     return {
         "base_fq": float(freqs[0]),
         "chi": chi_guess,
         "chi2": 0.0,
         "chi3": 0.0,
+        "_fit_success": False,
     }
 
 
@@ -282,9 +292,20 @@ def fit_chi_ramsey(
 
     param_names = ["P0", "A", "T2_eff", "nbar", "chi", "t0"]
     if popt is not None:
-        return dict(zip(param_names, [float(v) for v in popt]))
+        result = dict(zip(param_names, [float(v) for v in popt]))
+        result["_fit_success"] = True
+        return result
 
-    return dict(zip(param_names, p0))
+    warnings.warn(
+        "fit_chi_ramsey: curve fit did not converge — returning initial "
+        "guesses.  Downstream code should check '_fit_success' before using "
+        "these values.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+    result = dict(zip(param_names, p0))
+    result["_fit_success"] = False
+    return result
 
 
 # ---------------------------------------------------------------------------

@@ -57,6 +57,23 @@ class CalibrationOrchestrator:
         if getattr(out, "fit", None) is not None:
             fit = out.fit
             quality["r_squared"] = getattr(fit, "r_squared", None)
+            # P0.1: honour FitResult.success contract — a failed fit must
+            # propagate as quality["passed"] = False so that downstream
+            # build_patch / apply_patch never silently use stale parameters.
+            fit_success = getattr(fit, "success", None)
+            if fit_success is False:
+                quality["passed"] = False
+                quality["failure_reason"] = getattr(fit, "reason", None) or "fit did not converge"
+                return CalibrationResult(
+                    kind=kind,
+                    params=dict(getattr(out, "metrics", {}) or {}),
+                    uncertainties=dict(getattr(getattr(out, "fit", None), "uncertainties", {}) or {}),
+                    quality=quality,
+                    evidence={
+                        "artifact_id": artifact.artifact_id,
+                        "analysis_metadata": out_metadata,
+                    },
+                )
         r_sq = quality.get("r_squared")
         if r_sq is not None and r_sq < 0.5:
             quality["passed"] = False
@@ -162,17 +179,127 @@ class CalibrationOrchestrator:
             "apply_result": apply_result,
         }
 
-    def apply_patch(self, patch: Patch, dry_run: bool = False) -> dict[str, Any]:
+    def apply_patch(self, patch: Patch, dry_run: bool = True) -> dict[str, Any]:
+        """Apply (or preview) a calibration patch.
+
+        Parameters
+        ----------
+        patch : Patch
+            Collection of ``UpdateOp`` items to apply.
+        dry_run : bool
+            **Default is True** (P0.2 safety).  When *True*, no state is
+            mutated — only a human-readable preview is returned.  Pass
+            ``dry_run=False`` explicitly to apply.
+
+        Returns
+        -------
+        dict
+            ``{"dry_run": bool, "n_updates": int, "preview": list, "sync_ok": bool}``
+
+        Raises
+        ------
+        RuntimeError
+            If a non-dry-run apply fails mid-way.  The ``CalibrationStore``
+            is automatically rolled back to its pre-patch state.
+
+        .. versionchanged:: 2.1.0
+           *dry_run* default changed from ``False`` → ``True`` (P0.2).
+           Non-dry-run operations are now transactional (snapshot + rollback).
+        """
         preview: list[dict[str, Any]] = []
         sync_ok = True
 
+        # ── Build human-readable preview for every op ──
         for update in patch.updates:
             op = update.op
             payload = update.payload
-            preview.append({"op": op, "payload": payload})
+            entry: dict[str, Any] = {"op": op, "payload": payload}
 
-            if dry_run:
-                continue
+            # Annotate with old value when possible (best-effort)
+            if op == "SetCalibration" and not dry_run is False:
+                path = str(payload.get("path", ""))
+                try:
+                    parts = path.split(".")
+                    cursor = self.session.calibration.to_dict()
+                    for p in parts:
+                        if isinstance(cursor, dict):
+                            cursor = cursor.get(p)
+                        else:
+                            cursor = None
+                            break
+                    entry["old_value"] = cursor
+                except Exception:
+                    pass
+                entry["new_value"] = payload.get("value")
+
+            preview.append(entry)
+
+        if dry_run:
+            return {
+                "dry_run": True,
+                "n_updates": len(patch.updates),
+                "preview": preview,
+                "sync_ok": True,
+            }
+
+        # ── Snapshot for rollback ──
+        snapshot = self.session.calibration.create_in_memory_snapshot()
+
+        try:
+            self._apply_updates(patch)
+        except Exception as exc:
+            _logger.error(
+                "Patch apply failed mid-way — rolling back CalibrationStore. "
+                "Error: %s", exc, exc_info=True,
+            )
+            self.session.calibration.restore_in_memory_snapshot(snapshot)
+            raise RuntimeError(
+                f"Transactional patch apply failed and was rolled back: {exc}"
+            ) from exc
+
+        # ── Persist + sync ──
+        self.session.calibration.save()
+        self.session.save_pulses()
+
+        sync_ok = True
+        try:
+            from ..programs.macros.measure import measureMacro
+            ro_el = getattr(self.session.context_snapshot(), "ro_el", None)
+            if ro_el is not None:
+                measureMacro.sync_from_calibration(self.session.calibration, ro_el)
+        except Exception as exc:
+            _logger.warning("measureMacro sync_from_calibration failed: %s", exc, exc_info=True)
+            sync_ok = False
+
+        try:
+            bindings = getattr(self.session, "bindings", None)
+            if bindings is not None:
+                bindings.readout.sync_from_calibration(self.session.calibration)
+        except Exception as exc:
+            _logger.warning("ReadoutBinding sync_from_calibration failed: %s", exc, exc_info=True)
+            sync_ok = False
+
+        tag = getattr(patch, "reason", None) or f"patch_{len(self._applied_patches)}"
+        self._applied_patches.append(tag)
+
+        return {
+            "dry_run": False,
+            "n_updates": len(patch.updates),
+            "preview": preview,
+            "sync_ok": sync_ok,
+        }
+
+    # ------------------------------------------------------------------
+    # Internal: execute updates (factored out for transactional wrapper)
+    # ------------------------------------------------------------------
+    def _apply_updates(self, patch: Patch) -> None:
+        """Mutate CalibrationStore / pulses according to *patch* ops.
+
+        Raises on any individual op failure so the caller can rollback.
+        """
+        for update in patch.updates:
+            op = update.op
+            payload = update.payload
 
             if op == "SetCalibration":
                 path = str(payload["path"])
@@ -181,9 +308,9 @@ class CalibrationOrchestrator:
 
             elif op == "SetPulseParam":
                 pulse_name = str(payload["pulse_name"])
-                field = str(payload["field"])
+                field_name = str(payload["field"])
                 value = payload.get("value")
-                self._set_pulse_param(pulse_name, field, value)
+                self._set_pulse_param(pulse_name, field_name, value)
 
             elif op == "SetMeasureWeights":
                 from ..programs.macros.measure import measureMacro
@@ -200,23 +327,14 @@ class CalibrationOrchestrator:
                                 sin = value.get("sin")
                                 if cos is not None and sin is not None:
                                     self.session.pulse_mgr.add_int_weight_segments(
-                                        label,
-                                        cos,
-                                        sin,
-                                        persist=False,
+                                        label, cos, sin, persist=False,
                                     )
                             elif isinstance(value, (list, tuple)) and len(value) == 2:
                                 self.session.pulse_mgr.add_int_weight_segments(
-                                    label,
-                                    value[0],
-                                    value[1],
-                                    persist=False,
+                                    label, value[0], value[1], persist=False,
                                 )
                             self.session.pulse_mgr.append_integration_weight_mapping(
-                                pulse,
-                                label,
-                                label,
-                                override=True,
+                                pulse, label, label, override=True,
                             )
                         continue
                     measureMacro.set_pulse_op(info, active_op=operation, weights=weights, weight_len=info.length)
@@ -238,41 +356,6 @@ class CalibrationOrchestrator:
             elif op == "TriggerPulseRecompile":
                 include_volatile = bool(payload.get("include_volatile", True))
                 self.session.burn_pulses(include_volatile=include_volatile)
-
-        if not dry_run:
-            self.session.calibration.save()
-            self.session.save_pulses()
-
-            sync_ok = True
-            # Sync measureMacro from CalibrationStore after every commit
-            # so discrimination/quality params stay in sync.
-            try:
-                from ..programs.macros.measure import measureMacro
-                ro_el = getattr(self.session.context_snapshot(), "ro_el", None)
-                if ro_el is not None:
-                    measureMacro.sync_from_calibration(self.session.calibration, ro_el)
-            except Exception as exc:
-                _logger.warning("measureMacro sync_from_calibration failed: %s", exc, exc_info=True)
-                sync_ok = False
-
-            # Sync bindings from CalibrationStore (binding-driven API)
-            try:
-                bindings = getattr(self.session, "bindings", None)
-                if bindings is not None:
-                    bindings.readout.sync_from_calibration(self.session.calibration)
-            except Exception as exc:
-                _logger.warning("ReadoutBinding sync_from_calibration failed: %s", exc, exc_info=True)
-                sync_ok = False
-
-            tag = getattr(patch, "reason", None) or f"patch_{len(self._applied_patches)}"
-            self._applied_patches.append(tag)
-
-        return {
-            "dry_run": dry_run,
-            "n_updates": len(patch.updates),
-            "preview": preview,
-            "sync_ok": sync_ok if not dry_run else True,
-        }
 
     def list_applied_patches(self) -> list[str]:
         """Return list of patch tags applied during this session."""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -65,13 +66,27 @@ class T1Rule:
         t1_s = None
         if "T1_s" in params:
             t1_s = float(params["T1_s"])
-        elif "T1" in params:
-            t1_raw = float(params["T1"])
-            # Heuristic: physical T1 values in seconds are < 1e-3 (< 1 ms).
-            # Anything above 1e-3 is assumed to be in nanoseconds.
-            t1_s = t1_raw * 1e-9 if t1_raw > 1e-3 else t1_raw
         elif "T1_ns" in params:
             t1_s = float(params["T1_ns"]) * 1e-9
+        elif "T1" in params:
+            # P0.3: The old heuristic (``if t1_raw > 1e-3: assume ns``) has
+            # been removed.  Callers **must** provide ``T1_s`` (seconds) or
+            # ``T1_ns`` (nanoseconds) for unambiguous storage.  The bare
+            # ``T1`` key is now treated as *seconds* unconditionally; a
+            # DeprecationWarning is issued to alert callers.
+            t1_raw = float(params["T1"])
+            if t1_raw > 1e-3:
+                warnings.warn(
+                    f"T1Rule received bare 'T1' key with value {t1_raw:.6g} "
+                    f"which is > 1e-3 — this looks like nanoseconds, but the "
+                    f"heuristic unit-guessing has been removed (P0.3).  "
+                    f"Provide 'T1_s' (in seconds) or 'T1_ns' (in nanoseconds) "
+                    f"for unambiguous behaviour.  The raw value will be stored "
+                    f"as-is (assumed seconds).",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            t1_s = t1_raw
 
         if t1_s is not None:
             patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T1", value=t1_s)
@@ -94,8 +109,24 @@ class T2RamseyRule:
 
         params = result.params or {}
         patch = Patch(reason="T2RamseyRule", provenance={"kind": result.kind, "alias": self.alias})
-        if "T2_star" in params:
+
+        # P0.3: prefer explicit-unit keys; bare 'T2_star' still treated as ns
+        # for backwards compat (with deprecation warning).
+        if "T2_star_s" in params:
+            t2_s = float(params["T2_star_s"])
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_ramsey", value=t2_s)
+        elif "T2_star" in params:
+            warnings.warn(
+                "T2RamseyRule: bare 'T2_star' key is deprecated — provide "
+                "'T2_star_s' (seconds) or 'T2_star_ns' (nanoseconds) instead.  "
+                "The value is currently assumed to be in nanoseconds.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_ramsey", value=float(params["T2_star"]) * 1e-9)
+        elif "T2_star_ns" in params:
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_ramsey", value=float(params["T2_star_ns"]) * 1e-9)
+
         if "T2_star_us" in params:
             patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_star_us", value=params["T2_star_us"])
         if "qb_freq_corrected_Hz" in params:
@@ -115,8 +146,23 @@ class T2EchoRule:
 
         params = result.params or {}
         patch = Patch(reason="T2EchoRule", provenance={"kind": result.kind, "alias": self.alias})
-        if "T2_echo" in params:
+
+        # P0.3: prefer explicit-unit keys
+        if "T2_echo_s" in params:
+            t2_s = float(params["T2_echo_s"])
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_echo", value=t2_s)
+        elif "T2_echo" in params:
+            warnings.warn(
+                "T2EchoRule: bare 'T2_echo' key is deprecated — provide "
+                "'T2_echo_s' (seconds) or 'T2_echo_ns' (nanoseconds) instead.  "
+                "The value is currently assumed to be in nanoseconds.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_echo", value=float(params["T2_echo"]) * 1e-9)
+        elif "T2_echo_ns" in params:
+            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_echo", value=float(params["T2_echo_ns"]) * 1e-9)
+
         if "T2_echo_us" in params:
             patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_echo_us", value=params["T2_echo_us"])
         return patch if patch.updates else None
