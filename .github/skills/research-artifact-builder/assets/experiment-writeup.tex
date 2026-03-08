@@ -1,0 +1,89 @@
+% QuBox Experiment Writeup Template
+% Compile with: pdflatex or latexmk
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{siunitx}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{setspace}
+\setstretch{1.1}
+
+\title{[Experiment Name]: Results Summary}
+\author{QuBox Automated Report}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+
+% Brief description of the experiment purpose
+% System parameters: sample_id, cooldown_id, qubit frequencies, etc.
+
+This report summarizes the results of the [Experiment Name] experiment
+performed on sample \texttt{[sample\_id]} during cooldown \texttt{[cooldown\_id]}.
+
+\section{Methods}
+
+\subsection{Pulse Sequence}
+
+% Describe the QUA program structure
+% Pulse durations, amplitudes, sweep ranges
+
+\subsection{Measurement Protocol}
+
+% Number of averages, repetition rate
+% Readout configuration
+
+\section{Results}
+
+\subsection{Fit Parameters}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+Parameter & Value & Uncertainty \\
+\midrule
+% e.g.:
+% $f_{01}$ & \SI{5.123}{GHz} & \SI{0.001}{GHz} \\
+% $T_1$ & \SI{45.2}{\micro\second} & \SI{1.3}{\micro\second} \\
+\bottomrule
+\end{tabular}
+\caption{Extracted parameters from fit analysis.}
+\label{tab:fit-params}
+\end{table}
+
+\subsection{Figures}
+
+% \begin{figure}[h]
+% \centering
+% \includegraphics[width=0.8\textwidth]{figures/[experiment]_result.pdf}
+% \caption{[Description of the measurement result.]}
+% \label{fig:result}
+% \end{figure}
+
+\subsection{Quality Assessment}
+
+% FitResult.success: True/False
+% r_squared value
+% quality["passed"]: True/False
+
+\section{Discussion}
+
+% Comparison to expected values
+% Limitations and systematic errors
+% Recommended next steps
+
+\section{Metadata}
+
+\begin{itemize}
+    \item \textbf{QuBox version}: 2.0.0
+    \item \textbf{Schema version}: 4.0.0
+    \item \textbf{Experiment class}: \texttt{qubox\_v2.experiments.[module].[ClassName]}
+    \item \textbf{Wiring revision}: \texttt{[wiring\_rev hash]}
+\end{itemize}
+
+\end{document}
