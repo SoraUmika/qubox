@@ -1,0 +1,203 @@
+{
+  "package_centrality": {
+    "analysis": {
+      "in_degree": 8,
+      "out_degree": 3,
+      "total_degree": 11
+    },
+    "autotune": {
+      "in_degree": 0,
+      "out_degree": 2,
+      "total_degree": 2
+    },
+    "calibration": {
+      "in_degree": 4,
+      "out_degree": 4,
+      "total_degree": 8
+    },
+    "compile": {
+      "in_degree": 0,
+      "out_degree": 1,
+      "total_degree": 1
+    },
+    "core": {
+      "in_degree": 11,
+      "out_degree": 5,
+      "total_degree": 16
+    },
+    "devices": {
+      "in_degree": 1,
+      "out_degree": 1,
+      "total_degree": 2
+    },
+    "examples": {
+      "in_degree": 0,
+      "out_degree": 4,
+      "total_degree": 4
+    },
+    "experiments": {
+      "in_degree": 5,
+      "out_degree": 8,
+      "total_degree": 13
+    },
+    "gates": {
+      "in_degree": 2,
+      "out_degree": 2,
+      "total_degree": 4
+    },
+    "hardware": {
+      "in_degree": 3,
+      "out_degree": 4,
+      "total_degree": 7
+    },
+    "programs": {
+      "in_degree": 7,
+      "out_degree": 6,
+      "total_degree": 13
+    },
+    "pulses": {
+      "in_degree": 6,
+      "out_degree": 3,
+      "total_degree": 9
+    },
+    "tests": {
+      "in_degree": 0,
+      "out_degree": 4,
+      "total_degree": 4
+    },
+    "tools": {
+      "in_degree": 3,
+      "out_degree": 2,
+      "total_degree": 5
+    },
+    "verification": {
+      "in_degree": 1,
+      "out_degree": 2,
+      "total_degree": 3
+    }
+  },
+  "top_imported_modules": [
+    [
+      "qubox_v2.core.bindings",
+      54
+    ],
+    [
+      "qubox_v2.programs.macros.measure",
+      31
+    ],
+    [
+      "qubox_v2.hardware.program_runner",
+      27
+    ],
+    [
+      "qubox_v2.experiments.result",
+      20
+    ],
+    [
+      "qubox_v2.programs",
+      20
+    ],
+    [
+      "qubox_v2.analysis",
+      17
+    ],
+    [
+      "qubox_v2.analysis.output",
+      16
+    ],
+    [
+      "qubox_v2.experiments.experiment_base",
+      16
+    ],
+    [
+      "qubox_v2.analysis.analysis_tools",
+      13
+    ],
+    [
+      "qubox_v2.core.logging",
+      13
+    ],
+    [
+      "qubox_v2.gates.contexts",
+      13
+    ],
+    [
+      "qubox_v2.programs.measurement",
+      12
+    ],
+    [
+      "qubox_v2.core.persistence_policy",
+      11
+    ],
+    [
+      "qubox_v2.core.errors",
+      11
+    ],
+    [
+      "qubox_v2",
+      10
+    ]
+  ],
+  "top_importing_modules": [
+    [
+      "qubox_v2.experiments.session",
+      27
+    ],
+    [
+      "qubox_v2.experiments.calibration.gates",
+      18
+    ],
+    [
+      "qubox_v2.experiments.calibration.readout",
+      16
+    ],
+    [
+      "qubox_v2.experiments.experiment_base",
+      15
+    ],
+    [
+      "qubox_v2.programs.builders.cavity",
+      14
+    ],
+    [
+      "qubox_v2.programs.builders.time_domain",
+      13
+    ],
+    [
+      "qubox_v2.experiments.base",
+      12
+    ],
+    [
+      "qubox_v2.experiments.time_domain.rabi",
+      12
+    ],
+    [
+      "qubox_v2.programs.circuit_compiler",
+      11
+    ],
+    [
+      "qubox_v2.calibration.orchestrator",
+      10
+    ],
+    [
+      "qubox_v2.compile.api",
+      10
+    ],
+    [
+      "qubox_v2.experiments.spectroscopy.qubit",
+      10
+    ],
+    [
+      "qubox_v2.experiments.spectroscopy.resonator",
+      10
+    ],
+    [
+      "qubox_v2.experiments.time_domain.coherence",
+      10
+    ],
+    [
+      "qubox_v2.programs",
+      10
+    ]
+  ]
+}

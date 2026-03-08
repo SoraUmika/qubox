@@ -18,14 +18,18 @@ dependencies = [
     "pandas>=2.0",
 ]
 
+[project.scripts]
+qubox-lab-mcp = "qubox_lab_mcp.server:main"
+
 [project.optional-dependencies]
 simulation = ["qutip>=5.0"]
 gpu = ["jax[cuda12]>=0.4", "jaxlib>=0.4"]
 gui = ["PyQt5>=5.15"]
 dev = ["pytest>=7.0", "pytest-cov", "ruff"]
+mcp = ["mcp[cli]>=1.2.0"]
 
 [tool.setuptools.packages.find]
-include = ["qubox_v2*"]
+include = ["qubox_v2*", "qubox_lab_mcp*"]
 
 [tool.ruff]
 line-length = 120

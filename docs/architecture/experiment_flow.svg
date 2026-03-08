@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="920" viewBox="0 0 860 920" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <style>
+    text { font-size: 13px; fill: #222; }
+    .title { font-size: 18px; font-weight: bold; fill: #111; }
+    .subtitle { font-size: 12px; fill: #666; }
+    .node-label { font-size: 12px; fill: #fff; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+    .node-label-dark { font-size: 12px; fill: #222; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+    .small-label { font-size: 10px; fill: #555; text-anchor: middle; dominant-baseline: central; }
+    .edge { stroke-width: 1.5; fill: none; }
+    .edge-cycle { stroke-width: 2; fill: none; stroke-dasharray: 6,3; }
+    .metric { font-size: 10px; fill: #888; text-anchor: middle; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#555"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#d32f2f"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#e65100"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#1565c0"/>
+    </marker>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+  <text x="430" y="30" class="title" text-anchor="middle">qubox_v2 — Experiment Lifecycle Flow</text>
+  <text x="430" y="50" class="subtitle" text-anchor="middle">Control flow (top→bottom) • Side branches show key dependencies</text>
+  <rect x="250.0" y="75.0" width="300" height="50" rx="6" fill="#78909c" stroke="#78909c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="100" class="node-label" font-size="11px">User / Notebook</text>
+  <line x1="400" y1="125.0" x2="400" y2="159.0" stroke="#444" class="edge" marker-end="url(#arrow)" />
+  <rect x="250.0" y="165.0" width="300" height="50" rx="6" fill="#37474f" stroke="#37474f" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="190" class="node-label" font-size="11px">SessionManager.open()</text>
+  <line x1="400" y1="215.0" x2="400" y2="249.0" stroke="#444" class="edge" marker-end="url(#arrow)" />
+  <rect x="250.0" y="255.0" width="300" height="50" rx="6" fill="#1565c0" stroke="#1565c0" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="272" class="node-label" font-size="11px">HardwareController</text>
+  <text x="400" y="288" class="node-label" font-size="10px" fill="#ddd">+ ConfigEngine</text>
+  <line x1="400" y1="305.0" x2="400" y2="339.0" stroke="#444" class="edge" marker-end="url(#arrow)" />
+  <rect x="250.0" y="345.0" width="300" height="50" rx="6" fill="#7b1fa2" stroke="#7b1fa2" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="362" class="node-label" font-size="11px">PulseOperationManager</text>
+  <text x="400" y="378" class="node-label" font-size="10px" fill="#ddd">(burn pulses to QM config)</text>
+  <line x1="400" y1="395.0" x2="400" y2="429.0" stroke="#444" class="edge" marker-end="url(#arrow)" />
+  <rect x="250.0" y="435.0" width="300" height="50" rx="6" fill="#e65100" stroke="#e65100" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="452" class="node-label" font-size="11px">ExperimentBase._build_impl()</text>
+  <text x="400" y="468" class="node-label" font-size="10px" fill="#ddd">→ ProgramBuildResult</text>
+  <line x1="400" y1="485.0" x2="400" y2="519.0" stroke="#444" class="edge" marker-end="url(#arrow)" />
+  <rect x="250.0" y="525.0" width="300" height="50" rx="6" fill="#1565c0" stroke="#1565c0" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="542" class="node-label" font-size="11px">ProgramRunner.run_program()</text>
+  <text x="400" y="558" class="node-label" font-size="10px" fill="#ddd">→ RunResult</text>
+  <line x1="400" y1="575.0" x2="400" y2="609.0" stroke="#444" class="edge" marker-end="url(#arrow)" />
+  <rect x="250.0" y="615.0" width="300" height="50" rx="6" fill="#ad1457" stroke="#ad1457" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="632" class="node-label" font-size="11px">ExperimentBase.process()</text>
+  <text x="400" y="648" class="node-label" font-size="10px" fill="#ddd">→ AnalysisResult</text>
+  <line x1="400" y1="665.0" x2="400" y2="699.0" stroke="#444" class="edge" marker-end="url(#arrow)" />
+  <rect x="250.0" y="705.0" width="300" height="50" rx="6" fill="#c62828" stroke="#c62828" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="722" class="node-label" font-size="11px">CalibrationOrchestrator</text>
+  <text x="400" y="738" class="node-label" font-size="10px" fill="#ddd">→ Patch → CalibrationStore</text>
+  <line x1="400" y1="755.0" x2="400" y2="789.0" stroke="#444" class="edge" marker-end="url(#arrow)" />
+  <rect x="250.0" y="795.0" width="300" height="50" rx="6" fill="#2e7d32" stroke="#2e7d32" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="812" class="node-label" font-size="11px">Output.save()</text>
+  <text x="400" y="828" class="node-label" font-size="10px" fill="#ddd">→ JSON artifacts</text>
+  <rect x="40.0" y="260.0" width="180" height="40" rx="4" fill="#fff" stroke="#0277bd" stroke-width="1.5" opacity="1.0"/>
+  <text x="130.0" y="273" class="node-label-dark" font-size="10px">DeviceManager</text>
+  <text x="130.0" y="287" class="small-label" font-size="9px">(external instruments)</text>
+  <line x1="220.0" y1="280" x2="250.0" y2="280" stroke="#0277bd" stroke-dasharray="4,3" stroke-width="1"/>
+  <rect x="580.0" y="350.0" width="180" height="40" rx="4" fill="#fff" stroke="#7b1fa2" stroke-width="1.5" opacity="1.0"/>
+  <text x="670.0" y="363" class="node-label-dark" font-size="10px">PulseRegistry</text>
+  <text x="670.0" y="377" class="small-label" font-size="9px">(pulse_specs.json)</text>
+  <line x1="550.0" y1="370" x2="580.0" y2="370" stroke="#7b1fa2" stroke-dasharray="4,3" stroke-width="1"/>
+  <rect x="580.0" y="440.0" width="180" height="40" rx="4" fill="#fff" stroke="#e65100" stroke-width="1.5" opacity="1.0"/>
+  <text x="670.0" y="453" class="node-label-dark" font-size="10px">programs.builders.*</text>
+  <text x="670.0" y="467" class="small-label" font-size="9px">(QUA program factories)</text>
+  <line x1="550.0" y1="460" x2="580.0" y2="460" stroke="#e65100" stroke-dasharray="4,3" stroke-width="1"/>
+  <rect x="40.0" y="530.0" width="180" height="40" rx="4" fill="#fff" stroke="#1565c0" stroke-width="1.5" opacity="1.0"/>
+  <text x="130.0" y="543" class="node-label-dark" font-size="10px">QuantumMachinesManager</text>
+  <text x="130.0" y="557" class="small-label" font-size="9px">(OPX+ / Octave)</text>
+  <line x1="220.0" y1="550" x2="250.0" y2="550" stroke="#1565c0" stroke-dasharray="4,3" stroke-width="1"/>
+  <rect x="580.0" y="620.0" width="180" height="40" rx="4" fill="#fff" stroke="#ad1457" stroke-width="1.5" opacity="1.0"/>
+  <text x="670.0" y="633" class="node-label-dark" font-size="10px">analysis.fitting</text>
+  <text x="670.0" y="647" class="small-label" font-size="9px">analysis.metrics</text>
+  <line x1="550.0" y1="640" x2="580.0" y2="640" stroke="#ad1457" stroke-dasharray="4,3" stroke-width="1"/>
+  <rect x="40.0" y="710.0" width="180" height="40" rx="4" fill="#fff" stroke="#c62828" stroke-width="1.5" opacity="1.0"/>
+  <text x="130.0" y="723" class="node-label-dark" font-size="10px">calibration.json</text>
+  <text x="130.0" y="737" class="small-label" font-size="9px">hardware.json</text>
+  <line x1="220.0" y1="730" x2="250.0" y2="730" stroke="#c62828" stroke-dasharray="4,3" stroke-width="1"/>
+  <text x="430" y="900" class="small-label" >Each step feeds into the next • Side dependencies show composition / data flow</text>
+</svg>

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="720" viewBox="0 0 800 720" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <style>
+    text { font-size: 13px; fill: #222; }
+    .title { font-size: 18px; font-weight: bold; fill: #111; }
+    .subtitle { font-size: 12px; fill: #666; }
+    .node-label { font-size: 12px; fill: #fff; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+    .node-label-dark { font-size: 12px; fill: #222; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+    .small-label { font-size: 10px; fill: #555; text-anchor: middle; dominant-baseline: central; }
+    .edge { stroke-width: 1.5; fill: none; }
+    .edge-cycle { stroke-width: 2; fill: none; stroke-dasharray: 6,3; }
+    .metric { font-size: 10px; fill: #888; text-anchor: middle; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#555"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#d32f2f"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#e65100"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#1565c0"/>
+    </marker>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+  <text x="400" y="24" class="title" text-anchor="middle">qubox_v2 — Key Class Relationships</text>
+  <rect x="40" y="50" width="300" height="350" rx="10" fill="#e3f2fd" stroke="#bbb" stroke-width="1" opacity="1.0"/>
+  <text x="45" y="62" class="small-label" text-anchor="start" fill="#555" font-weight="bold">experiments</text>
+  <rect x="300" y="50" width="300" height="270" rx="10" fill="#fff3e0" stroke="#bbb" stroke-width="1" opacity="1.0"/>
+  <text x="305" y="62" class="small-label" text-anchor="start" fill="#555" font-weight="bold">hardware</text>
+  <rect x="540" y="50" width="300" height="350" rx="10" fill="#f3e5f5" stroke="#bbb" stroke-width="1" opacity="1.0"/>
+  <text x="545" y="62" class="small-label" text-anchor="start" fill="#555" font-weight="bold">pulses / gates</text>
+  <rect x="300" y="350" width="540" height="270" rx="10" fill="#e8f5e9" stroke="#bbb" stroke-width="1" opacity="1.0"/>
+  <text x="305" y="362" class="small-label" text-anchor="start" fill="#555" font-weight="bold">calibration</text>
+  <rect x="40" y="430" width="560" height="270" rx="10" fill="#fce4ec" stroke="#bbb" stroke-width="1" opacity="1.0"/>
+  <text x="45" y="442" class="small-label" text-anchor="start" fill="#555" font-weight="bold">core + devices</text>
+  <line x1="192.0" y1="80.0" x2="302.0" y2="80.0" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="188.8160886279804" y1="87.94031791861312" x2="305.4492373196879" y2="150.29516698836173" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="192.0" y1="80.0" x2="542.0" y2="80.0" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="160.65724192262329" y1="102.28329605374546" x2="335.9546545838248" y2="432.76486037875554" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="167.15499876608462" y1="100.40360523532507" x2="328.9154180034083" y2="355.06226026793604" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="151.23472455164878" y1="104.3270450834957" x2="346.1623817357138" y2="590.2669448979497" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="188.8160886279804" y1="152.05968208138688" x2="305.4492373196879" y2="89.70483301163826" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="192.0" y1="160.0" x2="302.0" y2="160.0" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="191.0957254980028" y1="155.73425647011985" x2="542.979630710497" y2="85.2136865365202" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="155.42812248008894" y1="183.50519664544362" x2="341.6195339799036" y2="591.2714263222356" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="120.0" y1="213.0" x2="120.0" y2="113.0" stroke="#888" stroke-dasharray="5,3" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="332.84500123391535" y1="359.5963947646749" x2="171.08458199659168" y2="104.93773973206399" stroke="#888" stroke-dasharray="5,3" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="380.0" y1="133.0" x2="380.0" y2="113.0" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="380.0" y1="187.0" x2="380.0" y2="207.0" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="380.0" y1="107.0" x2="380.0" y2="207.0" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="620.0" y1="187.0" x2="620.0" y2="207.0" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="620.0" y1="187.0" x2="620.0" y2="287.0" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <line x1="380.0" y1="487.0" x2="380.0" y2="507.0" stroke="#1565c0" class="edge" marker-end="url(#arrow-blue)" />
+  <rect x="50.0" y="55.0" width="140" height="50" rx="4" fill="#f57f17" stroke="#e65100" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="120" y="76" class="node-label" font-size="10px">SessionManager</text>
+  <text x="120" y="92" class="small-label" fill="#ddd" font-size="9px">«class»</text>
+  <rect x="50.0" y="135.0" width="140" height="50" rx="4" fill="#f57f17" stroke="#e65100" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="120" y="156" class="node-label" font-size="10px">ExperimentRunner</text>
+  <text x="120" y="172" class="small-label" fill="#ddd" font-size="9px">«class»</text>
+  <rect x="50.0" y="215.0" width="140" height="50" rx="4" fill="#f57f17" stroke="#e65100" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="120" y="236" class="node-label" font-size="10px">ExperimentBase</text>
+  <text x="120" y="252" class="small-label" fill="#ddd" font-size="9px">«class»</text>
+  <rect x="50.0" y="295.0" width="140" height="50" rx="4" fill="#5c6bc0" stroke="#3949ab" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="120" y="316" class="node-label" font-size="10px">ProgramBuildResult</text>
+  <text x="120" y="332" class="small-label" fill="#ddd" font-size="9px">«frozen dataclass»</text>
+  <rect x="310.0" y="55.0" width="140" height="50" rx="4" fill="#1565c0" stroke="#0d47a1" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="380" y="76" class="node-label" font-size="10px">HardwareController</text>
+  <text x="380" y="92" class="small-label" fill="#ddd" font-size="9px">«class»</text>
+  <rect x="310.0" y="135.0" width="140" height="50" rx="4" fill="#1565c0" stroke="#0d47a1" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="380" y="156" class="node-label" font-size="10px">ProgramRunner</text>
+  <text x="380" y="172" class="small-label" fill="#ddd" font-size="9px">«class»</text>
+  <rect x="310.0" y="215.0" width="140" height="50" rx="4" fill="#1565c0" stroke="#0d47a1" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="380" y="236" class="node-label" font-size="10px">ConfigEngine</text>
+  <text x="380" y="252" class="small-label" fill="#ddd" font-size="9px">«class»</text>
+  <rect x="550.0" y="55.0" width="140" height="50" rx="4" fill="#7b1fa2" stroke="#4a148c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="620" y="76" class="node-label" font-size="10px">PulseOperationManager</text>
+  <text x="620" y="92" class="small-label" fill="#ddd" font-size="9px">«class»</text>
+  <rect x="550.0" y="135.0" width="140" height="50" rx="4" fill="#5c6bc0" stroke="#3949ab" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="620" y="156" class="node-label" font-size="10px">Gate</text>
+  <text x="620" y="172" class="small-label" fill="#ddd" font-size="9px">«dataclass»</text>
+  <rect x="550.0" y="215.0" width="140" height="50" rx="4" fill="#8e24aa" stroke="#6a1b9a" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="620" y="236" class="node-label" font-size="10px">GateModel</text>
+  <text x="620" y="252" class="small-label" fill="#ddd" font-size="9px">«ABC»</text>
+  <rect x="550.0" y="295.0" width="140" height="50" rx="4" fill="#8e24aa" stroke="#6a1b9a" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="620" y="316" class="node-label" font-size="10px">GateHardware</text>
+  <text x="620" y="332" class="small-label" fill="#ddd" font-size="9px">«ABC»</text>
+  <rect x="310.0" y="355.0" width="140" height="50" rx="4" fill="#c62828" stroke="#b71c1c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="380" y="376" class="node-label" font-size="10px">CalibrationOrchestrator</text>
+  <text x="380" y="392" class="small-label" fill="#ddd" font-size="9px">«class»</text>
+  <rect x="310.0" y="435.0" width="140" height="50" rx="4" fill="#c62828" stroke="#b71c1c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="380" y="456" class="node-label" font-size="10px">CalibrationStore</text>
+  <text x="380" y="472" class="small-label" fill="#ddd" font-size="9px">«class»</text>
+  <rect x="310.0" y="515.0" width="140" height="50" rx="4" fill="#5c6bc0" stroke="#3949ab" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="380" y="536" class="node-label" font-size="10px">CalibrationData</text>
+  <text x="380" y="552" class="small-label" fill="#ddd" font-size="9px">«pydantic»</text>
+  <rect x="550.0" y="435.0" width="140" height="50" rx="4" fill="#ad1457" stroke="#880e4f" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="620" y="456" class="node-label" font-size="10px">Output</text>
+  <text x="620" y="472" class="small-label" fill="#ddd" font-size="9px">«dict subclass»</text>
+  <rect x="550.0" y="515.0" width="140" height="50" rx="4" fill="#ad1457" stroke="#880e4f" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="620" y="536" class="node-label" font-size="10px">cQED_attributes</text>
+  <text x="620" y="552" class="small-label" fill="#ddd" font-size="9px">«class»</text>
+  <rect x="50.0" y="435.0" width="140" height="50" rx="4" fill="#5c6bc0" stroke="#3949ab" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="120" y="456" class="node-label" font-size="10px">ExperimentContext</text>
+  <text x="120" y="472" class="small-label" fill="#ddd" font-size="9px">«frozen dataclass»</text>
+  <rect x="50.0" y="515.0" width="140" height="50" rx="4" fill="#5c6bc0" stroke="#3949ab" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="120" y="536" class="node-label" font-size="10px">SessionState</text>
+  <text x="120" y="552" class="small-label" fill="#ddd" font-size="9px">«frozen dataclass»</text>
+  <rect x="50.0" y="595.0" width="140" height="50" rx="4" fill="#37474f" stroke="#263238" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="120" y="616" class="node-label" font-size="10px">HardwareDefinition</text>
+  <text x="120" y="632" class="small-label" fill="#ddd" font-size="9px">«builder»</text>
+  <rect x="310.0" y="595.0" width="140" height="50" rx="4" fill="#0277bd" stroke="#01579b" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="380" y="616" class="node-label" font-size="10px">DeviceManager</text>
+  <text x="380" y="632" class="small-label" fill="#ddd" font-size="9px">«class»</text>
+  <rect x="10" y="668" width="300" height="45" rx="4" fill="#fafafa" stroke="#ccc" stroke-width="1.5" opacity="1.0"/>
+  <line x1="20" y1="683" x2="50" y2="683" stroke="#1565c0" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <text x="60" y="684" class="small-label" text-anchor="start">composition (has-a)</text>
+  <line x1="20" y1="701" x2="50" y2="701" stroke="#888" stroke-dasharray="5,3" stroke-width="1" marker-end="url(#arrow)"/>
+  <text x="60" y="702" class="small-label" text-anchor="start">dependency (uses)</text>
+  <rect x="190" y="674" width="15" height="15" rx="2" fill="#5c6bc0" stroke="#3949ab" stroke-width="1.5" opacity="1.0"/>
+  <text x="210" y="683" class="small-label" text-anchor="start">dataclass</text>
+  <rect x="190" y="694" width="15" height="15" rx="2" fill="#8e24aa" stroke="#6a1b9a" stroke-width="1.5" opacity="1.0"/>
+  <text x="210" y="703" class="small-label" text-anchor="start">abstract base</text>
+</svg>

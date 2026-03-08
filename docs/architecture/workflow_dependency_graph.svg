@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="680" viewBox="0 0 820 680" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <style>
+    text { font-size: 13px; fill: #222; }
+    .title { font-size: 18px; font-weight: bold; fill: #111; }
+    .subtitle { font-size: 12px; fill: #666; }
+    .node-label { font-size: 12px; fill: #fff; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+    .node-label-dark { font-size: 12px; fill: #222; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+    .small-label { font-size: 10px; fill: #555; text-anchor: middle; dominant-baseline: central; }
+    .edge { stroke-width: 1.5; fill: none; }
+    .edge-cycle { stroke-width: 2; fill: none; stroke-dasharray: 6,3; }
+    .metric { font-size: 10px; fill: #888; text-anchor: middle; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#555"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#d32f2f"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#e65100"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#1565c0"/>
+    </marker>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+  <text x="410" y="30" class="title" text-anchor="middle">qubox_v2 — Scientific Workflow Dependencies</text>
+  <text x="410" y="50" class="subtitle" text-anchor="middle">Core scientific layers only • Red dashed = bidirectional coupling</text>
+  <path d="M533.0,480.0 Q403.0,458.0 273.0,480.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M570.0366891015028,459.42817460700195 Q521.8472746452613,274.7134020224411 432.64659247149694,105.93838853899756" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M540.0733782030056,490.28591269649905 Q486.9265506119848,513.3050068296658 465.2931849429939,567.0308057305012" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M267.0,480.0 Q397.0,502.0 527.0,480.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="229.96331089849718" y1="459.42817460700195" x2="367.35340752850306" y2="105.93838853899756" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <path d="M200.0,457.0 Q222.0,413.0 200.0,369.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="254.8885386747757" y1="466.8103660796435" x2="340.19606980211006" y2="356.6304079865365" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <path d="M429.9633108984972,100.57182539299806 Q478.15272535473866,285.2865979775589 567.3534075285031,454.0616114610024" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M400.0,103.0 Q378.0,327.0 400.0,551.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M359.14937902307065,98.2303517494058 Q282.34228791868014,197.41120756789223 244.50888554202754,317.0139043159666" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M400.0,103.0 Q378.0,207.0 400.0,311.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M342.5479739772595,91.83340237483311 Q285.8711045418972,124.13645342327999 262.59698357701575,185.07962309260174" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M459.92662179699437,569.714087303501 Q513.0734493880152,546.6949931703342 534.7068150570061,492.96919426949876" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="340.07337820300563" y1="569.714087303501" x2="265.2931849429939" y2="492.96919426949876" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <path d="M400.0,557.0 Q422.0,333.0 400.0,109.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="357.10764522247985" y1="562.3309105692604" x2="246.73346117550705" y2="362.2784171083239" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <path d="M400.0,557.0 Q422.0,463.0 400.0,369.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="368.7949890002143" y1="559.6468808852144" x2="233.99948959678144" y2="225.6626284490775" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <line x1="600.0" y1="223.0" x2="600.0" y2="451.0" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <line x1="542.5479739772595" y1="188.1665976251669" x2="462.59698357701575" y2="94.92037690739826" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <line x1="263.23850987652315" y1="347.59805976874645" x2="531.0983399852807" y2="470.4198376828849" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <path d="M200.0,363.0 Q178.0,407.0 200.0,451.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M240.85062097692938,321.7696482505942 Q317.65771208131986,222.58879243210774 355.49111445797246,102.9860956840334" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="267.0" y1="340.0" x2="327.0" y2="340.0" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <line x1="454.8885386747757" y1="353.1896339203565" x2="540.1960698021101" y2="463.3695920134635" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <path d="M400.0,317.0 Q422.0,213.0 400.0,109.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M400.0,363.0 Q378.0,457.0 400.0,551.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="454.8885386747757" y1="326.8103660796435" x2="540.1960698021101" y2="216.6304079865365" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <line x1="345.1114613252243" y1="326.8103660796435" x2="259.80393019788994" y2="216.6304079865365" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <line x1="254.8885386747757" y1="213.18963392035656" x2="540.1960698021101" y2="463.3695920134635" stroke="#555" class="edge" marker-end="url(#arrow)" />
+  <path d="M257.4520260227405,188.1665976251669 Q314.1288954581028,155.86354657672 337.40301642298425,94.92037690739826" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <rect x="335.0" y="59.0" width="130" height="42" rx="6" fill="#37474f" stroke="#263238" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="80" class="node-label" >core</text>
+  <rect x="135.0" y="179.0" width="130" height="42" rx="6" fill="#7b1fa2" stroke="#4a148c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="200" y="200" class="node-label" >pulses</text>
+  <rect x="535.0" y="179.0" width="130" height="42" rx="6" fill="#6a1b9a" stroke="#4a148c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="600" y="200" class="node-label" >gates</text>
+  <rect x="135.0" y="319.0" width="130" height="42" rx="6" fill="#1565c0" stroke="#0d47a1" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="200" y="340" class="node-label" >hardware</text>
+  <rect x="535.0" y="319.0" width="130" height="42" rx="6" fill="#2e7d32" stroke="#1b5e20" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="600" y="340" class="node-label" >simulation</text>
+  <rect x="335.0" y="319.0" width="130" height="42" rx="6" fill="#e65100" stroke="#bf360c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="340" class="node-label" >programs</text>
+  <rect x="135.0" y="459.0" width="130" height="42" rx="6" fill="#c62828" stroke="#b71c1c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="200" y="480" class="node-label" >calibration</text>
+  <rect x="535.0" y="459.0" width="130" height="42" rx="6" fill="#ad1457" stroke="#880e4f" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="600" y="480" class="node-label" >analysis</text>
+  <rect x="335.0" y="559.0" width="130" height="42" rx="6" fill="#f57f17" stroke="#e65100" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="580" class="node-label" >experiments</text>
+  <text x="790" y="80" class="small-label" text-anchor="end" fill="#aaa">Layer 0: Foundation</text>
+  <text x="790" y="200" class="small-label" text-anchor="end" fill="#aaa">Layer 1-2: Primitives</text>
+  <text x="790" y="340" class="small-label" text-anchor="end" fill="#aaa">Layer 3-5: Infrastructure</text>
+  <text x="790" y="480" class="small-label" text-anchor="end" fill="#aaa">Layer 6: Calibration / Analysis</text>
+  <text x="790" y="580" class="small-label" text-anchor="end" fill="#aaa">Layer 8: Experiments</text>
+</svg>

@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="960" viewBox="0 0 1000 960" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <style>
+    text { font-size: 13px; fill: #222; }
+    .title { font-size: 18px; font-weight: bold; fill: #111; }
+    .subtitle { font-size: 12px; fill: #666; }
+    .node-label { font-size: 12px; fill: #fff; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+    .node-label-dark { font-size: 12px; fill: #222; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+    .small-label { font-size: 10px; fill: #555; text-anchor: middle; dominant-baseline: central; }
+    .edge { stroke-width: 1.5; fill: none; }
+    .edge-cycle { stroke-width: 2; fill: none; stroke-dasharray: 6,3; }
+    .metric { font-size: 10px; fill: #888; text-anchor: middle; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#555"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#d32f2f"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#e65100"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#2e7d32"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,3 L0,6 Z" fill="#1565c0"/>
+    </marker>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+  <text x="500" y="30" class="title" text-anchor="middle">qubox_v2 — Package Dependency Graph</text>
+  <text x="500" y="50" class="subtitle" text-anchor="middle">Node size ~ total degree • Red dashed = bidirectional edge • Orange = layer violation (≥3 levels)</text>
+  <path d="M558.0,540.0 Q403.0,520.0 248.0,540.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M593.2497591671516,520.1530471240158 Q529.895370661987,305.35775354654163 429.33897381667236,105.25975820579811" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M565.5704744793081,550.5347468749726 Q499.1948916925526,583.751327343088 459.69689895817817,646.592140340944" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="236.4427216026815" y1="750.896335225374" x2="338.09507953254285" y2="671.5864824404332" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="213.681579245751" y1="741.5294565426527" x2="363.05891308530533" y2="443.5079644002602" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <path d="M242.0,540.0 Q397.0,560.0 552.0,540.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="206.7502408328483" y1="520.1530471240158" x2="370.6610261833277" y2="105.25975820579811" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <path d="M180.0,518.0 Q200.0,423.0 180.0,328.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="234.42952552069184" y1="529.4652531250274" x2="340.30310104182183" y2="433.40785965905604" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="620.0" y1="278.0" x2="620.0" y2="208.0" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <path d="M426.7502408328483,99.84695287598421 Q490.10462933801296,314.64224645345837 590.6610261833276,514.7402417942019" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M400.0,102.0 Q380.0,367.0 400.0,632.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M356.15937956643404,95.55634918610404 Q275.6876963256395,176.47973226478894 228.08326112068522,280.2010101267767" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M400.0,102.0 Q380.0,247.0 400.0,392.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M343.5572783973185,89.10366477462605 Q280.42843691193605,112.99012596252211 241.90492046745712,168.41351755956686" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="400.0" y1="278.0" x2="400.0" y2="108.0" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="196.830530231352" y1="838.8261071282991" x2="381.54070877851717" y2="106.9485909276193" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="207.7272429209974" y1="840.3226017980019" x2="369.5894755060028" y2="445.04396134799765" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="180.0" y1="838.0" x2="180.0" y2="208.0" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="240.4582370590705" y1="855.1243357210427" x2="553.6909658061808" y2="766.2053909004911" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <path d="M454.4295255206918,649.4652531250274 Q520.8051083074473,616.248672656912 560.3031010418218,553.407859659056" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="345.5704744793082" y1="649.4652531250274" x2="239.69689895817814" y2="553.407859659056" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <path d="M400.0,638.0 Q420.0,373.0 400.0,108.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="400.0" y1="638.0" x2="400.0" y2="328.0" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="367.67009941385356" y1="641.2277996596569" x2="215.4586006428703" y2="323.89189134225484" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <path d="M400.0,638.0 Q420.0,543.0 400.0,448.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="374.16740794942075" y1="640.0005738963257" x2="208.33252031353854" y2="205.45381504103995" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="459.3852296837114" y1="653.6783465175404" x2="734.8678126049617" y2="548.0457407958577" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="620.0" y1="202.0" x2="620.0" y2="512.0" stroke="#e65100" class="edge" marker-end="url(#arrow-orange)" />
+  <line x1="563.5572783973186" y1="170.89633522537395" x2="461.90492046745715" y2="91.58648244043316" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="234.42952552069184" y1="310.5347468749726" x2="560.3031010418218" y2="526.592140340944" stroke="#e65100" class="edge" marker-end="url(#arrow-orange)" />
+  <path d="M180.0,322.0 Q160.0,417.0 180.0,512.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M223.84062043356596,284.44365081389594 Q304.3123036743605,203.52026773521106 351.9167388793148,99.79898987322333" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="234.42952552069184" y1="310.5347468749726" x2="340.30310104182183" y2="406.59214034094396" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="454.4295255206918" y1="430.5347468749726" x2="560.3031010418218" y2="526.592140340944" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <path d="M400.0,398.0 Q420.0,253.0 400.0,108.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M400.0,442.0 Q380.0,537.0 400.0,632.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="441.8949269680755" y1="403.7826089155837" x2="574.0507252608204" y2="200.64031592562077" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="358.1050730319245" y1="403.7826089155837" x2="225.94927473917954" y2="200.64031592562077" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="459.3852296837114" y1="426.3216534824596" x2="734.8678126049617" y2="531.9542592041423" stroke="#e65100" class="edge" marker-end="url(#arrow-orange)" />
+  <line x1="227.9853525506059" y1="193.93123138565977" x2="567.3709036541742" y2="522.2693418727966" stroke="#e65100" class="edge" marker-end="url(#arrow-orange)" />
+  <path d="M236.4427216026815,170.89633522537395 Q299.5715630880639,147.00987403747789 338.09507953254285,91.58648244043314" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <path d="M233.61691468982553,191.04698138250308 Q476.39126071323494,375.1874126513722 741.1943516305139,525.940205513178" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="435.12478701899806" y1="841.8710776676139" x2="581.4760400436795" y2="563.0731738775823" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="364.87521298100194" y1="841.8710776676139" x2="218.52395995632043" y2="563.0731738775823" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="400.0" y1="838.0" x2="400.0" y2="688.0" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="400.0" y1="838.0" x2="400.0" y2="448.0" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="759.3169196746633" y1="523.3986785124029" x2="444.6201526148855" y2="101.12895462057813" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <path d="M746.3830853101745,528.9530186174969 Q503.60873928676506,344.81258734862786 238.8056483694861,194.0597944868221" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
+  <line x1="600.915142304291" y1="739.068220591803" x2="420.93177940819703" y2="106.64044651952352" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <line x1="582.5280381547976" y1="742.4727920401473" x2="221.09828073344775" y2="202.3073555852671" stroke="#777" class="edge" marker-end="url(#arrow)" />
+  <rect x="324.0" y="52.0" width="152" height="56" rx="6" fill="#37474f" stroke="#263238" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="78" class="node-label" >core</text>
+  <text x="400" y="92" class="small-label" fill="#ddd">17 files • deg 16</text>
+  <rect x="111.0" y="155.5" width="138" height="49" rx="6" fill="#7b1fa2" stroke="#4a148c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="180" y="178" class="node-label" >pulses</text>
+  <text x="180" y="192" class="small-label" fill="#ddd">8 files • deg 9</text>
+  <rect x="556.0" y="158.0" width="128" height="44" rx="6" fill="#6a1b9a" stroke="#4a148c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="620" y="178" class="node-label" >gates</text>
+  <text x="620" y="192" class="small-label" fill="#ddd">23 files • deg 4</text>
+  <rect x="113.0" y="276.5" width="134" height="47" rx="6" fill="#1565c0" stroke="#0d47a1" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="180" y="298" class="node-label" >hardware</text>
+  <text x="180" y="312" class="small-label" fill="#ddd">6 files • deg 7</text>
+  <rect x="338.0" y="279.0" width="124" height="42" rx="6" fill="#0277bd" stroke="#01579b" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="298" class="node-label" >devices</text>
+  <text x="400" y="312" class="small-label" fill="#ddd">4 files • deg 2</text>
+  <rect x="559.0" y="279.5" width="122" height="41" rx="6" fill="#00695c" stroke="#004d40" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="620" y="298" class="node-label" >compile</text>
+  <text x="620" y="312" class="small-label" fill="#ddd">11 files • deg 1</text>
+  <rect x="740.0" y="280.0" width="120" height="40" rx="6" fill="#2e7d32" stroke="#1b5e20" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="800" y="298" class="node-label" >simulation</text>
+  <text x="800" y="312" class="small-label" fill="#ddd">5 files • deg 0</text>
+  <rect x="327.0" y="393.5" width="146" height="53" rx="6" fill="#e65100" stroke="#bf360c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="418" class="node-label" >programs</text>
+  <text x="400" y="432" class="small-label" fill="#ddd">28 files • deg 13</text>
+  <rect x="112.0" y="516.0" width="136" height="48" rx="6" fill="#c62828" stroke="#b71c1c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="180" y="538" class="node-label" >calibration</text>
+  <text x="180" y="552" class="small-label" fill="#ddd">11 files • deg 8</text>
+  <rect x="549.0" y="514.5" width="142" height="51" rx="6" fill="#ad1457" stroke="#880e4f" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="620" y="538" class="node-label" >analysis</text>
+  <text x="620" y="552" class="small-label" fill="#ddd">16 files • deg 11</text>
+  <rect x="740.0" y="400.0" width="120" height="40" rx="6" fill="#4e342e" stroke="#3e2723" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="800" y="418" class="node-label" >optimization</text>
+  <text x="800" y="432" class="small-label" fill="#ddd">4 files • deg 0</text>
+  <rect x="327.0" y="633.5" width="146" height="53" rx="6" fill="#f57f17" stroke="#e65100" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="658" class="node-label" >experiments</text>
+  <text x="400" y="672" class="small-label" fill="#ddd">30 files • deg 13</text>
+  <rect x="118.0" y="739.0" width="124" height="42" rx="6" fill="#827717" stroke="#6b6e00" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="180" y="758" class="node-label" >autotune</text>
+  <text x="180" y="772" class="small-label" fill="#ddd">2 files • deg 2</text>
+  <rect x="557.0" y="738.5" width="126" height="43" rx="6" fill="#546e7a" stroke="#37474f" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="620" y="758" class="node-label" >verification</text>
+  <text x="620" y="772" class="small-label" fill="#ddd">4 files • deg 3</text>
+  <rect x="740.0" y="640.0" width="120" height="40" rx="6" fill="#455a64" stroke="#263238" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="800" y="658" class="node-label" >gui</text>
+  <text x="800" y="672" class="small-label" fill="#ddd">2 files • deg 0</text>
+  <rect x="735.0" y="517.5" width="130" height="45" rx="6" fill="#616161" stroke="#424242" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="800" y="538" class="node-label" >tools</text>
+  <text x="800" y="552" class="small-label" fill="#ddd">3 files • deg 5</text>
+  <rect x="116.0" y="838.0" width="128" height="44" rx="6" fill="#78909c" stroke="#546e7a" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="180" y="858" class="node-label" >examples</text>
+  <text x="180" y="872" class="small-label" fill="#ddd">3 files • deg 4</text>
+  <rect x="336.0" y="838.0" width="128" height="44" rx="6" fill="#90a4ae" stroke="#78909c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
+  <text x="400" y="858" class="node-label" >tests</text>
+  <text x="400" y="872" class="small-label" fill="#ddd">5 files • deg 4</text>
+  <rect x="20" y="880" width="200" height="70" rx="4" fill="#fafafa" stroke="#ccc" stroke-width="1.5" opacity="1.0"/>
+  <text x="30" y="896" class="small-label" text-anchor="start" font-weight="bold" fill="#333">Legend:</text>
+  <line x1="30" y1="912" x2="70" y2="912" stroke="#777" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="80" y="913" class="small-label" text-anchor="start">normal import</text>
+  <line x1="30" y1="928" x2="70" y2="928" stroke="#d32f2f" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arrow-red)"/>
+  <text x="80" y="929" class="small-label" text-anchor="start">bidirectional (cycle)</text>
+  <line x1="30" y1="943" x2="70" y2="943" stroke="#e65100" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+  <text x="80" y="944" class="small-label" text-anchor="start">layer violation (≥3)</text>
+</svg>
