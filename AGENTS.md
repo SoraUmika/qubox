@@ -2,24 +2,24 @@
 
 ## Project Purpose
 
-This repository contains the **qubox API(main folder is qubox_v2)**, a framework intended to make **cQED experimental design, execution, and analysis easy to build, run, inspect, and extend**.
+This repository contains the **qubox API** (main implementation folder: `qubox_v2`), a framework intended to make **cQED experimental design, execution, analysis, and extension easier, clearer, and more reproducible**.
 
-The long-term goal is to provide a stable, hardware-aware, and user-friendly abstraction layer for:
+Its long-term goal is to provide a stable, hardware-aware, and user-friendly abstraction layer for:
 
 - defining cQED experiments,
 - constructing pulse sequences and higher-level protocols,
-- compiling them to backend-specific programs,
+- compiling them into backend-specific programs,
 - running them on supported hardware or simulator backends,
 - collecting and organizing results,
-- and analyzing those results in a reproducible way.
+- and analyzing those results in a reproducible and physically meaningful way.
 
-The design philosophy of this repository is to keep the user-facing experiment interface as simple and expressive as possible while ensuring that backend behavior remains physically and operationally faithful.
+The guiding philosophy of this repository is to keep the **user-facing experiment interface simple and expressive** while ensuring that **backend behavior remains physically faithful, operationally correct, and easy to inspect**.
 
 ---
 
 ## Startup Policy
 
-Before making changes, an agent should first gather project context.
+Before making changes, an agent must first gather project context.
 
 ### Requirements
 - Read `README.md` first.
@@ -30,10 +30,36 @@ Before making changes, an agent should first gather project context.
 - If the task affects notebooks, examples, or usage flows, inspect the relevant notebook(s) under the notebook folder before modifying code.
 - Prefer understanding the existing repository structure before introducing new abstractions, files, or workflows.
 
-### General working principle
+### General Working Principle
 - Prefer minimal, clear, and structurally consistent changes.
 - Do not introduce large architectural rewrites unless the task explicitly calls for them.
 - Preserve compatibility with the existing supported Quantum Machines stack unless the user explicitly requests a migration.
+
+---
+
+## Prompt Logging Policy
+
+All prompt requests and prompt-generated results must be logged for traceability.
+
+### Requirements
+- Every prompt question/request and every corresponding prompt result/response must be saved under the `past_prompt/` folder.
+- Each saved record must include an **explicit date and time** in its filename or metadata.
+- Timestamps should be precise enough to distinguish multiple prompt runs on the same day.
+- The saved record should make clear:
+  - the original prompt/request,
+  - the produced result/response,
+  - and, when relevant, the task context or target files.
+- Do not overwrite prior prompt logs unless the task explicitly calls for replacement; preserve history by default.
+
+### Guidance
+- Prefer stable, readable naming conventions such as:
+  - `past_prompt/YYYY-MM-DD_HH-MM-SS_<short_task_name>.md`
+  - or an equivalent structured format already used by the repository
+- If a prompt is revised multiple times, each meaningful revision should be logged separately.
+- Prompt logs should be organized so that past agent interactions can be audited later.
+
+### Goal
+This policy exists to ensure reproducibility, auditability, and historical traceability of agent-assisted development work.
 
 ---
 
@@ -42,8 +68,9 @@ Before making changes, an agent should first gather project context.
 For stability and reproducibility, all development and execution environments should use **Python 3.12.13**.
 
 ### Requirements
-- Before performing environment-dependent work, check whether **Python 3.12.X** is available on the system. Do fall back to Python 3.11.8 when trying to actually connect to hardware, hardware is only avaialble if the SYSTEM name is ECE-SHANKAR-07
-- If Python 3.12.X is not available, create and use a **virtual environment** based on that version, if possible.
+- Before performing environment-dependent work, check whether **Python 3.12.x** is available on the system.
+- When actually connecting to hardware, Python **3.11.8** may be used as a fallback, since hardware access is only available when the system name is `ECE-SHANKAR-07`.
+- If Python 3.12.x is not available, create and use a **virtual environment** based on that version, if possible.
 - Avoid using other Python versions unless:
   - the user explicitly requests it, or
   - there is a documented project-wide exception.
@@ -59,28 +86,28 @@ For stability and reproducibility, all development and execution environments sh
 
 The qubox API currently primarily supports **Quantum Machines** hardware and software.
 
-### Supported stack
+### Supported Stack
 - **Quantum Machines QUA / QM API version:** `1.2.6`
 - **Primary hardware target:** **OPX+ + Octave**
 
 All implementation, experiment generation, validation, and documentation work should remain consistent with this supported stack unless the user explicitly requests an upgrade or migration.
 
-### Official references
+### Official References
 - General Quantum Machines documentation:  
-  https://docs.quantum-machines.co/1.2.6/
+  `https://docs.quantum-machines.co/1.2.6/`
 - QUA Simulator API:  
-  https://docs.quantum-machines.co/1.2.6/docs/API_references/simulator_api/
+  `https://docs.quantum-machines.co/1.2.6/docs/API_references/simulator_api/`
 - Octave API:  
-  https://docs.quantum-machines.co/1.2.6/docs/API_references/qm_octave/
+  `https://docs.quantum-machines.co/1.2.6/docs/API_references/qm_octave/`
 - OPX+ / QM API:  
-  https://docs.quantum-machines.co/1.2.6/docs/API_references/qm_api/
+  `https://docs.quantum-machines.co/1.2.6/docs/API_references/qm_api/`
 - General tutorials:  
-  https://github.com/qua-platform/qua-libs/tree/main/Tutorials
+  `https://github.com/qua-platform/qua-libs/tree/main/Tutorials`
 
-### Scope expectations
+### Scope Expectations
 - Do not assume compatibility with other QM versions unless verified.
 - Do not assume compatibility with non-QM hardware unless the abstraction is explicitly backend-agnostic and the task requests such support.
-- If adding abstractions intended for future backend portability, keep the current QM backend behavior correct first.
+- If adding abstractions intended for future backend portability, keep current QM backend behavior correct first.
 
 ---
 
@@ -96,7 +123,7 @@ Agents working in this repository should preserve the following high-level desig
 - **extensibility toward future cQED experiments**
 - **practical usability for experimental physicists**
 
-The repository is not just a code library; it is intended to support real experimental workflows. As such, readability, reproducibility, and physical correctness matter more than clever abstraction for its own sake.
+This repository is not just a code library; it is intended to support real experimental workflows. Readability, reproducibility, and physical correctness matter more than clever abstraction for its own sake.
 
 ---
 
@@ -105,7 +132,7 @@ The repository is not just a code library; it is intended to support real experi
 For any new experiment, audit, refactor, or feature that produces or modifies a **QUA program**, the resulting **compiled program** must be treated as the source of truth for execution behavior.
 
 ### Requirements
-- Do **not** assume that the written QUA code and the actual compiled behavior are identical.
+- Do **not** assume that written QUA code and actual compiled behavior are identical.
 - Any experiment that compiles to QUA must be validated carefully to ensure that the generated program behaves as intended.
 - When checking, auditing, or developing a QUA-based experiment, the program should be run through the **Quantum Machines supported simulator API** whenever feasible.
 - Validation should focus on whether the compiled and simulated behavior matches the intended:
@@ -136,12 +163,12 @@ For any new experiment, audit, refactor, or feature that produces or modifies a 
   - set `n_avg = 1` unless averaging itself is the object of the test,
   - reduce unnecessarily long idle periods when they are not the feature being validated,
   - and simulate only the minimum duration needed to verify the sequence.
+
 - Refer to `standard_experiments.md` for the set of standard reference protocols that should pass for intended operations whenever applicable.
 
 ### Long-Wait and Relaxation Experiments
 - Some experiments include long delays, such as thermal relaxation waits, often on the order of **1000+ clock cycles** or longer.
 - For validation through the simulator API, these waits may be shortened artificially when the purpose is only to verify program structure, ordering, and timing logic rather than the exact physical wait duration.
-- For example, long relaxation waits may be reduced to a much shorter representative duration for simulator-based checks.
 - A good rule of thumb is to estimate the total pulse-sequence duration from:
   - state preparation,
   - experiment body,
@@ -198,9 +225,9 @@ The file `API_REFERENCE.md` is the canonical reference for public API usage.
 - Refer to `API_REFERENCE.md` when using or modifying the API.
 - Any change to the public API must be reflected in `API_REFERENCE.md`.
 - Any notable repository change should also update `docs/CHANGELOG.md`.
-- Documentation changes should be made in the same task whenever practical, so the code and docs remain synchronized.
+- Documentation changes should be made in the same task whenever practical, so code and docs remain synchronized.
 
-### This includes
+### This Includes
 - new public classes,
 - new functions,
 - renamed parameters,
@@ -210,7 +237,7 @@ The file `API_REFERENCE.md` is the canonical reference for public API usage.
 - backend support changes,
 - and workflow changes visible to users.
 
-### Documentation principle
+### Documentation Principle
 If a user-visible behavior changes, the corresponding documentation should change in the same task unless there is a strong reason not to.
 
 ---
@@ -247,7 +274,7 @@ Agents should prefer changes that are testable and inspectable.
 - If a change introduces a known limitation or unresolved discrepancy, document it explicitly rather than hiding it.
 - Avoid making changes that cannot be explained, inspected, or reproduced.
 
-### General principle
+### General Principle
 A successful change is not just one that “runs,” but one that can be explained and validated.
 
 ---
@@ -275,7 +302,7 @@ Agents should prefer the smallest correct change that fully addresses the task.
 - Do not introduce large new abstractions unless they are justified by repeated structure or long-term maintainability.
 - Do not rewrite working subsystems only for stylistic reasons.
 
-### Preferred behavior
+### Preferred Behavior
 - Understand existing conventions first.
 - Extend existing patterns where reasonable.
 - Refactor only when it clearly improves correctness, maintainability, or usability.
