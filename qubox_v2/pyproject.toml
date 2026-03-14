@@ -4,9 +4,9 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "qubox"
-version = "2.0.0"
+version = "3.0.0"
 description = "Quantum Box: cQED experiment orchestration for OPX+ / Octave hardware"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
@@ -29,8 +29,8 @@ dev = ["pytest>=7.0", "pytest-cov", "ruff"]
 mcp = ["mcp[cli]>=1.2.0"]
 
 [tool.setuptools.packages.find]
-include = ["qubox_v2*", "qubox_lab_mcp*"]
+include = ["qubox*", "qubox_tools*", "qubox_v2*", "qubox_lab_mcp*"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py311"

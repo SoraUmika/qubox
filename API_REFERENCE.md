@@ -5849,3 +5849,80 @@ arithmetic:
 *This document is auto-generated from source inspection and existing
 architecture documents.  Cross-reference with the governing documents in
 `qubox_v2/docs/` for policy-level requirements.*
+## qubox 3.x Canonical API
+
+The repository now exposes a notebook-facing public package:
+
+```python
+from qubox import Session
+```
+
+Use `qubox` as the top-level notebook namespace:
+
+- `Session.open(...)`
+- `session.exp.*` for standard experiment templates
+- `session.sequence()` for custom ordered control
+- `session.circuit()` for gate-sequence-style prototyping
+- `session.sweep.*` for first-class sweeps
+- `session.acquire.*` for acquisition specs
+- `session.ops.*` for semantic calibrated operations
+
+Reference documents for the new surface:
+
+- `README.md`
+- `docs/qubox_architecture.md`
+- `docs/qubox_migration_guide.md`
+
+For notebook workflows that still depend on unported runtime surfaces, use:
+
+```python
+from qubox.compat.notebook import (
+    QubitSpectroscopy,
+    CalibrationOrchestrator,
+    measureMacro,
+)
+```
+
+Notebook policy for this repository is now:
+
+- notebooks should import from `qubox`, `qubox.compat.notebook`, and `qubox_tools`
+- notebooks should not import `qubox_v2` directly
+
+`qubox_v2` remains the underlying implementation package for much of the
+runtime stack, but it is not the preferred notebook import surface.
+
+## qubox_tools Analysis API (2026-03-13 Update)
+
+The previous `qubox` runtime migration is only partially complete. For the
+current repository state:
+
+- `qubox_v2` remains the active execution-facing API for sessions,
+  experiments, calibration orchestration, and QM / QUA interaction.
+- `qubox_tools` is now the canonical analysis-facing API.
+- `qubox` remains a partial facade and should not yet be treated as the sole
+  runtime entry point.
+
+Recommended analysis imports:
+
+```python
+import qubox_tools as qt
+from qubox_tools import generalized_fit
+from qubox_tools.algorithms.post_selection import PostSelectionConfig
+from qubox_tools.plotting.common import plot_hm
+```
+
+Legacy compatibility remains available:
+
+- `qubox_v2.analysis.*`
+- `qubox_v2.optimization.*`
+
+These legacy modules now resolve to the extracted `qubox_tools` implementation
+for the moved analysis surface.
+
+For notebook analysis cells, prefer combining the namespaces like this:
+
+```python
+from qubox import Session
+from qubox.compat.notebook import QubitSpectroscopy
+import qubox_tools as qt
+```

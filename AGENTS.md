@@ -2,7 +2,7 @@
 
 ## Project Purpose
 
-This repository contains the **qubox API** (main implementation folder: `qubox_v2`), a framework intended to make **cQED experimental design, execution, analysis, and extension easier, clearer, and more reproducible**.
+This repository contains the **qubox API** (main implementation folder: `qubox_v2->qubox`), a framework intended to make **cQED experimental design, execution, analysis, and extension easier, clearer, and more reproducible**.
 
 Its long-term goal is to provide a stable, hardware-aware, and user-friendly abstraction layer for:
 
@@ -69,7 +69,7 @@ For stability and reproducibility, all development and execution environments sh
 
 ### Requirements
 - Before performing environment-dependent work, check whether **Python 3.12.x** is available on the system.
-- When actually connecting to hardware, Python **3.11.8** may be used as a fallback, since hardware access is only available when the system name is `ECE-SHANKAR-07`.
+- For now, Python **3.11.8** may be used as a fallback, since hardware access is only available when the system name is `ECE-SHANKAR-07` and some system only have 3.11.8.
 - If Python 3.12.x is not available, create and use a **virtual environment** based on that version, if possible.
 - Avoid using other Python versions unless:
   - the user explicitly requests it, or

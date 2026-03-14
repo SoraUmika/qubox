@@ -1,4 +1,4 @@
-# qubox_v2 Change Log
+﻿# qubox_v2 Change Log
 
 ## Change-Log Policy
 
@@ -27,6 +27,51 @@ Each entry must include:
 ---
 
 ## Entries
+
+### 2026-03-13 — Analysis API Extraction and Refactor Verification
+
+**Classification: Major**
+
+**Summary:**
+
+1. Added `qubox_tools` as the canonical analysis package for fitting,
+   plotting, post-processing, metrics, and optimization helpers.
+2. Converted `qubox_v2.analysis.*` and `qubox_v2.optimization.*` into
+   compatibility wrappers that point to the extracted analysis code.
+3. Hardened optional dependency imports so missing `pandas`, `pycma`,
+   `scikit-optimize`, `tqdm`, and `qm`-related notebook/runtime dependencies
+   do not block analysis-only validation.
+4. Added notebook-local `qubox_tools` sanity cells, explicit hardware
+   boundaries, notebook validation tooling, and new tests for the extracted
+   analysis surface.
+5. Added an explicit verification document showing that the earlier `qubox`
+   runtime migration was partial rather than complete.
+6. Final validation for this task was re-run with
+   `E:\Program Files\Python311\python.exe` (Python 3.11.8), including an
+   existing `qubox_v2` workflow-safety compatibility suite and deeper notebook
+   startup execution.
+7. Migrated the repository notebooks off direct `qubox_v2` imports by adding
+   the centralized `qubox.compat.notebook` shim and updating notebook sources
+   to import only from `qubox`, `qubox.compat.notebook`, and `qubox_tools`.
+
+**Files affected:**
+
+- `README.md`
+- `API_REFERENCE.md`
+- `docs/CHANGELOG.md`
+- `docs/qubox_refactor_verification.md`
+- `docs/qubox_tools_analysis_split.md`
+- `notebooks/post_cavity_experiment_context.ipynb`
+- `notebooks/post_cavity_experiment_quantum_circuit.ipynb`
+- `qubox_tools/**`
+- `qubox/compat/**`
+- `qubox_v2/__init__.py`
+- `qubox_v2/analysis/**`
+- `qubox_v2/calibration/__init__.py`
+- `qubox_v2/optimization/**`
+- `qubox_v2/pyproject.toml`
+- `tests/qubox_tools/test_analysis_split.py`
+- `tools/validate_notebooks.py`
 
 ### 2026-03-02 — Workflow Safety Refactoring (v2.1.0)
 
@@ -1784,3 +1829,57 @@ explicitly separated and regression-locked.
 - `architecture_design.md`
 - `test_case_report.md` (new)
 - `docs/CHANGELOG.md` â€” This entry
+
+---
+
+### 2026-03-13 - Architecture Refactor Proposal Documentation
+
+**Classification: Minor**
+
+Added a dedicated architecture review and refactor proposal document for the
+qubox experiment framework. The document audits the current experiment,
+calibration, compilation, and analysis architecture, critiques the current
+usability from a cQED workflow perspective, proposes a target design centered
+on experiment templates plus sequence and sweep primitives, and outlines a
+staged migration roadmap.
+
+**Files affected:**
+
+- `docs/qubox_experiment_framework_refactor_proposal.md`
+- `past_prompt/2026-03-13_03-59-01_architecture_review_qubox_framework.md`
+- `docs/CHANGELOG.md` - This entry
+
+---
+
+### 2026-03-13 - qubox Canonical Package Refactor
+
+**Classification: Major**
+
+Introduced a new canonical `qubox` package on top of the existing repository,
+with a Session-first public API, experiment-template namespaces, sequence and
+QuantumCircuit authoring surfaces, first-class sweep and acquisition objects,
+a QM runtime adapter, calibration snapshots and proposals, migration
+documentation, a root README, and public API tests. The older `qubox_v2`
+package remains available as a compatibility layer while the backend migration
+continues.
+
+**Files affected:**
+
+- `README.md`
+- `API_REFERENCE.md`
+- `docs/qubox_architecture.md`
+- `docs/qubox_migration_guide.md`
+- `qubox/__init__.py`
+- `qubox/session/*`
+- `qubox/experiments/*`
+- `qubox/sequence/*`
+- `qubox/circuit/*`
+- `qubox/operations/*`
+- `qubox/calibration/*`
+- `qubox/backends/*`
+- `qubox/data/*`
+- `qubox/analysis/*`
+- `qubox/compat/__init__.py`
+- `tests/test_qubox_public_api.py`
+- `qubox_v2/pyproject.toml`
+- `docs/CHANGELOG.md` - This entry

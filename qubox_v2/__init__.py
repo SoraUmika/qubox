@@ -31,3 +31,7 @@ __all__ = [
     "configure_global_logging",
     "get_logger",
 ]
+# NOTE:
+# `qubox_v2` remains the active execution-facing package in this repository.
+# `qubox_tools` is the canonical analysis package.
+# `qubox` exists as a partial facade from the earlier refactor pass.

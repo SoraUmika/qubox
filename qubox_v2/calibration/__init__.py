@@ -45,11 +45,16 @@ from .algorithms import (
     optimize_fock_sqr_iterative,
     optimize_fock_sqr_spsa,
 )
-from .mixer_calibration import (
-    ManualMixerCalibrator,
-    MixerCalibrationConfig,
-    SAMeasurementHelper,
-)
+try:
+    from .mixer_calibration import (
+        ManualMixerCalibrator,
+        MixerCalibrationConfig,
+        SAMeasurementHelper,
+    )
+except ImportError:  # pragma: no cover - optional lab dependency surface
+    ManualMixerCalibrator = None
+    MixerCalibrationConfig = None
+    SAMeasurementHelper = None
 from .contracts import Artifact, CalibrationResult, UpdateOp, Patch
 from .orchestrator import CalibrationOrchestrator
 from .patch_rules import (
@@ -65,14 +70,22 @@ from .patch_rules import (
     WeightRegistrationRule,
     default_patch_rules,
 )
-from .pulse_train_tomo import (
-    run_pulse_train_tomography,
-    fit_pulse_train_model,
-    fit_params_to_qubitrotation_knobs,
-    pretty_knob_report,
-    default_r0_dict,
-    plot_meas_vs_fit,
-)
+try:
+    from .pulse_train_tomo import (
+        run_pulse_train_tomography,
+        fit_pulse_train_model,
+        fit_params_to_qubitrotation_knobs,
+        pretty_knob_report,
+        default_r0_dict,
+        plot_meas_vs_fit,
+    )
+except ImportError:  # pragma: no cover - optional QM dependency surface
+    run_pulse_train_tomography = None
+    fit_pulse_train_model = None
+    fit_params_to_qubitrotation_knobs = None
+    pretty_knob_report = None
+    default_r0_dict = None
+    plot_meas_vs_fit = None
 
 __all__ = [
     # Store
