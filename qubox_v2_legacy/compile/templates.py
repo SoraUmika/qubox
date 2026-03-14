@@ -49,7 +49,7 @@ class DisplacementTemplate(GateTemplate):
 
     def build(self, x_slice: np.ndarray, *, ctx: Any, n_max: int) -> List[Any]:
         try:
-            from qubox_v2.gates.models import DisplacementModel
+            from qubox_v2_legacy.gates.models import DisplacementModel
         except Exception as e:
             raise ImportError("DisplacementTemplate requires qubox.gates.models.DisplacementModel") from e
 
@@ -123,7 +123,7 @@ class SQRTemplate(GateTemplate):
             raise ValueError(f"{self.name}: template n_max={self.n_max} but build called with n_max={n_max}")
 
         try:
-            from qubox_v2.gates.models import SQRModel
+            from qubox_v2_legacy.gates.models import SQRModel
         except Exception as e:
             raise ImportError("SQRTemplate requires qubox.gates.models.SQRModel") from e
 
@@ -181,7 +181,7 @@ class QubitRotationTemplate(GateTemplate):
 
     def build(self, x_slice: np.ndarray, *, ctx: Any, n_max: int) -> List[Any]:
         try:
-            from qubox_v2.gates.models import QubitRotationModel
+            from qubox_v2_legacy.gates.models import QubitRotationModel
         except Exception as e:
             raise ImportError("QubitRotationTemplate requires qubox.gates.models.QubitRotationModel") from e
 
@@ -234,7 +234,7 @@ class SNAPTemplate(GateTemplate):
             raise ValueError(f"{self.name}: template n_max={self.n_max} but build called with n_max={n_max}")
 
         try:
-            from qubox_v2.gates.models import SNAPModel
+            from qubox_v2_legacy.gates.models import SNAPModel
         except Exception as e:
             raise ImportError("SNAPTemplate requires qubox.gates.models.SNAPModel") from e
 

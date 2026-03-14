@@ -6,9 +6,9 @@ from typing import Callable, Dict, List, Optional, Sequence, Any, Tuple
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from qubox_v2.gates.contexts import ModelContext, NoiseConfig
-from qubox_v2.gates.cache import ModelCache
-from qubox_v2.gates.noise import QubitT1T2Noise
+from qubox_v2_legacy.gates.contexts import ModelContext, NoiseConfig
+from qubox_v2_legacy.gates.cache import ModelCache
+from qubox_v2_legacy.gates.noise import QubitT1T2Noise
 
 from .ansatz import Ansatz
 from .objectives import ObjectiveConfig

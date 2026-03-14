@@ -1,7 +1,7 @@
 # Gate–Protocol–Circuit Architecture Survey
 
 **Date**: 2026-03-02  
-**Scope**: `qubox_v2` full codebase  
+**Scope**: `qubox_v2_legacy` full codebase  
 **Purpose**: PHASE 0 mandatory survey before implementing the Gate → Protocol → Circuit → Backend (QUA) abstraction layer.
 
 ---
@@ -27,7 +27,7 @@
 
 ## 1. Executive Summary
 
-`qubox_v2` is a layered experiment orchestration framework for circuit-QED systems on Quantum Machines OPX+ hardware. It enforces declarative pulses, immutable session state, and calibration-DB persistence. The framework currently has:
+`qubox_v2_legacy` is a layered experiment orchestration framework for circuit-QED systems on Quantum Machines OPX+ hardware. It enforces declarative pulses, immutable session state, and calibration-DB persistence. The framework currently has:
 
 - **26 experiment classes** (all migrated to `_build_impl()` / `ProgramBuildResult`)
 - **~50 QUA program builders** spread across 8 builder modules under `programs/builders/`
@@ -667,8 +667,8 @@ Circuits don't track what readout streams they produce. The stream schema is imp
 ### New Module Layout
 
 ```
-qubox_v2/gates/                     ← EXISTING (simulation/optimization)
-qubox_v2/gates/intent/              ← NEW: Physics-intent gate types
+qubox_v2_legacy/gates/                     ← EXISTING (simulation/optimization)
+qubox_v2_legacy/gates/intent/              ← NEW: Physics-intent gate types
     ├── __init__.py
     ├── base.py                     ← IntentGate ABC
     ├── qubit_rotation.py           ← QubitRotation gate
@@ -679,19 +679,19 @@ qubox_v2/gates/intent/              ← NEW: Physics-intent gate types
     ├── frame_update.py             ← FrameUpdate gate
     └── conditional.py              ← ConditionalGate wrapper
 
-qubox_v2/gates/protocols/           ← NEW: Reusable protocol generators
+qubox_v2_legacy/gates/protocols/           ← NEW: Reusable protocol generators
     ├── __init__.py
     ├── base.py                     ← Protocol ABC
     ├── ramsey.py                   ← Ramsey protocol
     ├── echo.py                     ← Echo protocol
     └── active_reset.py             ← Active reset protocol
 
-qubox_v2/gates/circuit/             ← NEW: Circuit composition
+qubox_v2_legacy/gates/circuit/             ← NEW: Circuit composition
     ├── __init__.py
     ├── circuit.py                  ← Circuit type with measurement schema
     └── runner.py                   ← NEW CircuitRunner (gate-driven lowering)
 
-qubox_v2/tests/gate_architecture/   ← NEW: Tests
+qubox_v2_legacy/tests/gate_architecture/   ← NEW: Tests
     ├── __init__.py
     ├── test_gates.py
     ├── test_protocols.py

@@ -2,7 +2,7 @@
 
 ## Project Purpose
 
-This repository contains the **qubox API** (main implementation folder: `qubox_v2->qubox`), a framework intended to make **cQED experimental design, execution, analysis, and extension easier, clearer, and more reproducible**.
+This repository contains the **qubox API** (main implementation folder: `qubox`), a framework intended to make **cQED experimental design, execution, analysis, and extension easier, clearer, and more reproducible**.
 
 Its long-term goal is to provide a stable, hardware-aware, and user-friendly abstraction layer for:
 

@@ -1,6 +1,6 @@
 ---
 description: "Use when modifying calibration orchestrator, patch rules, calibration store, calibration history, or calibration transitions. Enforces FitResult.success contract, patch transactionality, and calibration lifecycle invariants."
-applyTo: "qubox_v2/calibration/**"
+applyTo: "qubox_v2_legacy/calibration/**"
 ---
 
 # Calibration Module Instructions

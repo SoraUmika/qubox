@@ -1,4 +1,4 @@
-# QuBox v2 — Workspace Instructions
+# QuBox — Workspace Instructions
 
 ## Project Overview
 
@@ -16,14 +16,14 @@ QuBox is a cQED (circuit quantum electrodynamics) experiment orchestration frame
 - **gates/** — Gate system architecture
 - **simulation/** — QuTiP quantum simulation
 
-See [qubox_v2/docs/ARCHITECTURE.md](qubox_v2/docs/ARCHITECTURE.md) for full details.
+See [qubox_v2_legacy/docs/ARCHITECTURE.md](qubox_v2_legacy/docs/ARCHITECTURE.md) for full details.
 
 ## Code Style
 
 - Ruff linter, 120-char lines, Python 3.10+ type hints
 - Pydantic v2 for all data models; frozen dataclasses for identity objects
 - `from __future__ import annotations` in every module
-- Imports: stdlib → third-party → local (relative within qubox_v2)
+- Imports: stdlib → third-party → local (relative within package)
 
 ## Conventions
 
@@ -39,7 +39,7 @@ See [qubox_v2/docs/ARCHITECTURE.md](qubox_v2/docs/ARCHITECTURE.md) for full deta
 pip install -e ".[dev]"      # editable install with dev deps
 pytest                        # run full test suite
 pytest tests/gate_architecture/ -v   # gate architecture tests with golden snapshots
-ruff check qubox_v2/          # lint
+ruff check qubox/             # lint
 ```
 
 ## Documentation

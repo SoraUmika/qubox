@@ -178,7 +178,7 @@ e:\repo\qubox\
 │               └── experiment-writeup.tex ← LaTeX writeup template
 ├── .vscode\
 │   └── mcp.json                         ← MCP server configuration
-└── qubox_v2\
+└── qubox_v2_legacy\
     └── ...
 ```
 

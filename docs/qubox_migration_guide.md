@@ -4,12 +4,12 @@ Date: 2026-03-13
 
 ## Goal
 
-Move user-facing code from `qubox_v2` to `qubox` without requiring an immediate
+Move user-facing code from `qubox_v2_legacy` to `qubox` without requiring an immediate
 rewrite of the entire backend stack.
 
 ## Canonical Import Changes
 
-- Old: `from qubox_v2.experiments.session import SessionManager`
+- Old: `from qubox_v2_legacy.experiments.session import SessionManager`
 - New: `from qubox import Session`
 
 - Old: instantiate `SessionManager(...)` then call `session.open()`
@@ -31,7 +31,7 @@ rewrite of the entire backend stack.
 Old:
 
 ```python
-from qubox_v2.experiments.session import SessionManager
+from qubox_v2_legacy.experiments.session import SessionManager
 
 session = SessionManager(
     sample_id="sampleA",
@@ -58,7 +58,7 @@ session = Session.open(
 Old:
 
 ```python
-from qubox_v2.experiments.spectroscopy.qubit import QubitSpectroscopy
+from qubox_v2_legacy.experiments.spectroscopy.qubit import QubitSpectroscopy
 
 exp = QubitSpectroscopy(session)
 result = exp.run(...)
@@ -76,7 +76,7 @@ result = session.exp.qubit.spectroscopy(...)
 Old:
 
 ```python
-from qubox_v2.programs.circuit_runner import QuantumCircuit, Gate
+from qubox_v2_legacy.programs.circuit_runner import QuantumCircuit, Gate
 ```
 
 New:
@@ -90,7 +90,7 @@ result = session.exp.custom(sequence=seq, ...)
 
 ## Compatibility Notes
 
-- `qubox_v2` is still present for compatibility and deep internals.
+- `qubox_v2_legacy` is still present for compatibility and deep internals.
 - The new `Session` object proxies unknown attributes to the underlying legacy
   session object, so notebook flows can migrate incrementally.
 - Not every historical experiment class has a first-class `session.exp.*`

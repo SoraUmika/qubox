@@ -2,25 +2,25 @@
 
 This repository currently contains three relevant Python package surfaces:
 
-- `qubox_v2`: the active execution-facing cQED framework for sessions, experiments, calibration orchestration, and QM / QUA interaction
+- `qubox`: the canonical user-facing cQED framework for sessions, experiments, calibration orchestration, and QM / QUA interaction
 - `qubox_tools`: the analysis-facing package for fitting, plotting, post-processing, and reusable optimization helpers
-- `qubox`: a partial higher-level facade from the earlier refactor pass; it is not yet a full replacement for `qubox_v2`
+- `qubox_v2_legacy`: the internal runtime backend (not for direct import); drives hardware interaction, QUA compilation, and legacy experiment classes
 
 ## Current Recommendation
 
-Use `qubox_v2` for experiment execution and `qubox_tools` for reusable analysis.
+Use `qubox` for experiment execution and `qubox_tools` for reusable analysis.
 
 ```python
-from qubox_v2.experiments.session import SessionManager
+from qubox import Session
 from qubox_tools import generalized_fit
 ```
 
 ## Runtime Scope
 
-`qubox_v2` remains the working lab stack for:
+`qubox` is the working lab stack for:
 
 - session lifecycle
-- experiment classes
+- experiment classes (template and custom)
 - calibration storage and orchestration
 - backend compilation and execution
 - artifact generation
@@ -35,22 +35,22 @@ from qubox_tools import generalized_fit
 - analysis algorithms
 - optimization utilities used by calibration/analysis workflows
 
-Legacy imports under `qubox_v2.analysis.*` and `qubox_v2.optimization.*` are preserved as compatibility wrappers.
+Legacy imports under `qubox_v2_legacy.analysis.*` and `qubox_v2_legacy.optimization.*` are preserved as compatibility wrappers.
 
 ## Quick Start
 
 Execution:
 
 ```python
-from qubox_v2.experiments.session import SessionManager
+from qubox import Session
 
-session = SessionManager(
+session = Session.open(
     sample_id="sampleA",
     cooldown_id="cd_2026_03_13",
     registry_base="E:/qubox",
     qop_ip="10.157.36.68",
     cluster_name="Cluster_2",
-).open()
+)
 ```
 
 Analysis:

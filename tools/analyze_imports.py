@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-analyze_imports.py — Static import-graph analysis for the qubox_v2 codebase.
+analyze_imports.py — Static import-graph analysis for the qubox_v2_legacy codebase.
 
-Walks every .py file under qubox_v2/, uses the AST to extract import
+Walks every .py file under qubox_v2_legacy/, uses the AST to extract import
 statements, then builds a directed graph of module-level and package-level
 dependencies.  Produces:
 
@@ -28,7 +28,7 @@ from typing import Any
 # Configuration
 # ---------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PACKAGE_ROOT = REPO_ROOT / "qubox_v2"
+PACKAGE_ROOT = REPO_ROOT / "qubox_v2_legacy"
 OUT_DIR = REPO_ROOT / "docs" / "architecture"
 
 # Packages to treat as top-level subsystems
@@ -100,12 +100,12 @@ def _extract_imports(filepath: Path) -> list[str]:
 
 
 def _to_subsystem(module_name: str) -> str | None:
-    """Map a dotted module name to its qubox_v2 subsystem, or None."""
-    if not module_name.startswith("qubox_v2."):
+    """Map a dotted module name to its qubox_v2_legacy subsystem, or None."""
+    if not module_name.startswith("qubox_v2_legacy."):
         return None
     parts = module_name.split(".")
     if len(parts) < 2:
-        return "qubox_v2"
+        return "qubox_v2_legacy"
     subsys = parts[1]
     if subsys in SUBSYSTEM_PACKAGES:
         return subsys
@@ -144,7 +144,7 @@ def build_module_graph() -> dict[str, dict]:
         for imp in _extract_imports(fp):
             dst_pkg = _to_subsystem(imp)
             
-            if imp.startswith("qubox_v2"):
+            if imp.startswith("qubox_v2_legacy"):
                 module_edges.append((src_mod, imp))
                 if src_pkg and dst_pkg and src_pkg != dst_pkg:
                     package_edges_set.add((src_pkg, dst_pkg))
@@ -312,7 +312,7 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     
     print("=" * 60)
-    print("qubox_v2 Import Analysis")
+    print("qubox_v2_legacy Import Analysis")
     print("=" * 60)
     
     graph = build_module_graph()

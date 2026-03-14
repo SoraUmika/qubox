@@ -34,7 +34,7 @@ class ReadoutWorkflowLibrary:
 
         class _ReadoutFullWorkflow:
             def run(self_nonlocal):
-                from qubox_v2.experiments.calibration.readout import CalibrateReadoutFull
+                from qubox_v2_legacy.experiments.calibration.readout import CalibrateReadoutFull
 
                 experiment = CalibrateReadoutFull(session.legacy_session)
                 payload = experiment.build_plan(

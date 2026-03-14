@@ -1,6 +1,6 @@
 ## `module.ClassName`
 
-**Module**: `qubox_v2.module.submodule`
+**Module**: `qubox.module.submodule`
 
 Brief description of the class purpose.
 
@@ -34,7 +34,7 @@ Description of what the method does.
 ### Example
 
 ```python
-from qubox_v2.module import ClassName
+from qubox.module import ClassName
 
 obj = ClassName(param1=value)
 result = obj.method_name(arg)

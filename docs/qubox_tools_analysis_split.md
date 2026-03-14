@@ -5,12 +5,12 @@ Date: 2026-03-13
 ## Purpose
 
 `qubox_tools` is the canonical package for reusable analysis logic. It is meant
-to be useful both with `qubox_v2` outputs and in standalone notebook/data
+to be useful both with `qubox_v2_legacy` outputs and in standalone notebook/data
 analysis workflows.
 
 ## Package Boundary
 
-`qubox_v2` owns:
+`qubox_v2_legacy` owns:
 
 - session/runtime concepts
 - experiment definitions and execution
@@ -27,10 +27,10 @@ analysis workflows.
 - discrimination and metric helpers
 - optimization utilities used by analysis/calibration
 
-Still retained in `qubox_v2` for runtime coupling reasons:
+Still retained in `qubox_v2_legacy` for runtime coupling reasons:
 
-- `qubox_v2.analysis.cQED_attributes`
-- `qubox_v2.analysis.pulseOp`
+- `qubox_v2_legacy.analysis.cQED_attributes`
+- `qubox_v2_legacy.analysis.pulseOp`
 
 ## Extracted Structure
 
@@ -65,22 +65,22 @@ qubox_tools/
 
 | Legacy import | New canonical import |
 |---|---|
-| `qubox_v2.analysis.fitting` | `qubox_tools.fitting.routines` |
-| `qubox_v2.analysis.models` | `qubox_tools.fitting.models` |
-| `qubox_v2.analysis.cQED_models` | `qubox_tools.fitting.cqed` |
-| `qubox_v2.analysis.pulse_train_models` | `qubox_tools.fitting.pulse_train` |
-| `qubox_v2.analysis.calibration_algorithms` | `qubox_tools.fitting.calibration` |
-| `qubox_v2.analysis.plotting` | `qubox_tools.plotting.common` |
-| `qubox_v2.analysis.cQED_plottings` | `qubox_tools.plotting.cqed` |
-| `qubox_v2.analysis.algorithms` | `qubox_tools.algorithms.core` |
-| `qubox_v2.analysis.analysis_tools` | `qubox_tools.algorithms.transforms` |
-| `qubox_v2.analysis.post_process` | `qubox_tools.algorithms.post_process` |
-| `qubox_v2.analysis.post_selection` | `qubox_tools.algorithms.post_selection` |
-| `qubox_v2.analysis.metrics` | `qubox_tools.algorithms.metrics` |
-| `qubox_v2.analysis.output` | `qubox_tools.data.containers` |
-| `qubox_v2.optimization.optimization` | `qubox_tools.optimization.bayesian` |
-| `qubox_v2.optimization.smooth_opt` | `qubox_tools.optimization.local` |
-| `qubox_v2.optimization.stochastic_opt` | `qubox_tools.optimization.stochastic` |
+| `qubox_v2_legacy.analysis.fitting` | `qubox_tools.fitting.routines` |
+| `qubox_v2_legacy.analysis.models` | `qubox_tools.fitting.models` |
+| `qubox_v2_legacy.analysis.cQED_models` | `qubox_tools.fitting.cqed` |
+| `qubox_v2_legacy.analysis.pulse_train_models` | `qubox_tools.fitting.pulse_train` |
+| `qubox_v2_legacy.analysis.calibration_algorithms` | `qubox_tools.fitting.calibration` |
+| `qubox_v2_legacy.analysis.plotting` | `qubox_tools.plotting.common` |
+| `qubox_v2_legacy.analysis.cQED_plottings` | `qubox_tools.plotting.cqed` |
+| `qubox_v2_legacy.analysis.algorithms` | `qubox_tools.algorithms.core` |
+| `qubox_v2_legacy.analysis.analysis_tools` | `qubox_tools.algorithms.transforms` |
+| `qubox_v2_legacy.analysis.post_process` | `qubox_tools.algorithms.post_process` |
+| `qubox_v2_legacy.analysis.post_selection` | `qubox_tools.algorithms.post_selection` |
+| `qubox_v2_legacy.analysis.metrics` | `qubox_tools.algorithms.metrics` |
+| `qubox_v2_legacy.analysis.output` | `qubox_tools.data.containers` |
+| `qubox_v2_legacy.optimization.optimization` | `qubox_tools.optimization.bayesian` |
+| `qubox_v2_legacy.optimization.smooth_opt` | `qubox_tools.optimization.local` |
+| `qubox_v2_legacy.optimization.stochastic_opt` | `qubox_tools.optimization.stochastic` |
 
 ## Dependency Policy
 

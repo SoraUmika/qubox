@@ -99,7 +99,7 @@ def test_single_qubit_rotation_override_beats_calibration_and_policy_selection(f
 
 def test_derive_state_supports_rotation_and_sense(gate_arch_modules):
     StateRule = gate_arch_modules.circuit_protocols.StateRule
-    from qubox_v2.programs.measurement import derive_state as derive_state_helper
+    from qubox_v2_legacy.programs.measurement import derive_state as derive_state_helper
 
     iq = {"I": np.array([0.0, 0.3, -0.2]), "Q": np.array([0.0, 0.0, 0.2])}
     gt_rule = StateRule(kind="I_threshold", threshold=0.1, sense="greater", rotation_angle=0.0)

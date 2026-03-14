@@ -3,12 +3,12 @@
 ## Workspace survey
 
 ### Observed repository structure
-- Primary source code: `qubox_v2/`
+- Primary source code: `qubox_v2_legacy/`
 - Top-level architecture and API references: `README.md`, `API_REFERENCE.md`, `ARCHITECTURE.md`, `SURVEY.md`
 - Legacy / operational notebooks: `notebooks/`
 - Context-mode sample registry and cooldown artifacts: `samples/post_cavity_sample_A/`
-- Existing schema and validation logic: `qubox_v2/verification/schema_checks.py`
-- Tests already present: `qubox_v2/tests/`, `tests/gate_architecture/`
+- Existing schema and validation logic: `qubox_v2_legacy/verification/schema_checks.py`
+- Tests already present: `qubox_v2_legacy/tests/`, `tests/gate_architecture/`
 
 ### Observed naming and data conventions
 - Sample-level config appears under `samples/<sample_id>/config/`

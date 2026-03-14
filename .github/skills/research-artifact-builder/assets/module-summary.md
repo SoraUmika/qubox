@@ -1,4 +1,4 @@
-# `qubox_v2.module_name` — Module Summary
+# `qubox.module_name` — Module Summary
 
 ## Overview
 

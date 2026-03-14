@@ -18,8 +18,8 @@ HARDWARE_MARKERS = (
     "from qm import",
     "import qm",
     "octave_sdk",
-    "qubox_v2.experiments",
-    "qubox_v2.experiments.session",
+    "qubox_v2_legacy.experiments",
+    "qubox_v2_legacy.experiments.session",
     "from qubox import Session",
 )
 

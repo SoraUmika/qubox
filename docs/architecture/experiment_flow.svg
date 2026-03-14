@@ -31,7 +31,7 @@
       <feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.15"/>
     </filter>
   </defs>
-  <text x="430" y="30" class="title" text-anchor="middle">qubox_v2 — Experiment Lifecycle Flow</text>
+  <text x="430" y="30" class="title" text-anchor="middle">qubox — Experiment Lifecycle Flow</text>
   <text x="430" y="50" class="subtitle" text-anchor="middle">Control flow (top→bottom) • Side branches show key dependencies</text>
   <rect x="250.0" y="75.0" width="300" height="50" rx="6" fill="#78909c" stroke="#78909c" stroke-width="1.5" opacity="1.0" filter="url(#shadow)"/>
   <text x="400" y="100" class="node-label" font-size="11px">User / Notebook</text>

@@ -1,5 +1,5 @@
 import numpy as np
-from qubox_v2.gates.liouville import unitary_to_superop  # adjust import path if needed
+from qubox_v2_legacy.gates.liouville import unitary_to_superop  # adjust import path if needed
 
 def entanglement_fidelity_from_superop(S: np.ndarray, d: int) -> float:
     """

@@ -31,7 +31,7 @@
       <feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.15"/>
     </filter>
   </defs>
-  <text x="410" y="30" class="title" text-anchor="middle">qubox_v2 — Scientific Workflow Dependencies</text>
+  <text x="410" y="30" class="title" text-anchor="middle">qubox — Scientific Workflow Dependencies</text>
   <text x="410" y="50" class="subtitle" text-anchor="middle">Core scientific layers only • Red dashed = bidirectional coupling</text>
   <path d="M533.0,480.0 Q403.0,458.0 273.0,480.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
   <path d="M570.0366891015028,459.42817460700195 Q521.8472746452613,274.7134020224411 432.64659247149694,105.93838853899756" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>

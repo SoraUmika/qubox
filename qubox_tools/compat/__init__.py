@@ -1,4 +1,4 @@
-"""Compatibility helpers for migrating from `qubox_v2.analysis`."""
+"""Compatibility helpers for migrating from legacy analysis imports."""
 
 from .legacy_analysis import LEGACY_ANALYSIS_MAP
 

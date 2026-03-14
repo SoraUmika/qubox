@@ -8,7 +8,7 @@ argument-hint: "Name the experiment or calibration flow to audit"
 
 ## Purpose
 
-Trace and verify the full lifecycle of experiments and calibration flows in qubox_v2 — from experiment construction through data acquisition, analysis, fit evaluation, patch building, and state application. Detects silent failures, contract violations, and data flow gaps.
+Trace and verify the full lifecycle of experiments and calibration flows in qubox — from experiment construction through data acquisition, analysis, fit evaluation, patch building, and state application. Detects silent failures, contract violations, and data flow gaps.
 
 ## When to Use
 
@@ -22,7 +22,7 @@ Trace and verify the full lifecycle of experiments and calibration flows in qubo
 
 ### Step 1 — Identify the Experiment
 
-1. Locate the experiment class file in `qubox_v2/experiments/`
+1. Locate the experiment class file in `qubox_v2_legacy/experiments/`
 2. Read its class definition, `__init__`, `run()`, and `analyze()` methods
 3. Identify which base class it inherits from (`ExperimentRunner`, `cQED_Experiment`, etc.)
 4. Map its dependencies: which hardware elements, pulse operations, and analysis tools it uses

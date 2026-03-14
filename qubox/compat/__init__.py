@@ -1,8 +1,8 @@
-"""Compatibility notes and migration helpers for legacy `qubox_v2` users."""
+"""Compatibility notes and migration helpers for legacy users."""
 
 from importlib import import_module
 
-LEGACY_PACKAGE = "qubox_v2"
+LEGACY_PACKAGE = "qubox_v2_legacy"
 
 
 def __getattr__(name: str):

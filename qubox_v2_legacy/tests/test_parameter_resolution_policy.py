@@ -6,16 +6,16 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from qubox_v2.analysis.cQED_attributes import cQED_attributes
-from qubox_v2.calibration.store import CalibrationStore
-from qubox_v2.experiments.calibration.gates import AllXY
-from qubox_v2.experiments.calibration.readout import IQBlob
-from qubox_v2.experiments.cavity.storage import NumSplittingSpectroscopy
-from qubox_v2.experiments.spectroscopy.qubit import QubitSpectroscopy
-from qubox_v2.experiments.spectroscopy.resonator import ResonatorSpectroscopy
-from qubox_v2.experiments.time_domain.coherence import T2Ramsey
-from qubox_v2.experiments.time_domain.rabi import PowerRabi
-from qubox_v2.programs.circuit_runner import CircuitRunner, Gate, QuantumCircuit
+from qubox_v2_legacy.analysis.cQED_attributes import cQED_attributes
+from qubox_v2_legacy.calibration.store import CalibrationStore
+from qubox_v2_legacy.experiments.calibration.gates import AllXY
+from qubox_v2_legacy.experiments.calibration.readout import IQBlob
+from qubox_v2_legacy.experiments.cavity.storage import NumSplittingSpectroscopy
+from qubox_v2_legacy.experiments.spectroscopy.qubit import QubitSpectroscopy
+from qubox_v2_legacy.experiments.spectroscopy.resonator import ResonatorSpectroscopy
+from qubox_v2_legacy.experiments.time_domain.coherence import T2Ramsey
+from qubox_v2_legacy.experiments.time_domain.rabi import PowerRabi
+from qubox_v2_legacy.programs.circuit_runner import CircuitRunner, Gate, QuantumCircuit
 
 
 class _FakeHW:

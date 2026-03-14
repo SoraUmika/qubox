@@ -1,4 +1,4 @@
-# Contract Checklist — qubox_v2 Invariants
+# Contract Checklist — qubox Invariants
 
 Use this checklist when reviewing any code change. Each item is a hard invariant that must hold across the codebase.
 

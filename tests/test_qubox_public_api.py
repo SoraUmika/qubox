@@ -180,3 +180,5 @@ def test_result_proposal_round_trip():
 def test_notebook_compat_surface_is_lazy():
     assert "QubitSpectroscopy" in notebook_compat.__all__
     assert "measureMacro" in notebook_compat.__all__
+    assert "RunResult" in notebook_compat.__all__
+    assert "save_run_summary" in notebook_compat.__all__

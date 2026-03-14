@@ -4,10 +4,10 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 import numpy as np
 
-from qubox_v2.gates.contexts import ModelContext, NoiseConfig
-from qubox_v2.gates.cache import ModelCache
-from qubox_v2.gates.noise import QubitT1T2Noise
-from qubox_v2.gates.fidelity import avg_gate_fidelity_superop
+from qubox_v2_legacy.gates.contexts import ModelContext, NoiseConfig
+from qubox_v2_legacy.gates.cache import ModelCache
+from qubox_v2_legacy.gates.noise import QubitT1T2Noise
+from qubox_v2_legacy.gates.fidelity import avg_gate_fidelity_superop
 
 from .ansatz import Ansatz
 from .param_space import ParamSpace
@@ -70,7 +70,7 @@ def compile_with_ansatz(
         F_best = unitary_avg_fidelity(U_best, np.asarray(U_target, dtype=np.complex128))
         extra = {"U_best": U_best}
     elif mode == "density_matrix":
-        from qubox_v2.compile.objectives import apply_gates_to_density_matrix, density_matrix_fidelity
+        from qubox_v2_legacy.compile.objectives import apply_gates_to_density_matrix, density_matrix_fidelity
         # Start from |0âŸ©âŸ¨0| (vacuum state)
         qubit_dim = ctx.qubit_dim
         d = qubit_dim * (n_max + 1)

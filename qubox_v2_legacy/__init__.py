@@ -1,8 +1,8 @@
-# qubox_v2 — Restructured Quantum Box API
-# =========================================
+# qubox_v2_legacy — Internal Runtime Backend
+# ============================================
 #
-# This is the modernized, modular version of the qubox package.
-# All public symbols are re-exported here for convenience.
+# This package contains the legacy runtime internals for qubox.
+# Users should import from `qubox` (the public API) instead.
 #
 # Architecture layers:
 #   core/        — Config models, protocols, errors, logging
@@ -32,6 +32,6 @@ __all__ = [
     "get_logger",
 ]
 # NOTE:
-# `qubox_v2` remains the active execution-facing package in this repository.
+# `qubox` is the canonical user-facing package.
 # `qubox_tools` is the canonical analysis package.
-# `qubox` exists as a partial facade from the earlier refactor pass.
+# `qubox_v2_legacy` provides the internal runtime backend.

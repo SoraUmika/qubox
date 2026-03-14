@@ -1,8 +1,8 @@
-"""Analysis-first tools for qubox_v2 experiment results.
+"""Analysis-first tools for qubox experiment results.
 
 `qubox_tools` is the canonical home for reusable fitting, plotting,
 post-processing, and optimization helpers. The execution-facing API
-remains in `qubox_v2`.
+remains in `qubox`.
 """
 
 from importlib import import_module

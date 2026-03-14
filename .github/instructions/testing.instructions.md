@@ -1,6 +1,6 @@
 ---
 description: "Use when writing or modifying tests for qubox. Covers pytest conventions, golden snapshot testing, and test organization."
-applyTo: ["qubox_v2/tests/**", "tests/**"]
+applyTo: ["qubox_v2_legacy/tests/**", "tests/**"]
 ---
 
 # Test Instructions
@@ -17,6 +17,6 @@ applyTo: ["qubox_v2/tests/**", "tests/**"]
 ```bash
 pytest                                    # full suite
 pytest tests/gate_architecture/ -v        # gate architecture with snapshots
-pytest qubox_v2/tests/ -v                 # core unit tests
-ruff check qubox_v2/                      # lint check
+pytest qubox_v2_legacy/tests/ -v                 # core unit tests
+ruff check qubox/                             # lint check
 ```

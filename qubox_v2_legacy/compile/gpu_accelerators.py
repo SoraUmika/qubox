@@ -301,7 +301,7 @@ def enable_jax_acceleration(verbose: bool = True) -> bool:
         return False
     
     try:
-        from qubox_v2.compile import evaluators
+        from qubox_v2_legacy.compile import evaluators
         
         # Save original functions
         if 'compose_unitary' not in _original_functions:
@@ -352,7 +352,7 @@ def disable_jax_acceleration(verbose: bool = True) -> bool:
         return False
     
     try:
-        from qubox_v2.compile import evaluators
+        from qubox_v2_legacy.compile import evaluators
         
         # Restore original functions
         if 'compose_unitary' in _original_functions:

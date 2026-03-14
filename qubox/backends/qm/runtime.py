@@ -144,7 +144,7 @@ _ADAPTERS: dict[str, LegacyExperimentAdapter] | None = None
 def _load_adapters() -> dict[str, LegacyExperimentAdapter]:
     global _ADAPTERS
     if _ADAPTERS is None:
-        from qubox_v2.experiments import (
+        from qubox_v2_legacy.experiments import (
             ActiveQubitResetBenchmark,
             PowerRabi,
             QubitSpectroscopy,
@@ -262,7 +262,7 @@ class QMRuntime:
         )
         n_shots = int(request.shots or getattr(request.sweep, "averaging", 1) or 1)
         if self.circuit_runner_cls is None:
-            from qubox_v2.programs.circuit_runner import CircuitRunner
+            from qubox_v2_legacy.programs.circuit_runner import CircuitRunner
 
             self.circuit_runner_cls = CircuitRunner
         runner = self.circuit_runner_cls(self.session.legacy_session)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from qubox_v2.calibration.store import CalibrationStore
+from qubox_v2_legacy.calibration.store import CalibrationStore
 
 
 def test_legacy_calibration_migrates_to_cqed_params(tmp_path):

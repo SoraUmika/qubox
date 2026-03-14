@@ -1,4 +1,7 @@
-﻿# qubox_v2 Change Log
+﻿# qubox Change Log
+
+> **Note:** Historical entries below may reference `qubox_v2` — the package that
+> was renamed to `qubox_v2_legacy`. The canonical user-facing package is now `qubox`.
 
 ## Change-Log Policy
 
@@ -27,6 +30,67 @@ Each entry must include:
 ---
 
 ## Entries
+
+### 2026-03-14 — Complete Legacy qubox_v2 Reference Migration
+
+**Classification: Major**
+
+**Summary:**
+
+Migrated all `qubox_v2` references across the entire codebase (~45 files,
+~1700+ replacements) so that:
+- `qubox` is the sole user-facing package name in docs, examples, and comments
+- `qubox_v2_legacy` is used consistently for internal runtime import paths
+- The compat layer (`qubox.compat.notebook`) correctly points to `qubox_v2_legacy`
+- API_REFERENCE.md known gaps 21.1 and 21.3 resolved
+- CHANGELOG.md title updated with historical note
+
+Historical documents (CHANGELOG entries, claude_report.md, past_prompt/)
+retain original `qubox_v2` mentions as historical records.
+
+**Files affected:**
+
+- `qubox/compat/notebook.py`, `qubox/compat/__init__.py`, `qubox/__init__.py`
+- `qubox_tools/__init__.py`, `qubox_tools/compat/__init__.py`,
+  `qubox_tools/compat/legacy_analysis.py`, `qubox_tools/fitting/calibration.py`,
+  `qubox_tools/fitting/pulse_train.py`
+- `qubox_v2_legacy/__init__.py`
+- `tests/gate_architecture/conftest.py`
+- `tools/analyze_imports.py`, `tools/build_context_notebook.py`,
+  `tools/generate_codebase_graphs.py`, `tools/validate_notebooks.py`
+- `README.md`, `API_REFERENCE.md`, `SURVEY.md`
+- `.github/copilot-instructions.md`, `.github/instructions/*.md`,
+  `.github/skills/**`, `.github/WORKFLOW_BLUEPRINT.md`
+- `qubox_lab_mcp/README.md`, `qubox_lab_mcp/resources/repo_resources.py`
+- `docs/architecture_review.md`, `docs/architecture/*.json`, `docs/architecture/*.svg`
+- `docs/codebase_graph_survey.md`, `docs/gate_architecture_review.md`,
+  `docs/qubox_architecture.md`, `docs/qubox_experiment_framework_refactor_proposal.md`,
+  `docs/qubox_lab_mcp_design.md`, `docs/qubox_migration_guide.md`,
+  `docs/qubox_refactor_verification.md`, `docs/qubox_tools_analysis_split.md`
+- `docs/CHANGELOG.md`
+
+### 2026-03-14 — Beginner Tutorial Notebook and Notebook Compat Additions
+
+**Classification: Moderate**
+
+**Summary:**
+
+1. Added a new onboarding tutorial notebook under `tutorials/` that teaches
+   the real current `qubox` workflow for session startup, artifact
+   inspection, standard baseline experiments, and calibration patch review.
+2. Extended `qubox.compat.notebook` with notebook-facing runtime result and
+   artifact helpers so tutorials can stay under the `qubox` namespace while
+   still using the existing execution stack.
+3. Updated the public API reference to document the expanded
+   `qubox.compat.notebook` tutorial-facing surface.
+
+**Files affected:**
+
+- `API_REFERENCE.md`
+- `docs/CHANGELOG.md`
+- `qubox/compat/notebook.py`
+- `tests/test_qubox_public_api.py`
+- `tutorials/01_getting_started_basic_experiments.ipynb`
 
 ### 2026-03-13 — Analysis API Extraction and Refactor Verification
 

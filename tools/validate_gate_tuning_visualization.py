@@ -9,20 +9,20 @@ import shutil
 
 import numpy as np
 from qm import generate_qua_script
-from qubox_v2.programs.macros.measure import measureMacro
+from qubox_v2_legacy.programs.macros.measure import measureMacro
 
-from qubox_v2.calibration import CalibrationStore
-from qubox_v2.programs import api as cQED_programs
-from qubox_v2.hardware.config_engine import ConfigEngine
-from qubox_v2.pulses.manager import PulseOperationManager
-from qubox_v2.analysis.cQED_attributes import cQED_attributes
-from qubox_v2.core.bindings import bindings_from_hardware_config
-from qubox_v2.programs.circuit_runner import (
+from qubox_v2_legacy.calibration import CalibrationStore
+from qubox_v2_legacy.programs import api as cQED_programs
+from qubox_v2_legacy.hardware.config_engine import ConfigEngine
+from qubox_v2_legacy.pulses.manager import PulseOperationManager
+from qubox_v2_legacy.analysis.cQED_attributes import cQED_attributes
+from qubox_v2_legacy.core.bindings import bindings_from_hardware_config
+from qubox_v2_legacy.programs.circuit_runner import (
     CircuitRunner,
     make_power_rabi_circuit,
     make_xy_pair_circuit,
 )
-from qubox_v2.programs.gate_tuning import GateTuningStore, make_xy_tuning_record
+from qubox_v2_legacy.programs.gate_tuning import GateTuningStore, make_xy_tuning_record
 
 
 @dataclass

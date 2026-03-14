@@ -4,7 +4,7 @@ Date: 2026-03-13
 
 ## Scope and Audit Basis
 
-This review is based on the current `qubox_v2` codebase, with emphasis on the
+This review is based on the current `qubox_v2_legacy` codebase, with emphasis on the
 actual runtime path rather than only the advertised API. The audit focused on:
 
 - `experiments/session.py`, `experiments/experiment_base.py`, and
@@ -66,7 +66,7 @@ template layer, not above everything else.
 
 ### Session and Runtime Context
 
-The practical entry point is `qubox_v2.experiments.session.SessionManager`.
+The practical entry point is `qubox_v2_legacy.experiments.session.SessionManager`.
 This object does much more than simple session bookkeeping:
 
 - resolves sample and cooldown paths through the sample registry
@@ -661,7 +661,7 @@ sequences.
 ### Qubit Spectroscopy
 
 ```python
-from qubox_v2 import Session
+from qubox_v2_legacy import Session
 
 session = Session.open(sample_id="sampleA", cooldown_id="cd2026_03_13")
 
@@ -773,7 +773,7 @@ The exact naming can vary, but the structure should separate experiment intent
 from backend lowering.
 
 ```text
-qubox_v2/
+qubox_v2_legacy/
   session/
     session.py
     context.py

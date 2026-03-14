@@ -1,6 +1,6 @@
 ---
 description: "Use when modifying experiment base classes, creating new experiment subclasses, or changing experiment lifecycle methods (run, analyze, configure). Enforces ExperimentRunner patterns and composition-over-inheritance."
-applyTo: "qubox_v2/experiments/**"
+applyTo: "qubox_v2_legacy/experiments/**"
 ---
 
 # Experiments Module Instructions

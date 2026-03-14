@@ -6,7 +6,7 @@ import numpy as np
 from ..hardware_base import GateHardware
 from ..hash_utils import array_md5
 
-from qubox_v2.analysis.pulseOp import PulseOp
+from qubox_v2_legacy.analysis.pulseOp import PulseOp
 
 
 def _as_padded_complex(I, Q, *, pad_to_4: bool = True) -> np.ndarray:

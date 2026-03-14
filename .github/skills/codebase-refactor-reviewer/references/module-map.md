@@ -1,4 +1,4 @@
-# Module Map — qubox_v2 Architecture Boundaries
+# Module Map — qubox Architecture Boundaries
 
 ## Core Modules
 

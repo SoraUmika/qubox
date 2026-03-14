@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-generate_codebase_graphs.py — Generate architecture diagrams for qubox_v2.
+generate_codebase_graphs.py — Generate architecture diagrams for qubox.
 
 Reads the JSON outputs from analyze_imports.py and produces four SVG
 diagrams directly (no Graphviz binary needed):
@@ -213,7 +213,7 @@ def generate_package_dependency_graph():
     node_w, node_h = 120, 40
 
     svg = _svg_header(W, H, title="Package Dependency Graph")
-    svg += _text(W//2, 30, "qubox_v2 — Package Dependency Graph", cls="title", extra='text-anchor="middle"')
+    svg += _text(W//2, 30, "qubox — Package Dependency Graph", cls="title", extra='text-anchor="middle"')
     svg += _text(W//2, 50, "Node size ~ total degree • Red dashed = bidirectional edge • Orange = layer violation (≥3 levels)", cls="subtitle", extra='text-anchor="middle"')
 
     # Draw edges first (under nodes)
@@ -317,7 +317,7 @@ def generate_workflow_dependency_graph():
     node_w, node_h = 130, 42
 
     svg = _svg_header(W, H)
-    svg += _text(W//2, 30, "qubox_v2 — Scientific Workflow Dependencies", cls="title", extra='text-anchor="middle"')
+    svg += _text(W//2, 30, "qubox — Scientific Workflow Dependencies", cls="title", extra='text-anchor="middle"')
     svg += _text(W//2, 50, "Core scientific layers only • Red dashed = bidirectional coupling", cls="subtitle", extra='text-anchor="middle"')
 
     # Edges
@@ -485,7 +485,7 @@ def generate_class_relationships():
     box_w, box_h = 140, 50
 
     svg = _svg_header(W, H)
-    svg += _text(W//2, 24, "qubox_v2 — Key Class Relationships", cls="title", extra='text-anchor="middle"')
+    svg += _text(W//2, 24, "qubox — Key Class Relationships", cls="title", extra='text-anchor="middle"')
 
     # Group backgrounds
     group_colors = ["#e3f2fd", "#fff3e0", "#f3e5f5", "#e8f5e9", "#fce4ec"]
@@ -597,7 +597,7 @@ def generate_experiment_flow():
     cx = 400
 
     svg = _svg_header(W, H)
-    svg += _text(W//2, 30, "qubox_v2 — Experiment Lifecycle Flow", cls="title", extra='text-anchor="middle"')
+    svg += _text(W//2, 30, "qubox — Experiment Lifecycle Flow", cls="title", extra='text-anchor="middle"')
     svg += _text(W//2, 50, "Control flow (top→bottom) • Side branches show key dependencies", cls="subtitle", extra='text-anchor="middle"')
 
     # Main flow boxes + arrows

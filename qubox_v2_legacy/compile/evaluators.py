@@ -4,8 +4,8 @@ from __future__ import annotations
 from typing import Any, Optional, Sequence
 import numpy as np
 
-from qubox_v2.gates.cache import ModelCache
-from qubox_v2.gates.contexts import ModelContext, NoiseConfig
+from qubox_v2_legacy.gates.cache import ModelCache
+from qubox_v2_legacy.gates.contexts import ModelContext, NoiseConfig
 
 
 def compose_unitary(

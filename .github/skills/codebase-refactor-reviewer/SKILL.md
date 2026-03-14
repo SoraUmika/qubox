@@ -8,7 +8,7 @@ argument-hint: "Describe the refactor or point to changed files/modules"
 
 ## Purpose
 
-Systematically review code refactors in the qubox_v2 codebase to ensure correctness, contract compliance, and architectural consistency. Produces a structured review report with risk assessment.
+Systematically review code refactors in the qubox codebase to ensure correctness, contract compliance, and architectural consistency. Produces a structured review report with risk assessment.
 
 ## When to Use
 
@@ -34,7 +34,7 @@ For each changed file, verify these invariants:
 - [ ] **ExperimentContext immutability**: No code assigns to fields of a frozen `ExperimentContext` after construction.
 - [ ] **Patch transactionality**: `CalibrationOrchestrator.apply_patch` must support rollback. No partial state mutations.
 - [ ] **Persistence policy**: `split_output_for_persistence` is used for all Output serialization; raw numpy arrays never written directly to JSON.
-- [ ] **Import hygiene**: Relative imports within qubox_v2; no circular dependencies introduced.
+- [ ] **Import hygiene**: Relative imports within package; no circular dependencies introduced.
 
 ### Step 3 — Dependency Impact Analysis
 

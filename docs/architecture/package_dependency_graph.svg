@@ -31,7 +31,7 @@
       <feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.15"/>
     </filter>
   </defs>
-  <text x="500" y="30" class="title" text-anchor="middle">qubox_v2 — Package Dependency Graph</text>
+  <text x="500" y="30" class="title" text-anchor="middle">qubox — Package Dependency Graph</text>
   <text x="500" y="50" class="subtitle" text-anchor="middle">Node size ~ total degree • Red dashed = bidirectional edge • Orange = layer violation (≥3 levels)</text>
   <path d="M558.0,540.0 Q403.0,520.0 248.0,540.0" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>
   <path d="M593.2497591671516,520.1530471240158 Q529.895370661987,305.35775354654163 429.33897381667236,105.25975820579811" stroke="#d32f2f" class="edge-cycle" marker-end="url(#arrow-red)"/>

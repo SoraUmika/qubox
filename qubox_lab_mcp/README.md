@@ -125,7 +125,7 @@ python -m unittest discover -s qubox_lab_mcp/tests -v
 ```
 
 ## Next additions for Phase 2
-- Schema-aware calibration validators using existing `qubox_v2` models when available
+- Schema-aware calibration validators using existing `qubox` models when available
 - Better decomposition-schema adapters for actual gate artifact corpora
 - Offline simulation wrappers for safe local validation
 - Richer report generators and compatibility impact summaries

@@ -19,7 +19,7 @@ def test_qubox_tools_generalized_fit_on_gaussian_model():
 
 
 def test_legacy_analysis_wrapper_resolves_to_extracted_function():
-    from qubox_v2.analysis.fitting import generalized_fit as legacy_generalized_fit
+    from qubox_v2_legacy.analysis.fitting import generalized_fit as legacy_generalized_fit
 
     assert legacy_generalized_fit is qt.generalized_fit
 
@@ -38,6 +38,6 @@ def test_butterfly_metrics_runs_without_pandas_dependency():
 
 
 def test_legacy_optimization_namespace_still_imports():
-    import qubox_v2.optimization as legacy_optimization
+    import qubox_v2_legacy.optimization as legacy_optimization
 
     assert hasattr(legacy_optimization, "scipy_minimize")

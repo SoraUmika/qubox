@@ -31,7 +31,7 @@
       <feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.15"/>
     </filter>
   </defs>
-  <text x="400" y="24" class="title" text-anchor="middle">qubox_v2 — Key Class Relationships</text>
+  <text x="400" y="24" class="title" text-anchor="middle">qubox — Key Class Relationships</text>
   <rect x="40" y="50" width="300" height="350" rx="10" fill="#e3f2fd" stroke="#bbb" stroke-width="1" opacity="1.0"/>
   <text x="45" y="62" class="small-label" text-anchor="start" fill="#555" font-weight="bold">experiments</text>
   <rect x="300" y="50" width="300" height="270" rx="10" fill="#fff3e0" stroke="#bbb" stroke-width="1" opacity="1.0"/>

@@ -17,8 +17,8 @@ import numpy as np
 
 from qualang_tools.units import unit
 
-from qubox_v2.experiments.session import SessionManager
-from qubox_v2.experiments import (
+from qubox_v2_legacy.experiments.session import SessionManager
+from qubox_v2_legacy.experiments import (
     ReadoutTrace,
     ReadoutWeightsOptimization,
     ReadoutGEDiscrimination,
@@ -28,7 +28,7 @@ from qubox_v2.experiments import (
     FockResolvedPowerRabi,
     StorageSpectroscopy,
 )
-from qubox_v2.programs.macros.measure import measureMacro
+from qubox_v2_legacy.programs.macros.measure import measureMacro
 
 
 REFERENCE_SEED = {

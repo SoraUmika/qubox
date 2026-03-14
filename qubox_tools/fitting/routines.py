@@ -328,7 +328,7 @@ def fit_and_wrap(
         R-squared, and residuals.  On fit failure the ``params`` dict is
         empty and ``metadata["failed"]`` is ``True``.
     """
-    from qubox_v2.experiments.result import FitResult
+    from qubox_v2_legacy.experiments.result import FitResult
 
     popt, pcov = generalized_fit(
         xdata, ydata, model, p0, bounds=bounds, plotting=plotting, **kwargs,

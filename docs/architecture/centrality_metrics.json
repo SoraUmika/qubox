@@ -78,125 +78,125 @@
   },
   "top_imported_modules": [
     [
-      "qubox_v2.core.bindings",
+      "qubox_v2_legacy.core.bindings",
       54
     ],
     [
-      "qubox_v2.programs.macros.measure",
+      "qubox_v2_legacy.programs.macros.measure",
       31
     ],
     [
-      "qubox_v2.hardware.program_runner",
+      "qubox_v2_legacy.hardware.program_runner",
       27
     ],
     [
-      "qubox_v2.experiments.result",
+      "qubox_v2_legacy.experiments.result",
       20
     ],
     [
-      "qubox_v2.programs",
+      "qubox_v2_legacy.programs",
       20
     ],
     [
-      "qubox_v2.analysis",
+      "qubox_v2_legacy.analysis",
       17
     ],
     [
-      "qubox_v2.analysis.output",
+      "qubox_v2_legacy.analysis.output",
       16
     ],
     [
-      "qubox_v2.experiments.experiment_base",
+      "qubox_v2_legacy.experiments.experiment_base",
       16
     ],
     [
-      "qubox_v2.analysis.analysis_tools",
+      "qubox_v2_legacy.analysis.analysis_tools",
       13
     ],
     [
-      "qubox_v2.core.logging",
+      "qubox_v2_legacy.core.logging",
       13
     ],
     [
-      "qubox_v2.gates.contexts",
+      "qubox_v2_legacy.gates.contexts",
       13
     ],
     [
-      "qubox_v2.programs.measurement",
+      "qubox_v2_legacy.programs.measurement",
       12
     ],
     [
-      "qubox_v2.core.persistence_policy",
+      "qubox_v2_legacy.core.persistence_policy",
       11
     ],
     [
-      "qubox_v2.core.errors",
+      "qubox_v2_legacy.core.errors",
       11
     ],
     [
-      "qubox_v2",
+      "qubox_v2_legacy",
       10
     ]
   ],
   "top_importing_modules": [
     [
-      "qubox_v2.experiments.session",
+      "qubox_v2_legacy.experiments.session",
       27
     ],
     [
-      "qubox_v2.experiments.calibration.gates",
+      "qubox_v2_legacy.experiments.calibration.gates",
       18
     ],
     [
-      "qubox_v2.experiments.calibration.readout",
+      "qubox_v2_legacy.experiments.calibration.readout",
       16
     ],
     [
-      "qubox_v2.experiments.experiment_base",
+      "qubox_v2_legacy.experiments.experiment_base",
       15
     ],
     [
-      "qubox_v2.programs.builders.cavity",
+      "qubox_v2_legacy.programs.builders.cavity",
       14
     ],
     [
-      "qubox_v2.programs.builders.time_domain",
+      "qubox_v2_legacy.programs.builders.time_domain",
       13
     ],
     [
-      "qubox_v2.experiments.base",
+      "qubox_v2_legacy.experiments.base",
       12
     ],
     [
-      "qubox_v2.experiments.time_domain.rabi",
+      "qubox_v2_legacy.experiments.time_domain.rabi",
       12
     ],
     [
-      "qubox_v2.programs.circuit_compiler",
+      "qubox_v2_legacy.programs.circuit_compiler",
       11
     ],
     [
-      "qubox_v2.calibration.orchestrator",
+      "qubox_v2_legacy.calibration.orchestrator",
       10
     ],
     [
-      "qubox_v2.compile.api",
+      "qubox_v2_legacy.compile.api",
       10
     ],
     [
-      "qubox_v2.experiments.spectroscopy.qubit",
+      "qubox_v2_legacy.experiments.spectroscopy.qubit",
       10
     ],
     [
-      "qubox_v2.experiments.spectroscopy.resonator",
+      "qubox_v2_legacy.experiments.spectroscopy.resonator",
       10
     ],
     [
-      "qubox_v2.experiments.time_domain.coherence",
+      "qubox_v2_legacy.experiments.time_domain.coherence",
       10
     ],
     [
-      "qubox_v2.programs",
+      "qubox_v2_legacy.programs",
       10
     ]
   ]

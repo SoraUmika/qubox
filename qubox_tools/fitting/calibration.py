@@ -1,11 +1,11 @@
-# qubox_v2/analysis/calibration_algorithms.py
+# Calibration analysis algorithms (originally qubox_v2_legacy/analysis/calibration_algorithms.py)
 """Calibration analysis algorithms — pure fitting and optimisation routines.
 
 These functions accept experimental data, perform fitting / optimisation,
 and return typed calibration models ready for storage.  They have no
 dependencies on QUA, experiment execution, or hardware.
 
-Canonical home for functions previously in ``qubox_v2.calibration.algorithms``.
+Canonical home for functions previously in ``qubox_v2_legacy.calibration.algorithms``.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from .cqed import (
 from .routines import generalized_fit
 
 if TYPE_CHECKING:
-    from qubox_v2.calibration.models import (
+    from qubox_v2_legacy.calibration.models import (
         FockSQRCalibration,
         MultiStateCalibration,
         PulseTrainResult,
@@ -97,7 +97,7 @@ def fit_pulse_train(
         result = minimize(cost, x0, method="Nelder-Mead")
         amp_err, phase_err, delta = result.x
 
-    from qubox_v2.calibration.models import PulseTrainResult
+    from qubox_v2_legacy.calibration.models import PulseTrainResult
 
     return PulseTrainResult(
         element=element,
@@ -183,7 +183,7 @@ def fit_multi_alpha_affine(
     A = W[:2, :].T
     b = W[2, :]
 
-    from qubox_v2.calibration.models import MultiStateCalibration
+    from qubox_v2_legacy.calibration.models import MultiStateCalibration
 
     return MultiStateCalibration(
         element=element,
@@ -348,7 +348,7 @@ def fit_fock_sqr(
     if popt is not None:
         params = {"A": float(popt[0]), "g_pi": float(popt[1]), "offset": float(popt[2])}
 
-    from qubox_v2.calibration.models import FockSQRCalibration
+    from qubox_v2_legacy.calibration.models import FockSQRCalibration
 
     return FockSQRCalibration(
         fock_number=fock_number,
@@ -416,7 +416,7 @@ def optimize_fock_sqr_spsa(
     param_names = [f"p{i}" for i in range(len(best_x))]
     params = dict(zip(param_names, [float(v) for v in best_x]))
 
-    from qubox_v2.calibration.models import FockSQRCalibration
+    from qubox_v2_legacy.calibration.models import FockSQRCalibration
 
     return FockSQRCalibration(
         fock_number=fock_number,

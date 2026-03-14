@@ -1,7 +1,7 @@
 """Canonical qubox public API.
 
-`qubox` is the new user-facing package. The older `qubox_v2` package remains
-available as a compatibility layer while the refactor is staged.
+`qubox` is the user-facing package for cQED experiment orchestration.
+Legacy runtime internals live in `qubox_v2_legacy` (not for direct import).
 """
 from __future__ import annotations
 

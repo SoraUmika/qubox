@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from typing import Callable, List, Optional, Dict, Any
 import numpy as np
 
-from qubox_v2.gates.contexts import ModelContext, NoiseConfig
-from qubox_v2.gates.cache import ModelCache
-from qubox_v2.gates.noise import QubitT1T2Noise
-from qubox_v2.gates.fidelity import avg_gate_fidelity_superop
+from qubox_v2_legacy.gates.contexts import ModelContext, NoiseConfig
+from qubox_v2_legacy.gates.cache import ModelCache
+from qubox_v2_legacy.gates.noise import QubitT1T2Noise
+from qubox_v2_legacy.gates.fidelity import avg_gate_fidelity_superop
 
 from .ansatz import Ansatz
 from .param_space import ParamSpace

@@ -1,8 +1,8 @@
-# qubox_v2 — Codebase Architecture Survey
+# qubox_v2_legacy — Codebase Architecture Survey
 
 > **Generated:** 2026-03-07  
 > **Type:** Read-only structural reconnaissance  
-> **Scope:** Full `qubox_v2/` package (183 Python files across 20 packages)
+> **Scope:** Full `qubox_v2_legacy/` package (183 Python files across 20 packages)
 
 ---
 
@@ -390,7 +390,7 @@ Machine-readable data:
 | 12 | `programs.measurement` | **12** | Measurement program factories |
 | 13 | `core.persistence_policy` | **11** | ✅ Expected — used for JSON serialization |
 | 14 | `core.errors` | **11** | ✅ Expected — error types are foundational |
-| 15 | `qubox_v2` (root init) | **10** | Package-level logger access |
+| 15 | `qubox_v2_legacy` (root init) | **10** | Package-level logger access |
 
 ### Top 15 Most-Importing Modules (Out-Degree)
 
@@ -447,7 +447,7 @@ The cycle explosion is caused by a small number of **misplaced types**. Because 
 ### Clean Target Architecture
 
 ```
-qubox_v2/
+qubox_v2_legacy/
 ├── core/                  # Layer 0: ZERO upward imports
 │   ├── types.py           # Enums, type aliases, constants
 │   ├── errors.py          # All error types
@@ -631,7 +631,7 @@ The codebase depends on: numpy, scipy, matplotlib, plotly, qm (Quantum Machines 
 
 ### Methodology
 
-1. All 183 `.py` files under `qubox_v2/` were parsed using Python's `ast` module
+1. All 183 `.py` files under `qubox_v2_legacy/` were parsed using Python's `ast` module
 2. Import statements (both absolute and relative) were resolved to dotted module names
 3. Module-level imports were aggregated to package-level dependency edges
 4. Cycles were detected using DFS-based enumeration (up to length 10)

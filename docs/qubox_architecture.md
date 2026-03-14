@@ -57,7 +57,7 @@ gate-sequence thinking, but it is not the only top-level model.
 
 New production-facing code should enter the QM stack through the `qubox`
 runtime adapter, not by directly choosing between multiple historical compiler
-paths. Internally the adapter still delegates some work to stable `qubox_v2`
+paths. Internally the adapter still delegates some work to stable `qubox_v2_legacy`
 experiment classes and the existing `compile_v2` path while the migration is
 completed.
 

@@ -23,7 +23,7 @@
 
 ## 2. Public API Entry Points
 
-### 2.1 IR Types (all in `qubox_v2.programs.circuit_runner`)
+### 2.1 IR Types (all in `qubox_v2_legacy.programs.circuit_runner`)
 
 | Type | Kind | Key Fields |
 |------|------|------------|
@@ -40,7 +40,7 @@
 | `IntentGate` | alias | `= Gate` |
 | `Circuit` | alias | `= QuantumCircuit` |
 
-### 2.2 Protocols (`qubox_v2.programs.circuit_protocols`)
+### 2.2 Protocols (`qubox_v2_legacy.programs.circuit_protocols`)
 
 | Class / Function | Produces |
 |------------------|----------|
@@ -51,7 +51,7 @@
 | `make_echo_circuit(**kw)` | Shorthand → `EchoProtocol(**kw).build()` |
 | `make_active_reset_circuit(**kw)` | Shorthand → `ActiveResetProtocol(**kw).build()` |
 
-### 2.3 Compiler (`qubox_v2.programs.circuit_compiler`)
+### 2.3 Compiler (`qubox_v2_legacy.programs.circuit_compiler`)
 
 | Class / Method | Return Type |
 |---------------|-------------|
@@ -64,7 +64,7 @@ Legacy bridge in `CircuitRunner`:
 | `CircuitRunner.compile_v2(circuit, *, n_shots=None)` | Delegates to `CircuitRunnerV2(session).compile()` |
 | `CircuitRunner.compile_program(circuit, *, n_shots=None)` | Alias for `compile_v2()` |
 
-### 2.4 Display (`qubox_v2.programs.circuit_display`)
+### 2.4 Display (`qubox_v2_legacy.programs.circuit_display`)
 
 | Function | Return |
 |----------|--------|
@@ -75,7 +75,7 @@ Legacy bridge in `CircuitRunner`:
 - `.to_diagram_text(cell_width=20)` → `circuit_to_diagram_text`
 - `.draw(…)` / `.display(…)` / `.draw_logical(…)` → `draw_circuit`
 
-### 2.5 Execution (`qubox_v2.programs.circuit_execution`)
+### 2.5 Execution (`qubox_v2_legacy.programs.circuit_execution`)
 
 | Function | Default | Notes |
 |----------|---------|-------|
@@ -138,7 +138,7 @@ Safety guardrails:
 | 4 | **`compile_program` vs `compile_v2`** | Two names for the same bridge on `CircuitRunner`.  `compile_program` is an alias for `compile_v2`.  | Naming | Recommend deprecating one.  No action now. |
 | 5 | **Real-time branching** | `ActiveResetProtocol(enable_real_time_branching=True)` builds a circuit with a `ConditionalGate` referencing derived state, then the compiler correctly raises `RuntimeError`. | Correctness | Correct behavior per "IQ-only" design.  A future real-time branch path would need a separate gate type (e.g. `measure_and_branch`) that emits QUA `if_()` with a threshold variable. |
 | 6 | **Frequency resolution fallback chain** | `_base_frequency_for()` tries calibration → attributes.  `_lo_frequency_for()` tries hardware → bindings.  Failure modes produce clear `ValueError`s. | Correct | No action. |
-| 7 | **Test location** | Tests live under `e:\qubox\tests\gate_architecture\`, outside the `qubox_v2/tests/` tree. | Project layout consistency | Acceptable for isolation.  Consider merging into `qubox_v2/tests/` if the project standardizes on a single test root. |
+| 7 | **Test location** | Tests live under `e:\qubox\tests\gate_architecture\`, outside the `qubox_v2_legacy/tests/` tree. | Project layout consistency | Acceptable for isolation.  Consider merging into `qubox_v2_legacy/tests/` if the project standardizes on a single test root. |
 | 8 | **`MeasurementSchema.validate()` is explicit-call** | Schema validation is invoked manually by the compiler, not enforced at construction time (`__post_init__`). | Flexibility | Correct choice — allows building partial schemas during protocol construction before final validate. |
 
 ### 3.3 Naming Consistency Check
