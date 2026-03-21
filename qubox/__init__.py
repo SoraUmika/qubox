@@ -1,7 +1,7 @@
 """Canonical qubox public API.
 
 `qubox` is the user-facing package for cQED experiment orchestration.
-Legacy runtime internals live in `qubox_v2_legacy` (not for direct import).
+Legacy runtime internals live in `qubox.legacy` (not for direct import).
 """
 from __future__ import annotations
 

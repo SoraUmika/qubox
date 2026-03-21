@@ -138,21 +138,285 @@ def _build_active_reset_args(session, request: ExecutionRequest) -> dict[str, An
     }
 
 
+# ---------------------------------------------------------------------------
+# New arg builders for standard experiments (16 additional adapters)
+# ---------------------------------------------------------------------------
+
+# ── readout ──
+
+def _build_readout_trace_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    return {
+        "drive_frequency": float(request.params.get("drive_frequency", 0.0)),
+        "ro_therm_clks": int(request.params.get("ro_therm_clks", 10000)),
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+    }
+
+
+def _build_iq_blobs_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    return {
+        "r180": str(request.params.get("r180", request.params.get("pulse", "x180"))),
+        "n_runs": int(request.shots or request.params.get("n_runs", 1000)),
+        "qb_therm_clks": request.params.get("qb_therm_clks"),
+    }
+
+
+def _build_butterfly_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    readout_target = session.resolve_alias(request.targets.get("readout", "readout"), role_hint="readout")
+    threshold = request.params.get("threshold", "calibrated")
+    if threshold == "calibrated":
+        disc = session.resolve_discrimination(readout_target)
+        threshold = float(disc.threshold) if disc is not None else 0.0
+    return {
+        "prep_policy": str(request.params.get("prep_policy", request.params.get("policy", "threshold"))),
+        "prep_kwargs": request.params.get("prep_kwargs", {"threshold": float(threshold)}),
+        "k": request.params.get("k"),
+        "r180": str(request.params.get("r180", "x180")),
+        "update_measure_macro": bool(request.params.get("update_measure_macro", False)),
+        "show_analysis": bool(request.params.get("show_analysis", False)),
+        "n_samples": int(request.shots or request.params.get("n_samples", 10_000)),
+        "M0_MAX_TRIALS": int(request.params.get("max_trials", 16)),
+    }
+
+
+# ── resonator ──
+
+def _build_resonator_power_spec_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    axis = request.params.get("freq") or _primary_axis(request)
+    values = _resolve_numeric_axis(session, axis, default_parameter="freq")
+    df = _require_uniform_step(values, name="freq")
+    return {
+        "readout_op": str(request.params.get("readout_op", request.params.get("operation", "readout"))),
+        "rf_begin": float(values[0]),
+        "rf_end": float(values[-1] + df),
+        "df": float(df),
+        "g_min": float(request.params.get("gain_min", request.params.get("g_min", 1e-3))),
+        "g_max": float(request.params.get("gain_max", request.params.get("g_max", 0.5))),
+        "N_a": int(request.params.get("n_gain_points", request.params.get("N_a", 50))),
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+        "ro_therm_clks": request.params.get("ro_therm_clks"),
+    }
+
+
+# ── qubit (time domain) ──
+
+def _build_temporal_rabi_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    axis = request.params.get("duration") or _primary_axis(request)
+    values = _resolve_numeric_axis(session, axis, default_parameter="duration")
+    dt = _require_uniform_step(values, name="duration")
+    return {
+        "pulse": str(request.params.get("pulse", "x180")),
+        "pulse_len_begin": int(round(float(values[0]))),
+        "pulse_len_end": int(round(float(values[-1]))),
+        "dt": int(round(float(dt))),
+        "pulse_gain": float(request.params.get("pulse_gain", 1.0)),
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+        "qb_therm_clks": request.params.get("qb_therm_clks"),
+    }
+
+
+def _build_time_rabi_chevron_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    return {
+        "if_span": float(request.params["freq_span"]),
+        "df": float(request.params["df"]),
+        "max_pulse_duration": int(request.params["max_duration"]),
+        "dt": int(request.params.get("dt", 4)),
+        "pulse": str(request.params.get("pulse", "x180")),
+        "pulse_gain": float(request.params.get("pulse_gain", 1.0)),
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+        "qb_therm_clks": request.params.get("qb_therm_clks"),
+    }
+
+
+def _build_power_rabi_chevron_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    return {
+        "if_span": float(request.params["freq_span"]),
+        "df": float(request.params["df"]),
+        "max_gain": float(request.params["max_gain"]),
+        "dg": float(request.params.get("dg", 0.01)),
+        "pulse": str(request.params.get("pulse", "x180")),
+        "pulse_duration": int(request.params.get("pulse_duration", 100)),
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+        "qb_therm_clks": request.params.get("qb_therm_clks"),
+    }
+
+
+def _build_t1_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    axis = request.params.get("delay") or _primary_axis(request)
+    values = _resolve_numeric_axis(session, axis, default_parameter="delay")
+    dt = _require_uniform_step(values, name="delay")
+    return {
+        "delay_end": int(round(float(values[-1]))),
+        "dt": int(round(float(dt))),
+        "delay_begin": int(round(float(values[0]))),
+        "r180": str(request.params.get("r180", request.params.get("pulse", "x180"))),
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+        "use_circuit_runner": bool(request.params.get("use_circuit_runner", True)),
+    }
+
+
+def _build_echo_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    axis = request.params.get("delay") or _primary_axis(request)
+    values = _resolve_numeric_axis(session, axis, default_parameter="delay")
+    dt = _require_uniform_step(values, name="delay")
+    return {
+        "delay_end": int(round(float(values[-1]))),
+        "dt": int(round(float(dt))),
+        "delay_begin": int(round(float(values[0]))),
+        "r180": str(request.params.get("r180", "x180")),
+        "r90": str(request.params.get("r90", "x90")),
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+        "qb_therm_clks": request.params.get("qb_therm_clks"),
+    }
+
+
+# ── calibration ──
+
+def _build_all_xy_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    return {
+        "gate_indices": request.params.get("gate_indices"),
+        "prefix": str(request.params.get("prefix", "")),
+        "qb_detuning": int(request.params.get("qb_detuning", 0)),
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+        "qb_therm_clks": request.params.get("qb_therm_clks"),
+    }
+
+
+def _build_drag_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    amps = request.params.get("amps")
+    if amps is None:
+        axis = _primary_axis(request)
+        if axis is not None:
+            amps = np.asarray(axis.values, dtype=float)
+    if amps is None:
+        raise ValueError("DRAG calibration requires 'amps' parameter.")
+    return {
+        "amps": np.asarray(amps, dtype=float),
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+        "base_alpha": float(request.params.get("base_alpha", 1.0)),
+        "calibration_op": str(request.params.get("calibration_op", "ge_ref_r180")),
+        "x180": str(request.params.get("x180", "ge_x180")),
+        "x90": str(request.params.get("x90", "ge_x90")),
+        "y180": str(request.params.get("y180", "ge_y180")),
+        "y90": str(request.params.get("y90", "ge_y90")),
+        "qb_therm_clks": request.params.get("qb_therm_clks"),
+    }
+
+
+# ── tomography ──
+
+def _build_qubit_tomo_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    state_prep = request.params.get("state_prep")
+    if state_prep is None:
+        raise ValueError("Qubit state tomography requires 'state_prep' parameter.")
+    return {
+        "state_prep": state_prep,
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+        "x90_pulse": str(request.params.get("x90_pulse", "x90")),
+        "yn90_pulse": str(request.params.get("yn90_pulse", "yn90")),
+        "therm_clks": request.params.get("therm_clks", request.params.get("qb_therm_clks")),
+    }
+
+
+def _build_wigner_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    gates = request.params.get("state_prep")
+    if gates is None:
+        raise ValueError("Wigner tomography requires 'state_prep' parameter.")
+    x_vals = request.params.get("x_vals")
+    p_vals = request.params.get("p_vals")
+    if x_vals is None or p_vals is None:
+        raise ValueError("Wigner tomography requires 'x_vals' and 'p_vals' parameters.")
+    return {
+        "gates": gates,
+        "x_vals": np.asarray(x_vals, dtype=float),
+        "p_vals": np.asarray(p_vals, dtype=float),
+        "base_alpha": float(request.params.get("base_alpha", 10.0)),
+        "r90_pulse": str(request.params.get("r90_pulse", "x90")),
+        "n_avg": int(request.shots or request.params.get("n_avg", 200)),
+        "qb_therm_clks": request.params.get("qb_therm_clks"),
+    }
+
+
+# ── storage / cavity ──
+
+def _build_storage_spec_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    axis = request.params.get("freq") or _primary_axis(request)
+    values = _resolve_numeric_axis(session, axis, default_parameter="freq")
+    df = _require_uniform_step(values, name="freq")
+    return {
+        "disp": str(request.params["disp"]),
+        "rf_begin": float(values[0]),
+        "rf_end": float(values[-1] + df),
+        "df": float(df),
+        "storage_therm_time": int(request.params["storage_therm_time"]),
+        "sel_r180": str(request.params.get("sel_r180", "sel_x180")),
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+    }
+
+
+def _build_storage_t1_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    axis = request.params.get("delay") or _primary_axis(request)
+    values = _resolve_numeric_axis(session, axis, default_parameter="delay")
+    dt = _require_uniform_step(values, name="delay")
+    return {
+        "fock_fqs": request.params.get("fock_fqs"),
+        "fock_disps": request.params.get("fock_disps"),
+        "delay_end": int(round(float(values[-1]))),
+        "dt": int(round(float(dt))),
+        "delay_begin": int(round(float(values[0]))),
+        "sel_r180": str(request.params.get("sel_r180", "sel_x180")),
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+        "st_therm_clks": request.params.get("st_therm_clks", request.params.get("storage_therm_clks")),
+    }
+
+
+def _build_num_splitting_args(session, request: ExecutionRequest) -> dict[str, Any]:
+    rf_centers = request.params.get("rf_centers")
+    rf_spans = request.params.get("rf_spans")
+    if rf_centers is None or rf_spans is None:
+        raise ValueError("Number splitting spectroscopy requires 'rf_centers' and 'rf_spans' parameters.")
+    return {
+        "rf_centers": list(rf_centers),
+        "rf_spans": list(rf_spans),
+        "df": float(request.params.get("df", 50e3)),
+        "sel_r180": str(request.params.get("sel_r180", "sel_x180")),
+        "state_prep": request.params.get("state_prep"),
+        "n_avg": int(request.shots or request.params.get("n_avg", 1000)),
+        "st_therm_clks": request.params.get("st_therm_clks", request.params.get("storage_therm_clks")),
+    }
+
+
 _ADAPTERS: dict[str, LegacyExperimentAdapter] | None = None
 
 
 def _load_adapters() -> dict[str, LegacyExperimentAdapter]:
     global _ADAPTERS
     if _ADAPTERS is None:
-        from qubox_v2_legacy.experiments import (
+        from qubox.legacy.experiments import (
             ActiveQubitResetBenchmark,
+            AllXY,
+            DRAGCalibration,
+            FockResolvedT1,
+            IQBlob,
+            NumSplittingSpectroscopy,
             PowerRabi,
+            PowerRabiChevron,
             QubitSpectroscopy,
+            QubitStateTomography,
+            ReadoutButterflyMeasurement,
+            ReadoutTrace,
+            ResonatorPowerSpectroscopy,
             ResonatorSpectroscopy,
+            StorageSpectroscopy,
+            StorageWignerTomography,
+            T1Relaxation,
+            T2Echo,
             T2Ramsey,
+            TemporalRabi,
+            TimeRabiChevron,
         )
 
         _ADAPTERS = {
+            # ── spectroscopy (existing) ──
             "qubit.spectroscopy": LegacyExperimentAdapter(
                 experiment_cls=QubitSpectroscopy,
                 artifact_tag="qubitSpectroscopy",
@@ -164,6 +428,7 @@ def _load_adapters() -> dict[str, LegacyExperimentAdapter]:
                 arg_builder=_build_resonator_spec_args,
                 measure_context_key="readout_op",
             ),
+            # ── qubit time domain (existing + new) ──
             "qubit.power_rabi": LegacyExperimentAdapter(
                 experiment_cls=PowerRabi,
                 artifact_tag="powerRabi",
@@ -175,6 +440,93 @@ def _load_adapters() -> dict[str, LegacyExperimentAdapter]:
                 artifact_tag="T2Ramsey",
                 arg_builder=_build_ramsey_args,
             ),
+            "qubit.temporal_rabi": LegacyExperimentAdapter(
+                experiment_cls=TemporalRabi,
+                artifact_tag="temporalRabi",
+                arg_builder=_build_temporal_rabi_args,
+            ),
+            "qubit.time_rabi_chevron": LegacyExperimentAdapter(
+                experiment_cls=TimeRabiChevron,
+                artifact_tag="timeRabiChevron",
+                arg_builder=_build_time_rabi_chevron_args,
+            ),
+            "qubit.power_rabi_chevron": LegacyExperimentAdapter(
+                experiment_cls=PowerRabiChevron,
+                artifact_tag="powerRabiChevron",
+                arg_builder=_build_power_rabi_chevron_args,
+            ),
+            "qubit.t1": LegacyExperimentAdapter(
+                experiment_cls=T1Relaxation,
+                artifact_tag="T1Relaxation",
+                arg_builder=_build_t1_args,
+            ),
+            "qubit.echo": LegacyExperimentAdapter(
+                experiment_cls=T2Echo,
+                artifact_tag="T2Echo",
+                arg_builder=_build_echo_args,
+            ),
+            # ── resonator (new) ──
+            "resonator.power_spectroscopy": LegacyExperimentAdapter(
+                experiment_cls=ResonatorPowerSpectroscopy,
+                artifact_tag="resonatorPowerSpectroscopy",
+                arg_builder=_build_resonator_power_spec_args,
+                measure_context_key="readout_op",
+            ),
+            # ── readout (new) ──
+            "readout.trace": LegacyExperimentAdapter(
+                experiment_cls=ReadoutTrace,
+                artifact_tag="readoutTrace",
+                arg_builder=_build_readout_trace_args,
+            ),
+            "readout.iq_blobs": LegacyExperimentAdapter(
+                experiment_cls=IQBlob,
+                artifact_tag="iqBlobs",
+                arg_builder=_build_iq_blobs_args,
+            ),
+            "readout.butterfly": LegacyExperimentAdapter(
+                experiment_cls=ReadoutButterflyMeasurement,
+                artifact_tag="butterflyMeasurement",
+                arg_builder=_build_butterfly_args,
+            ),
+            # ── calibration (new) ──
+            "calibration.all_xy": LegacyExperimentAdapter(
+                experiment_cls=AllXY,
+                artifact_tag="allXY",
+                arg_builder=_build_all_xy_args,
+            ),
+            "calibration.drag": LegacyExperimentAdapter(
+                experiment_cls=DRAGCalibration,
+                artifact_tag="dragCalibration",
+                arg_builder=_build_drag_args,
+            ),
+            # ── tomography (new) ──
+            "tomography.qubit_state": LegacyExperimentAdapter(
+                experiment_cls=QubitStateTomography,
+                artifact_tag="qubitStateTomography",
+                arg_builder=_build_qubit_tomo_args,
+            ),
+            "tomography.wigner": LegacyExperimentAdapter(
+                experiment_cls=StorageWignerTomography,
+                artifact_tag="wignerTomography",
+                arg_builder=_build_wigner_args,
+            ),
+            # ── storage / cavity (new) ──
+            "storage.spectroscopy": LegacyExperimentAdapter(
+                experiment_cls=StorageSpectroscopy,
+                artifact_tag="storageSpectroscopy",
+                arg_builder=_build_storage_spec_args,
+            ),
+            "storage.t1_decay": LegacyExperimentAdapter(
+                experiment_cls=FockResolvedT1,
+                artifact_tag="storageT1Decay",
+                arg_builder=_build_storage_t1_args,
+            ),
+            "storage.num_splitting": LegacyExperimentAdapter(
+                experiment_cls=NumSplittingSpectroscopy,
+                artifact_tag="numSplittingSpectroscopy",
+                arg_builder=_build_num_splitting_args,
+            ),
+            # ── reset (existing) ──
             "reset.active": LegacyExperimentAdapter(
                 experiment_cls=ActiveQubitResetBenchmark,
                 artifact_tag="activeResetBenchmark",
@@ -262,7 +614,7 @@ class QMRuntime:
         )
         n_shots = int(request.shots or getattr(request.sweep, "averaging", 1) or 1)
         if self.circuit_runner_cls is None:
-            from qubox_v2_legacy.programs.circuit_runner import CircuitRunner
+            from qubox.legacy.programs.circuit_runner import CircuitRunner
 
             self.circuit_runner_cls = CircuitRunner
         runner = self.circuit_runner_cls(self.session.legacy_session)

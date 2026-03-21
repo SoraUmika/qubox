@@ -465,3 +465,54 @@ This is the best default because it is:
 - and representative of real cQED control structure.
 
 ---
+
+# Canonical Standard Experiment Suite (20 Experiments)
+
+The following 20 experiments form the canonical standard experiment suite of the
+`qubox` API. They are accessible via `session.exp.<category>.<method>(...)` and
+cover the core cQED experimental workflow from basic characterization through
+calibration, coherence, tomography, and cavity physics.
+
+## Experiment Registry
+
+| # | Template Key | Category | API Path | Legacy Source |
+|---|---|---|---|---|
+| 1 | `readout.trace` | Readout | `session.exp.readout.trace(...)` | `readout_trace` |
+| 2 | `resonator.spectroscopy` | Resonator | `session.exp.resonator.spectroscopy(...)` | `resonator_spectroscopy` |
+| 3 | `resonator.power_spectroscopy` | Resonator | `session.exp.resonator.power_spectroscopy(...)` | `resonator_power_spectroscopy` |
+| 4 | `qubit.spectroscopy` | Qubit | `session.exp.qubit.spectroscopy(...)` | `qubit_spectroscopy` |
+| 5 | `qubit.temporal_rabi` | Qubit | `session.exp.qubit.temporal_rabi(...)` | `temporal_rabi` |
+| 6 | `qubit.power_rabi` | Qubit | `session.exp.qubit.power_rabi(...)` | `power_rabi` |
+| 7 | `qubit.time_rabi_chevron` | Qubit | `session.exp.qubit.time_rabi_chevron(...)` | `time_rabi_chevron` |
+| 8 | `qubit.power_rabi_chevron` | Qubit | `session.exp.qubit.power_rabi_chevron(...)` | `power_rabi_chevron` |
+| 9 | `qubit.t1` | Qubit | `session.exp.qubit.t1(...)` | `T1_relaxation` |
+| 10 | `qubit.ramsey` | Qubit | `session.exp.qubit.ramsey(...)` | `T2_ramsey` |
+| 11 | `qubit.echo` | Qubit | `session.exp.qubit.echo(...)` | `T2_echo` |
+| 12 | `readout.iq_blobs` | Readout | `session.exp.readout.iq_blobs(...)` | `iq_blobs` |
+| 13 | `calibration.all_xy` | Calibration | `session.exp.calibration.all_xy(...)` | `all_xy` |
+| 14 | `calibration.drag` | Calibration | `session.exp.calibration.drag(...)` | `drag_calibration_YALE` |
+| 15 | `readout.butterfly` | Readout | `session.exp.readout.butterfly(...)` | `readout_butterfly_measurement` |
+| 16 | `tomography.qubit_state` | Tomography | `session.exp.tomography.qubit_state(...)` | `qubit_state_tomography` |
+| 17 | `storage.spectroscopy` | Storage | `session.exp.storage.spectroscopy(...)` | `storage_spectroscopy` |
+| 18 | `storage.t1_decay` | Storage | `session.exp.storage.t1_decay(...)` | `storage_T1_decay` (via FockResolvedT1) |
+| 19 | `storage.num_splitting` | Storage | `session.exp.storage.num_splitting(...)` | `num_splitting_spectroscopy` |
+| 20 | `tomography.wigner` | Tomography | `session.exp.tomography.wigner(...)` | `storage_wigner_tomography` |
+
+## Category Summary
+
+- **Readout** (3): trace, iq_blobs, butterfly
+- **Resonator** (2): spectroscopy, power_spectroscopy
+- **Qubit** (7): spectroscopy, temporal_rabi, power_rabi, time_rabi_chevron, power_rabi_chevron, t1, ramsey, echo
+- **Calibration** (2): all_xy, drag
+- **Storage** (3): spectroscopy, t1_decay, num_splitting
+- **Tomography** (2): qubit_state, wigner
+- **Reset** (1): active (not counted in the 20, pre-existing)
+
+## Trust Validation
+
+Each experiment in this suite should:
+
+1. Compile to a valid QUA program via the legacy adapter pipeline
+2. Produce correct sweep structure and timing when simulated
+3. Return an `ExperimentResult` with proper build, run, and analysis stages
+4. Preserve physics intent as documented in `API_REFERENCE.md` Section 11

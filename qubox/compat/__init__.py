@@ -2,7 +2,7 @@
 
 from importlib import import_module
 
-LEGACY_PACKAGE = "qubox_v2_legacy"
+LEGACY_PACKAGE = "qubox.legacy"
 
 
 def __getattr__(name: str):

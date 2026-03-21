@@ -1,0 +1,28 @@
+Metadata-Version: 2.4
+Name: qubox
+Version: 3.0.0
+Summary: Quantum Box: cQED experiment orchestration for OPX+ / Octave hardware
+Requires-Python: <3.13,>=3.11
+Requires-Dist: numpy>=1.24
+Requires-Dist: scipy>=1.10
+Requires-Dist: matplotlib>=3.7
+Requires-Dist: pydantic>=2.0
+Requires-Dist: qm-qua>=1.1
+Requires-Dist: qualang-tools>=0.15
+Requires-Dist: tqdm>=4.65
+Requires-Dist: pandas>=2.0
+Provides-Extra: simulation
+Requires-Dist: qutip>=5.0; extra == "simulation"
+Provides-Extra: gpu
+Requires-Dist: jax[cuda12]>=0.4; extra == "gpu"
+Requires-Dist: jaxlib>=0.4; extra == "gpu"
+Provides-Extra: gui
+Requires-Dist: PyQt5>=5.15; extra == "gui"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Requires-Dist: ipykernel; extra == "dev"
+Requires-Dist: jupyter; extra == "dev"
+Provides-Extra: mcp
+Requires-Dist: mcp[cli]>=1.2.0; extra == "mcp"

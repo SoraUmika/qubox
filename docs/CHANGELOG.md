@@ -31,6 +31,42 @@ Each entry must include:
 
 ## Entries
 
+### 2026-03-14 — Standard Experiment Suite: 20 Canonical Experiments
+
+**Classification: Major**
+
+**Summary:**
+
+Migrated 20 representative experiments from the legacy `cQED_programs.py` into the
+new `qubox` API as the canonical standard experiment suite. This expands the
+`ExperimentLibrary` from 5 template experiments to 21 (20 standard + 1 reset).
+
+New experiment sub-libraries added to `session.exp`:
+- `session.exp.readout` — ReadoutExperimentLibrary (trace, iq_blobs, butterfly)
+- `session.exp.calibration` — CalibrationExperimentLibrary (all_xy, drag)
+- `session.exp.storage` — StorageExperimentLibrary (spectroscopy, t1_decay, num_splitting)
+- `session.exp.tomography` — TomographyExperimentLibrary (qubit_state, wigner)
+
+Existing sub-libraries extended:
+- `session.exp.qubit` — added temporal_rabi, time_rabi_chevron, power_rabi_chevron, t1, echo
+- `session.exp.resonator` — added power_spectroscopy
+
+Each experiment follows the established adapter pattern: user calls template method →
+`ExecutionRequest` → `QMRuntime._run_template()` → `LegacyExperimentAdapter` →
+legacy experiment class → QUA program → hardware execution → analysis.
+
+16 new arg_builder functions translate high-level `ExecutionRequest` params to
+legacy constructor arguments, preserving physics intent and sweep semantics.
+
+**Files affected:**
+- `qubox/experiments/templates/library.py` — 4 new sub-library classes, 16 new methods
+- `qubox/experiments/templates/__init__.py` — updated exports
+- `qubox/backends/qm/runtime.py` — 16 new arg_builder functions, 16 new adapter entries
+- `API_REFERENCE.md` — Section 11 expanded with all 20 experiment signatures
+- `standard_experiments.md` — updated with canonical 20-experiment list
+- `tests/test_standard_experiments.py` — new test file (23 tests)
+- `docs/CHANGELOG.md` — this entry
+
 ### 2026-03-14 — Complete Legacy qubox_v2 Reference Migration
 
 **Classification: Major**

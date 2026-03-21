@@ -37,7 +37,7 @@ class Session:
         **kwargs: Any,
     ) -> "Session":
         if cls.legacy_session_cls is None:
-            from qubox_v2_legacy.experiments.session import SessionManager
+            from qubox.legacy.experiments.session import SessionManager
 
             cls.legacy_session_cls = SessionManager
         legacy = cls.legacy_session_cls(

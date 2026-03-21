@@ -1,0 +1,91 @@
+# qubox — Windsurf Rules
+
+## Identity
+
+You are working in the qubox repository, a cQED experiment framework targeting Quantum Machines
+hardware (OPX+ + Octave, QUA API v1.2.6). This controls real quantum hardware. Physical
+correctness is never optional.
+
+## Before Every Task
+
+1. Read `AGENTS.md` completely. It is the master policy document.
+2. Follow the Startup Checklist in `AGENTS.md §3`.
+3. Follow the Priority Hierarchy in `AGENTS.md §2` when policies conflict.
+
+## Python
+
+- Version: **3.12.13** (fallback: 3.11.8 on ECE-SHANKAR-07 only)
+- Forbidden: any other Python version unless user explicitly authorizes
+- Style: PEP 8, type hints on all public functions, docstrings on all public classes/methods
+- Linter: ruff, 120-char line length
+- Imports: stdlib → third-party → local (relative within package)
+- Use `from __future__ import annotations` in every module
+- Pydantic v2 for data models; frozen dataclasses for identity objects
+
+## QUA Code
+
+- The compiled QUA program is the source of truth — not the written code.
+- Validate every QUA change through the simulator before declaring it done.
+- Compilation must complete in < 1 minute.
+- Validation shortcuts: `n_avg=1`, shorten idle periods, simulate minimum duration.
+- Hosted server: `host="10.157.36.68"`, `cluster_name="Cluster_2"` — do not substitute.
+- Mismatches between intent and compiled behavior must be reported, never silently accepted.
+- Document unresolvable mismatches in `limitations/qua_related_limitations.md`.
+
+## Standard Experiments
+
+- `standard_experiments.md` defines trust gates for compilation logic.
+- If your change touches pulse-sequence generation, compilation, scheduling, or QUA translation:
+  verify relevant standard experiments still pass.
+- Failure = do not ship without explanation and user approval.
+
+## Documentation
+
+- Every user-visible change updates `API_REFERENCE.md` and `docs/CHANGELOG.md` in the same task.
+- A notebook that breaks from a code change is incomplete work.
+- Changelog is append-only — never rewrite history.
+
+## Backward Compatibility
+
+- Do not rename or remove public APIs without explicit user approval.
+- Breaking changes require: `API_REFERENCE.md` update + `docs/CHANGELOG.md` entry + notebook updates.
+
+## Change Scope
+
+- Make the smallest correct change that addresses the task.
+- Do not add unrelated cleanup.
+- Do not introduce new abstractions without justification from repeated structure.
+- Extend existing patterns before creating new ones.
+
+## Legacy Code
+
+- `qubox_v2_legacy` is deprecated. All legacy code now lives in `qubox/legacy/`.
+- Do not add new imports from `qubox_v2_legacy` — use `qubox.legacy.*` instead.
+- The notebook import surface is `qubox.compat.notebook`.
+
+## Prompt Logging
+
+- Log every completed task to `past_prompt/YYYY-MM-DD_HH-MM-SS_<task_name>.md`.
+- Use `tools/log_prompt.py` to generate the file.
+- Never overwrite prior logs.
+
+## What NOT to Do
+
+- Do not silently accept mismatches between intended and compiled behavior.
+- Do not rename or remove public APIs without explicit approval.
+- Do not assume compatibility with non-QM hardware.
+- Do not assume QM API compatibility beyond 1.2.6.
+- Do not use Python versions outside 3.12.x / 3.11.x.
+- Do not skip docs updates when user-visible behavior changes.
+- Do not scatter temp scripts or utilities outside `tools/`.
+- Do not import directly from `qubox_v2_legacy`.
+- Do not introduce new abstractions without justification.
+
+## Hosted Server Config
+
+```python
+host         = "10.157.36.68"
+cluster_name = "Cluster_2"
+```
+
+Prefer this for simulator validation. Never silently substitute a different server.

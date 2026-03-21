@@ -116,7 +116,7 @@ qubox/
 ├── experiments/
 │   ├── __init__.py
 │   ├── templates/
-│   │   └── library.py   # ExperimentLibrary (qubit, resonator, reset)
+│   │   └── library.py   # ExperimentLibrary (qubit, resonator, readout, calibration, storage, tomography, reset)
 │   ├── workflows/
 │   │   └── library.py   # WorkflowLibrary (readout)
 │   └── custom/
@@ -146,7 +146,7 @@ qubox/
 | `qubox.data` | `ExecutionRequest` and `ExperimentResult` — run specification and result container |
 | `qubox.calibration` | `CalibrationSnapshot` and `CalibrationProposal` — calibration inspection and patch proposing |
 | `qubox.analysis` | `run_named_pipeline()` — lightweight named analysis pipelines for custom experiments |
-| `qubox.experiments` | `ExperimentLibrary` and `WorkflowLibrary` — template-based experiment runners |
+| `qubox.experiments` | `ExperimentLibrary` (20 standard experiments) and `WorkflowLibrary` — template-based runners |
 | `qubox.backends.qm` | `QMRuntime` — QM-specific execution: lowers sequences to QUA programs via legacy adapter |
 | `qubox.compat` | Compatibility shims for notebooks still importing legacy classes |
 | `qubox.examples` | Runnable example scripts demonstrating the API |
@@ -778,17 +778,44 @@ result = session.exp.custom(circuit=circ, acquire=session.acquire.iq("readout"),
 Available on `session.exp`.
 
 ```python
-session.exp          # → ExperimentLibrary
-session.exp.qubit    # → QubitExperimentLibrary
-session.exp.resonator# → ResonatorExperimentLibrary
-session.exp.reset    # → ResetExperimentLibrary
+session.exp              # → ExperimentLibrary
+session.exp.qubit        # → QubitExperimentLibrary
+session.exp.resonator    # → ResonatorExperimentLibrary
+session.exp.readout      # → ReadoutExperimentLibrary
+session.exp.calibration  # → CalibrationExperimentLibrary
+session.exp.storage      # → StorageExperimentLibrary
+session.exp.tomography   # → TomographyExperimentLibrary
+session.exp.reset        # → ResetExperimentLibrary
 ```
 
-### 11.2 Template Experiments
+### 11.2 Standard Experiment Suite (20 experiments)
 
 All template experiments return an `ExperimentResult`.
 
-#### Resonator Spectroscopy
+---
+
+#### Readout Trace — `readout.trace`
+
+Acquires raw ADC readout traces.
+
+```python
+result = session.exp.readout.trace(readout="rr0", drive_frequency=8.61e9, n_avg=1000)
+```
+
+**Signature:**
+
+```python
+session.exp.readout.trace(
+    *,
+    readout: str,              # Readout element alias
+    drive_frequency: float,    # Drive frequency for the readout tone (Hz)
+    **kwargs,                  # Additional: n_avg, ro_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### Resonator Spectroscopy — `resonator.spectroscopy`
 
 ```python
 result = session.exp.resonator.spectroscopy(
@@ -809,7 +836,39 @@ session.exp.resonator.spectroscopy(
 ) → ExperimentResult
 ```
 
-#### Qubit Spectroscopy
+---
+
+#### Resonator Power Spectroscopy — `resonator.power_spectroscopy`
+
+2D sweep: frequency × readout gain, for characterizing resonator response as a function of power.
+
+```python
+result = session.exp.resonator.power_spectroscopy(
+    readout="rr0",
+    freq=session.sweep.linspace(-5e6, 5e6, 201, center="readout"),
+    gain_min=1e-3,
+    gain_max=0.5,
+    n_gain_points=50,
+    n_avg=200,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.resonator.power_spectroscopy(
+    *,
+    readout: str,
+    freq: SweepAxis,                 # Frequency sweep axis
+    gain_min: float = 1e-3,          # Minimum readout gain
+    gain_max: float = 0.5,           # Maximum readout gain
+    **kwargs,                        # Additional: n_gain_points/N_a, n_avg, readout_op, ro_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### Qubit Spectroscopy — `qubit.spectroscopy`
 
 ```python
 result = session.exp.qubit.spectroscopy(
@@ -834,7 +893,38 @@ session.exp.qubit.spectroscopy(
 ) → ExperimentResult
 ```
 
-#### Power Rabi
+---
+
+#### Temporal Rabi — `qubit.temporal_rabi`
+
+Sweeps drive pulse duration at fixed amplitude.
+
+```python
+result = session.exp.qubit.temporal_rabi(
+    qubit="q0",
+    readout="rr0",
+    duration=session.sweep.linspace(4, 200, 50, parameter="duration"),
+    pulse="x180",
+    n_avg=1000,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.qubit.temporal_rabi(
+    *,
+    qubit: str,
+    readout: str,
+    duration: SweepAxis,       # Pulse duration sweep (clock cycles)
+    pulse: str = "x180",      # Pulse operation name
+    **kwargs,                  # Additional: n_avg, pulse_gain, qb_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### Power Rabi — `qubit.power_rabi`
 
 ```python
 result = session.exp.qubit.power_rabi(
@@ -858,7 +948,102 @@ session.exp.qubit.power_rabi(
 ) → ExperimentResult
 ```
 
-#### Ramsey
+---
+
+#### Time Rabi Chevron — `qubit.time_rabi_chevron`
+
+2D sweep: pulse duration × frequency detuning.
+
+```python
+result = session.exp.qubit.time_rabi_chevron(
+    qubit="q0",
+    readout="rr0",
+    freq_span=10e6,
+    df=100e3,
+    max_duration=200,
+    dt=4,
+    n_avg=500,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.qubit.time_rabi_chevron(
+    *,
+    qubit: str,
+    readout: str,
+    freq_span: float,          # IF frequency span (Hz)
+    df: float,                 # Frequency step (Hz)
+    max_duration: int,         # Maximum pulse duration (clock cycles)
+    dt: int = 4,               # Duration step (clock cycles)
+    **kwargs,                  # Additional: n_avg, pulse, pulse_gain, qb_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### Power Rabi Chevron — `qubit.power_rabi_chevron`
+
+2D sweep: drive amplitude × frequency detuning.
+
+```python
+result = session.exp.qubit.power_rabi_chevron(
+    qubit="q0",
+    readout="rr0",
+    freq_span=10e6,
+    df=100e3,
+    max_gain=1.0,
+    dg=0.01,
+    n_avg=500,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.qubit.power_rabi_chevron(
+    *,
+    qubit: str,
+    readout: str,
+    freq_span: float,          # IF frequency span (Hz)
+    df: float,                 # Frequency step (Hz)
+    max_gain: float,           # Maximum amplitude gain
+    dg: float = 0.01,          # Gain step
+    **kwargs,                  # Additional: n_avg, pulse, pulse_duration, qb_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### T1 Relaxation — `qubit.t1`
+
+Measures energy relaxation time. Applies π-pulse then waits variable delay.
+
+```python
+result = session.exp.qubit.t1(
+    qubit="q0",
+    readout="rr0",
+    delay=session.sweep.linspace(4, 40000, 100, parameter="delay"),
+    n_avg=1000,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.qubit.t1(
+    *,
+    qubit: str,
+    readout: str,
+    delay: SweepAxis,          # Delay sweep (clock cycles)
+    **kwargs,                  # Additional: n_avg, r180/pulse, qb_therm_clks, use_circuit_runner
+) → ExperimentResult
+```
+
+---
+
+#### T2 Ramsey — `qubit.ramsey`
 
 ```python
 result = session.exp.qubit.ramsey(
@@ -883,7 +1068,297 @@ session.exp.qubit.ramsey(
 ) → ExperimentResult
 ```
 
-#### Active Reset Benchmark
+---
+
+#### T2 Echo — `qubit.echo`
+
+Spin-echo (Hahn echo) sequence: π/2 — τ — π — τ — π/2 — measure.
+
+```python
+result = session.exp.qubit.echo(
+    qubit="q0",
+    readout="rr0",
+    delay=session.sweep.linspace(8, 4000, 100, parameter="delay"),
+    n_avg=1000,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.qubit.echo(
+    *,
+    qubit: str,
+    readout: str,
+    delay: SweepAxis,          # Half-echo delay sweep (clock cycles)
+    **kwargs,                  # Additional: n_avg, r180, r90, qb_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### IQ Blobs — `readout.iq_blobs`
+
+Per-shot IQ blob separation (ground/excited states, optionally f-state).
+
+```python
+result = session.exp.readout.iq_blobs(
+    qubit="q0",
+    readout="rr0",
+    n_runs=2000,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.readout.iq_blobs(
+    *,
+    qubit: str,
+    readout: str,
+    **kwargs,                  # Additional: n_runs/n_avg, r180/pulse, qb_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### AllXY — `calibration.all_xy`
+
+Runs all 21 AllXY gate-pair sequences for gate calibration validation.
+
+```python
+result = session.exp.calibration.all_xy(qubit="q0", readout="rr0", n_avg=1000)
+```
+
+**Signature:**
+
+```python
+session.exp.calibration.all_xy(
+    *,
+    qubit: str,
+    readout: str,
+    **kwargs,                  # Additional: n_avg, gate_indices, prefix, qb_detuning, qb_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### DRAG Calibration — `calibration.drag`
+
+DRAG pulse amplitude calibration (Yale method: X180·Y90 and Y180·X90).
+
+```python
+result = session.exp.calibration.drag(
+    qubit="q0",
+    readout="rr0",
+    amps=np.linspace(-0.5, 0.5, 51),
+    n_avg=1000,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.calibration.drag(
+    *,
+    qubit: str,
+    readout: str,
+    amps: SweepAxis | array,   # DRAG amplitude sweep
+    **kwargs,                  # Additional: n_avg, base_alpha, calibration_op,
+                               #   x180, x90, y180, y90, qb_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### Readout Butterfly Measurement — `readout.butterfly`
+
+Post-selection-based readout fidelity measurement (triple measurement M0-M1-M2).
+
+```python
+result = session.exp.readout.butterfly(qubit="q0", readout="rr0", n_samples=10_000)
+```
+
+**Signature:**
+
+```python
+session.exp.readout.butterfly(
+    *,
+    qubit: str,
+    readout: str,
+    **kwargs,                  # Additional: n_samples/n_avg, prep_policy/policy,
+                               #   prep_kwargs, r180, threshold, max_trials, qb_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### Qubit State Tomography — `tomography.qubit_state`
+
+Single-qubit state tomography (X, Y, Z projections).
+
+```python
+def my_state_prep():
+    play("x90", "qubit")
+
+result = session.exp.tomography.qubit_state(
+    qubit="q0",
+    readout="rr0",
+    state_prep=my_state_prep,
+    n_avg=1000,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.tomography.qubit_state(
+    *,
+    qubit: str,
+    readout: str,
+    state_prep: Callable | list[Callable],   # QUA-compatible state preparation callable(s)
+    **kwargs,                                # Additional: n_avg, x90_pulse, yn90_pulse,
+                                             #   therm_clks/qb_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### Storage Spectroscopy — `storage.spectroscopy`
+
+Displacement → selective π → measure, sweeping frequency to find Fock-dependent qubit transitions.
+
+```python
+result = session.exp.storage.spectroscopy(
+    qubit="q0",
+    readout="rr0",
+    storage="st0",
+    freq=session.sweep.linspace(-5e6, 5e6, 201, center="q0.ge"),
+    disp="disp_n1",
+    storage_therm_time=50000,
+    n_avg=1000,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.storage.spectroscopy(
+    *,
+    qubit: str,
+    readout: str,
+    storage: str,                          # Storage/cavity element alias
+    freq: SweepAxis,                       # Frequency sweep axis
+    disp: str,                             # Displacement pulse name
+    storage_therm_time: int,               # Storage cooldown (clock cycles)
+    **kwargs,                              # Additional: n_avg, sel_r180
+) → ExperimentResult
+```
+
+---
+
+#### Storage T1 Decay — `storage.t1_decay`
+
+Fock-state energy relaxation: displace → wait → selective π → measure.
+Uses `FockResolvedT1` backend; for single-Fock T1 pass a one-element `fock_fqs` list.
+
+```python
+result = session.exp.storage.t1_decay(
+    qubit="q0",
+    readout="rr0",
+    storage="st0",
+    delay=session.sweep.linspace(4, 40000, 100, parameter="delay"),
+    fock_fqs=[5.123e9],
+    fock_disps=["disp_n1"],
+    n_avg=1000,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.storage.t1_decay(
+    *,
+    qubit: str,
+    readout: str,
+    storage: str,
+    delay: SweepAxis,          # Delay sweep (clock cycles)
+    **kwargs,                  # Additional: n_avg, fock_fqs, fock_disps, sel_r180,
+                               #   st_therm_clks/storage_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### Number Splitting Spectroscopy — `storage.num_splitting`
+
+Resolves photon-number-dependent qubit frequency shifts.
+
+```python
+result = session.exp.storage.num_splitting(
+    qubit="q0",
+    readout="rr0",
+    storage="st0",
+    rf_centers=[5.1e9, 5.09e9, 5.08e9],
+    rf_spans=[2e6, 2e6, 2e6],
+    df=50e3,
+    n_avg=500,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.storage.num_splitting(
+    *,
+    qubit: str,
+    readout: str,
+    storage: str,
+    rf_centers: list[float],       # Center frequencies per Fock state (Hz)
+    rf_spans: list[float],         # Frequency span per Fock state (Hz)
+    df: float = 50e3,              # Frequency step (Hz)
+    **kwargs,                      # Additional: n_avg, sel_r180, state_prep,
+                                   #   st_therm_clks/storage_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### Wigner Tomography — `tomography.wigner`
+
+Storage Wigner function tomography via displaced parity measurement.
+
+```python
+result = session.exp.tomography.wigner(
+    qubit="q0",
+    readout="rr0",
+    storage="st0",
+    state_prep=my_state_prep,
+    x_vals=np.linspace(-3, 3, 61),
+    p_vals=np.linspace(-3, 3, 61),
+    base_alpha=10.0,
+    n_avg=200,
+)
+```
+
+**Signature:**
+
+```python
+session.exp.tomography.wigner(
+    *,
+    qubit: str,
+    readout: str,
+    storage: str,
+    state_prep: Callable | list[Callable],   # QUA state-preparation callable(s)
+    x_vals: array,                           # Phase-space x grid
+    p_vals: array,                           # Phase-space p grid
+    **kwargs,                                # Additional: n_avg, base_alpha, r90_pulse, qb_therm_clks
+) → ExperimentResult
+```
+
+---
+
+#### Active Reset Benchmark — `reset.active`
 
 ```python
 result = session.exp.reset.active(

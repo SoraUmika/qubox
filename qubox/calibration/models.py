@@ -44,7 +44,7 @@ class CalibrationProposal:
         return "\n".join(lines)
 
     def apply(self, session, *, dry_run: bool = False) -> dict[str, Any]:
-        from qubox_v2_legacy.calibration.contracts import Patch
+        from qubox.calibration.contracts import Patch
 
         patch = Patch(reason=self.reason or "Applied from qubox result proposal")
         for update in self.updates:

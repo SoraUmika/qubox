@@ -3,7 +3,7 @@ import os
 import json
 from pathlib import Path
 
-from qubox_v2_legacy.core.persistence_policy import split_output_for_persistence
+from qubox.core.persistence import split_output_for_persistence
 
 class Output(dict):
     """

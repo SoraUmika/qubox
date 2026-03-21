@@ -1,362 +1,325 @@
-# AGENTS.md
+# AGENTS.md — qubox Agent Configuration
 
-## Project Purpose
-
-This repository contains the **qubox API** (main implementation folder: `qubox`), a framework intended to make **cQED experimental design, execution, analysis, and extension easier, clearer, and more reproducible**.
-
-Its long-term goal is to provide a stable, hardware-aware, and user-friendly abstraction layer for:
-
-- defining cQED experiments,
-- constructing pulse sequences and higher-level protocols,
-- compiling them into backend-specific programs,
-- running them on supported hardware or simulator backends,
-- collecting and organizing results,
-- and analyzing those results in a reproducible and physically meaningful way.
-
-The guiding philosophy of this repository is to keep the **user-facing experiment interface simple and expressive** while ensuring that **backend behavior remains physically faithful, operationally correct, and easy to inspect**.
+> **This repository controls real quantum hardware. Physical correctness and compiled-program
+> fidelity are never optional. Read this document before making any change.**
 
 ---
 
-## Startup Policy
+## 1. Quick-Start Decision Tree
 
-Before making changes, an agent must first gather project context.
-
-### Requirements
-- Read `README.md` first.
-- If the task is API-related, also inspect `API_REFERENCE.md`.
-- If the task touches QUA compilation, experiment structure, or validation, also inspect:
-  - `standard_experiments.md`
-  - `limitations/qua_related_limitations.md` if it exists
-- If the task affects notebooks, examples, or usage flows, inspect the relevant notebook(s) under the notebook folder before modifying code.
-- Prefer understanding the existing repository structure before introducing new abstractions, files, or workflows.
-
-### General Working Principle
-- Prefer minimal, clear, and structurally consistent changes.
-- Do not introduce large architectural rewrites unless the task explicitly calls for them.
-- Preserve compatibility with the existing supported Quantum Machines stack unless the user explicitly requests a migration.
-
----
-
-## Prompt Logging Policy
-
-All prompt requests and prompt-generated results must be logged for traceability.
-
-### Requirements
-- Every prompt question/request and every corresponding prompt result/response must be saved under the `past_prompt/` folder.
-- Each saved record must include an **explicit date and time** in its filename or metadata.
-- Timestamps should be precise enough to distinguish multiple prompt runs on the same day.
-- The saved record should make clear:
-  - the original prompt/request,
-  - the produced result/response,
-  - and, when relevant, the task context or target files.
-- Do not overwrite prior prompt logs unless the task explicitly calls for replacement; preserve history by default.
-
-### Guidance
-- Prefer stable, readable naming conventions such as:
-  - `past_prompt/YYYY-MM-DD_HH-MM-SS_<short_task_name>.md`
-  - or an equivalent structured format already used by the repository
-- If a prompt is revised multiple times, each meaningful revision should be logged separately.
-- Prompt logs should be organized so that past agent interactions can be audited later.
-
-### Goal
-This policy exists to ensure reproducibility, auditability, and historical traceability of agent-assisted development work.
+```
+START
+  │
+  ├─ What is the task?
+  │
+  ├─► CODE CHANGE (non-QUA)
+  │     Read: README.md, API_REFERENCE.md
+  │     Apply: §2 Priority, §3 Checklist, §8 Change Protocol, §9 Docs Sync
+  │
+  ├─► QUA / COMPILATION / PULSE-SEQUENCE WORK
+  │     Read: README.md, standard_experiments.md,
+  │           limitations/qua_related_limitations.md (if exists)
+  │     Apply: §6 QUA Protocol, §7 Trust Gates, §8 Change Protocol
+  │     Validate: compile → simulate → verify (§6)
+  │
+  ├─► NEW EXPERIMENT
+  │     Read: README.md, API_REFERENCE.md, standard_experiments.md,
+  │           qubox/experiments/ (existing pattern), relevant notebooks
+  │     Apply: §6 QUA Protocol, §7 Trust Gates, §8 Change Protocol, §9 Docs Sync
+  │
+  ├─► DOCS-ONLY CHANGE
+  │     Read: API_REFERENCE.md, docs/CHANGELOG.md
+  │     Apply: §9 Docs Sync Rules
+  │
+  ├─► NOTEBOOK / EXAMPLE WORK
+  │     Read: README.md, API_REFERENCE.md, the specific notebook(s)
+  │     Apply: §8 Change Protocol, §9 Docs Sync
+  │
+  ├─► REFACTOR
+  │     Read: README.md, API_REFERENCE.md, affected modules
+  │     Apply: §2 Priority (backward compat = high), §8 Change Protocol
+  │     Test: unit tests + standard experiments if pulse path touched
+  │
+  └─► BUG FIX
+        Read: affected module(s), relevant test(s)
+        Apply: §8 Change Protocol (scope: minimal), §9 Docs Sync if user-visible
+```
 
 ---
 
-## Python Version Policy
+## 2. Priority Hierarchy
 
-For stability and reproducibility, all development and execution environments should use **Python 3.12.13**.
+When two policies conflict, the higher-numbered priority wins.
 
-### Requirements
-- Before performing environment-dependent work, check whether **Python 3.12.x** is available on the system.
-- For now, Python **3.11.8** may be used as a fallback, since hardware access is only available when the system name is `ECE-SHANKAR-07` and some system only have 3.11.8.
-- If Python 3.12.x is not available, create and use a **virtual environment** based on that version, if possible.
-- Avoid using other Python versions unless:
-  - the user explicitly requests it, or
-  - there is a documented project-wide exception.
-
-### Notes
-- Environment changes should be kept minimal and justified.
-- If a different Python version is required by a dependency or external tool, clearly document the reason.
-- Do not silently change the Python version policy.
+1. **Physical correctness / hardware safety** — Compiled program behavior must match intent. A mismatch is never silently acceptable. Real hardware time is expensive; incorrect programs waste it.
+2. **Backward compatibility** — Do not rename or remove public APIs without explicit user approval. Existing notebooks and user workflows must not silently break.
+3. **Documentation consistency** — If user-visible behavior changes, docs change in the same task. Stale docs are a form of silent breakage.
+4. **Minimal change scope** — The smallest correct change wins. No unrelated cleanup. No speculative refactoring.
+5. **Reproducibility** — Changes must be explainable, inspectable, and re-runnable. Validation results must be logged or reported.
+6. **Code clarity** — Prefer readable, structurally consistent code over clever abstraction.
 
 ---
 
-## Hardware and Backend Scope
+## 3. Startup Checklist
 
-The qubox API currently primarily supports **Quantum Machines** hardware and software.
+Complete these before writing any code or documentation:
 
-### Supported Stack
-- **Quantum Machines QUA / QM API version:** `1.2.6`
-- **Primary hardware target:** **OPX+ + Octave**
-
-All implementation, experiment generation, validation, and documentation work should remain consistent with this supported stack unless the user explicitly requests an upgrade or migration.
-
-### Official References
-- General Quantum Machines documentation:  
-  `https://docs.quantum-machines.co/1.2.6/`
-- QUA Simulator API:  
-  `https://docs.quantum-machines.co/1.2.6/docs/API_references/simulator_api/`
-- Octave API:  
-  `https://docs.quantum-machines.co/1.2.6/docs/API_references/qm_octave/`
-- OPX+ / QM API:  
-  `https://docs.quantum-machines.co/1.2.6/docs/API_references/qm_api/`
-- General tutorials:  
-  `https://github.com/qua-platform/qua-libs/tree/main/Tutorials`
-
-### Scope Expectations
-- Do not assume compatibility with other QM versions unless verified.
-- Do not assume compatibility with non-QM hardware unless the abstraction is explicitly backend-agnostic and the task requests such support.
-- If adding abstractions intended for future backend portability, keep current QM backend behavior correct first.
+- [ ] Read `README.md` — understand project purpose, architecture, and entry points.
+- [ ] Read `API_REFERENCE.md` — if the task touches public API.
+- [ ] Read `standard_experiments.md` — if the task touches QUA compilation, pulse sequences, or experiment structure.
+- [ ] Read `limitations/qua_related_limitations.md` — if it exists and the task is QUA-related.
+- [ ] Read the relevant notebook(s) — if the task affects usage examples or notebooks.
+- [ ] Confirm Python version (3.12.13 preferred; 3.11.8 on ECE-SHANKAR-07 only). See §4.
+- [ ] Confirm QM API version is 1.2.6. Do not assume other versions.
+- [ ] If simulator validation is required: confirm hosted server accessibility (see §4).
+- [ ] Understand the existing code structure before proposing new abstractions.
 
 ---
 
-## Core Repository Philosophy
+## 4. Environment & Backend
 
-Agents working in this repository should preserve the following high-level design goals:
+### Python
 
-- **high-level experiment simplicity**
-- **backend-faithful compiled behavior**
-- **clear and inspectable pulse-sequence logic**
-- **reproducibility**
-- **documentation consistency**
-- **extensibility toward future cQED experiments**
-- **practical usability for experimental physicists**
+| Version | Status |
+|---|---|
+| **3.12.10** | **Required (installed default)** |
+| 3.11.8 | Fallback — ECE-SHANKAR-07 only (hardware access machine) |
+| Any other | **Forbidden** unless user explicitly authorizes |
 
-This repository is not just a code library; it is intended to support real experimental workflows. Readability, reproducibility, and physical correctness matter more than clever abstraction for its own sake.
+Do not silently change the Python version. If the installed version differs, report it.
 
----
+### Hardware Stack
 
-## QUA Program Validation Policy
+- **Backend:** Quantum Machines OPX+ + Octave
+- **QUA / QM API:** version `1.2.6` — do not assume compatibility with other versions
+- **Architecture ref:** `qubox/legacy/docs/ARCHITECTURE.md`
 
-For any new experiment, audit, refactor, or feature that produces or modifies a **QUA program**, the resulting **compiled program** must be treated as the source of truth for execution behavior.
+### Hosted Server
 
-### Requirements
-- Do **not** assume that written QUA code and actual compiled behavior are identical.
-- Any experiment that compiles to QUA must be validated carefully to ensure that the generated program behaves as intended.
-- When checking, auditing, or developing a QUA-based experiment, the program should be run through the **Quantum Machines supported simulator API** whenever feasible.
-- Validation should focus on whether the compiled and simulated behavior matches the intended:
-  - pulse sequence,
-  - timing,
-  - control flow,
-  - measurements,
-  - and overall experimental logic.
+```python
+host         = "10.157.36.68"
+cluster_name = "Cluster_2"
+```
 
-### Hosted Quantum Machines Server Preference
-- If a hosted Quantum Machines server is available, prefer using the hosted server for simulator-based validation and, when explicitly appropriate for the task, real experiment execution.
-- Use the following hosted server settings:
-  - `host = "10.157.36.68"`
-  - `cluster_name = "Cluster_2"`
-- When simulator validation is possible on the hosted server, prefer that path over purely local assumptions.
-- When real execution is requested or required for the audit, use the same hosted configuration unless the task explicitly specifies a different target.
-- If the hosted server is unavailable, inaccessible, misconfigured, or inconsistent with the requested task, report that clearly and fall back to the best available validation path.
-- Do not silently substitute a different host or cluster unless the user explicitly requests it or the repository already defines an approved override.
+Use this configuration for simulator validation and real execution. Do not silently substitute a different host or cluster. If the server is unreachable, report that clearly and fall back to best available path.
 
-### Simulation and Compilation Guidance
-- Be aware that some QUA programs may introduce **hardware-limited latency** or other backend-specific behavior not obvious from the written source.
-- If such latency or backend behavior is observed and cannot be reasonably removed or corrected, it must be documented in:
-  - `limitations/qua_related_limitations.md`
-- Compilation and simulation cost must be taken into account during validation.
-- As a general target, **QUA compilation time should remain below 1 minute**. If compilation exceeds 1 minute, report it clearly.
-- For experiments that mainly sweep linear variables or repeat the same sequence many times through averaging, use reduced settings for validation whenever possible.
-- In particular, for quick validation of repeated experiments:
-  - set `n_avg = 1` unless averaging itself is the object of the test,
-  - reduce unnecessarily long idle periods when they are not the feature being validated,
-  - and simulate only the minimum duration needed to verify the sequence.
+### Reference Documentation
 
-- Refer to `standard_experiments.md` for the set of standard reference protocols that should pass for intended operations whenever applicable.
-
-### Long-Wait and Relaxation Experiments
-- Some experiments include long delays, such as thermal relaxation waits, often on the order of **1000+ clock cycles** or longer.
-- For validation through the simulator API, these waits may be shortened artificially when the purpose is only to verify program structure, ordering, and timing logic rather than the exact physical wait duration.
-- A good rule of thumb is to estimate the total pulse-sequence duration from:
-  - state preparation,
-  - experiment body,
-  - to measurement,
-  and simulate only up to that timespan.
-
-### Reporting Expectations
-- If the compiled program does not perfectly match the intended high-level design, report the discrepancy clearly.
-- If simulator behavior, backend constraints, or compilation artifacts prevent a perfect match, do **not** ignore it; document the issue explicitly.
-
-### Goal
-The purpose of this policy is to ensure that high-level experiment definitions in qubox remain faithful to the actual backend behavior seen by the Quantum Machines stack.
-
-Perfect agreement may not always be achievable due to backend constraints, compilation artifacts, or hardware-related timing behavior. When this occurs, the mismatch must be clearly reported rather than silently accepted.
+| Resource | URL |
+|---|---|
+| QM General Docs | https://docs.quantum-machines.co/1.2.6/ |
+| Simulator API | https://docs.quantum-machines.co/1.2.6/docs/API_references/simulator_api/ |
+| Octave API | https://docs.quantum-machines.co/1.2.6/docs/API_references/qm_octave/ |
+| OPX+ / QM API | https://docs.quantum-machines.co/1.2.6/docs/API_references/qm_api/ |
+| QUA Tutorials | https://github.com/qua-platform/qua-libs/tree/main/Tutorials |
 
 ---
 
-## Standard Experiment / Trust Protocol Policy
+## 5. Prompt Logging Policy
 
-The file `standard_experiments.md` defines standard reference experiments that act as trust gates for agent-generated compilation logic.
+Every agent task must be logged for auditability and reproducibility.
 
-### Requirements
-- If a task introduces or modifies pulse-sequence generation, experiment compilation, scheduling logic, or QUA translation behavior, the agent should consider whether the relevant standard experiments still pass.
-- These standard experiments are meant to be simple but structurally representative.
-- Passing them does **not** prove total correctness, but failure to pass them should be treated as a warning sign that compilation behavior may not be trustworthy.
-- If a standard experiment becomes invalid because of a legitimate architectural change, update `standard_experiments.md` accordingly and explain why.
+**File location:** `past_prompt/`
+**Naming:** `past_prompt/YYYY-MM-DD_HH-MM-SS_<short_task_name>.md`
 
----
+Each log must contain:
+- Original prompt / request
+- Produced response or summary of changes
+- Target files modified
+- Task context (why, constraints, assumptions)
 
-## Tooling Policy
-
-Agents may use utilities located in the `tools/` folder when they help complete the task more effectively.
-
-### Requirements
-- Reuse existing tools when appropriate.
-- Modify existing tools if:
-  - the current version is outdated,
-  - it no longer applies to the present codebase,
-  - or improving it would substantially simplify or strengthen the task.
-- Prefer improving shared tooling over duplicating one-off logic when the tool is likely to be reused.
-
-### Guidance
-- Keep tools general-purpose when possible.
-- Avoid creating narrow one-use utilities unless the task clearly justifies it.
-- If a tool becomes part of the regular workflow, ensure its usage is discoverable and documented.
+**Rules:**
+- Never overwrite a prior log. Each run gets its own file.
+- If a prompt is revised multiple times, each meaningful revision is a separate file.
+- Use `tools/log_prompt.py` to generate logs automatically.
 
 ---
 
-## API and Documentation Consistency
+## 6. QUA Compilation & Validation Protocol
 
-The file `API_REFERENCE.md` is the canonical reference for public API usage.
+> **The compiled QUA program is the source of truth. Written code is intent. Compiled behavior is reality. When they differ, reality wins — and the discrepancy must be reported.**
 
-### Requirements
-- Refer to `API_REFERENCE.md` when using or modifying the API.
-- Any change to the public API must be reflected in `API_REFERENCE.md`.
-- Any notable repository change should also update `docs/CHANGELOG.md`.
-- Documentation changes should be made in the same task whenever practical, so code and docs remain synchronized.
+### Validation Steps (required for any QUA-touching change)
 
-### This Includes
-- new public classes,
-- new functions,
-- renamed parameters,
-- removed features,
-- changed behavior,
-- changed defaults,
-- backend support changes,
-- and workflow changes visible to users.
+1. **Compile** — Run the QUA program builder. Compilation must complete in **< 1 minute**. If it exceeds 1 minute, report it.
+2. **Simulate** — Run through the hosted QM simulator (`host = "10.157.36.68"`, `cluster_name = "Cluster_2"`).
+3. **Verify** — Inspect the simulated output for:
+   - Correct pulse ordering and timing
+   - Correct control flow (loops, conditionals, sweeps)
+   - Correct measurement placement
+   - Correct frame / phase updates
+   - Multi-element alignment behavior
 
-### Documentation Principle
-If a user-visible behavior changes, the corresponding documentation should change in the same task unless there is a strong reason not to.
+### Validation Shortcuts (for quick structural checks)
 
----
+- Set `n_avg = 1` unless averaging is what is being tested.
+- Shorten idle periods (thermal relaxation waits, etc.) to the minimum needed to verify structure.
+- Simulate only up to the end of the pulse sequence (state prep → experiment body → measurement).
+- For long-wait experiments (e.g., T1 with 1000+ clock cycle delays): shorten the wait artificially for simulation; verify structure, not duration.
 
-## Notebook and Example Policy
+### Reporting Requirements
 
-The notebook folder contains usage examples and workflow demonstrations.
+- If compiled behavior does not match intent: report the discrepancy explicitly.
+- If a mismatch cannot be fixed (hardware limitation, compilation artifact): document it in `limitations/qua_related_limitations.md`.
+- **Never silently accept a mismatch between intended and compiled behavior.**
 
-### Requirements
-- If a major change is made to the API, user workflow, experiment structure, or core abstractions, inspect the relevant notebook(s) and update them as needed.
-- Notebooks should remain aligned with the current public usage model of the repository.
-- If an old notebook no longer represents best practice, either:
-  - update it,
-  - clearly relabel it as legacy / archival,
-  - or replace it with a better example.
+### Tools
 
-### Notes
-- Notebooks are part of the practical user interface of the repository.
-- A code change that breaks notebooks without acknowledgment is considered incomplete work.
-- Prefer notebooks that demonstrate intended usage clearly rather than exposing unnecessary internal complexity.
+- `tools/validate_qua.py` — command-line validation helper. Use `--quick` for fast structural checks.
 
 ---
 
-## Testing and Validation Expectations
+## 7. Standard Experiments (Trust Gates)
 
-Agents should prefer changes that are testable and inspectable.
+`standard_experiments.md` defines reference pulse protocols that act as trust gates for compilation logic.
 
-### Requirements
-- When modifying experiment logic, pulse compilation, or API behavior, check whether the change should be accompanied by:
-  - a unit test,
-  - a validation script,
-  - a simulator check,
-  - or an update to a standard experiment.
-- If a change introduces a known limitation or unresolved discrepancy, document it explicitly rather than hiding it.
-- Avoid making changes that cannot be explained, inspected, or reproduced.
+**Rule:** If your change touches pulse-sequence generation, compilation, scheduling, or QUA translation — run the relevant standard experiments and verify they still pass.
 
-### General Principle
-A successful change is not just one that “runs,” but one that can be explained and validated.
+- Failure = do not ship without explanation and explicit user approval.
+- If a standard experiment becomes invalid from a legitimate change: update `standard_experiments.md`, explain why, and get user acknowledgment.
+- Passing standard experiments does not prove total correctness, but failing them is a red flag that must not be ignored.
 
 ---
 
-## Backward Compatibility Guidance
+## 8. Change Protocol
 
-When modifying existing interfaces, prefer preserving backward compatibility unless the task explicitly requires breaking changes.
+### Scope
+- Make the **smallest correct change** that fully addresses the task.
+- Do not perform unrelated cleanup.
+- Do not introduce new abstractions unless there is repeated structure that clearly justifies them.
+- Extend existing patterns before creating new ones.
 
-### Requirements
-- Do not rename or remove public APIs casually.
+### Backward Compatibility
+- Do not rename or remove public API elements without explicit user approval.
 - If a breaking change is necessary:
-  - document it in `API_REFERENCE.md`,
-  - record it in `docs/CHANGELOG.md`,
-  - and update affected notebooks/examples.
-- If a legacy path is being deprecated, prefer a clear migration path where practical.
+  1. Update `API_REFERENCE.md` with the change and migration path.
+  2. Update `docs/CHANGELOG.md`.
+  3. Update affected notebooks and examples.
+
+### Testing
+Every change must have at least one of:
+- [ ] Unit test in `tests/`
+- [ ] Validation script run and result reported
+- [ ] Simulator check completed (§6)
+- [ ] Standard experiment verified (§7)
+
+### Known Limitations
+- Document explicitly in `limitations/qua_related_limitations.md`.
+- Never hide a limitation by silently working around it.
 
 ---
 
-## Change Scope Guidance
+## 9. Documentation Sync Rules
 
-Agents should prefer the smallest correct change that fully addresses the task.
+> **If user-visible behavior changes, documentation changes in the same task.**
 
-### Requirements
-- Do not perform unrelated cleanup unless it materially improves the requested work.
-- Do not introduce large new abstractions unless they are justified by repeated structure or long-term maintainability.
-- Do not rewrite working subsystems only for stylistic reasons.
+"Documentation" means:
+- `API_REFERENCE.md` — canonical public API reference
+- `docs/CHANGELOG.md` — append-only change log
+- Relevant notebooks under `notebooks/`
 
-### Preferred Behavior
-- Understand existing conventions first.
-- Extend existing patterns where reasonable.
-- Refactor only when it clearly improves correctness, maintainability, or usability.
+Documentation sync is **required** when:
+- New public class or function is added
+- Parameter is renamed or removed
+- Default value changes
+- Feature is removed or deprecated
+- Behavior changes (even subtly)
+- Backend support changes
+- Workflow changes visible to users
 
----
-
-## File and Repository Hygiene
-
-### Requirements
-- Keep new files placed in logically appropriate directories.
-- Avoid scattering experimental scripts, temporary utilities, or ad hoc notes in unrelated parts of the repository.
-- If creating a new policy, limitation, or reference document, place it in a location consistent with the existing repository structure.
-
-### Guidance
-- Repository structure should remain understandable to a new contributor.
-- File names should be descriptive and stable.
+**Notebook rule:** A code change that breaks a notebook without acknowledgment is incomplete work. Either update the notebook, mark it as legacy, or replace it.
 
 ---
 
-## Reporting and Transparency Expectations
+## 10. Tooling Policy
 
-When an agent finishes a substantial task, it should be able to explain:
+- Tools live in `tools/`. Do not scatter utilities elsewhere.
+- **Reuse before duplicating.** Check `tools/` for existing scripts before writing new ones.
+- **Improve shared tools** rather than creating parallel one-off scripts.
+- If a tool becomes part of regular workflow: add a usage note to `tools/` or mention it in `README.md`.
+- Keep tools general-purpose. Avoid narrow one-use scripts unless the task clearly requires it.
 
-- what was changed,
-- why it was changed,
-- what assumptions were made,
-- what validation was performed,
-- what remains uncertain,
-- and what limitations were discovered.
+### Key Tools
 
-### Requirements
-- Do not silently ignore mismatches between intended behavior and compiled behavior.
-- Do not silently leave broken notebooks, stale docs, or failed trust protocols if they were affected by the change.
-- Be explicit about what was verified versus what was only assumed.
+| Tool | Purpose |
+|---|---|
+| `tools/validate_qua.py` | Compile + simulate a QUA program against the hosted server |
+| `tools/log_prompt.py` | Log agent prompts to `past_prompt/` |
+| `tools/validate_standard_experiments_simulation.py` | Run standard experiments against simulator |
 
 ---
 
-## Working Expectations for Agents
+## 11. File & Repo Hygiene
 
-When making changes in this repository, agents should aim to preserve:
+- Place new files in logically appropriate directories (not the repo root).
+- No scattered temporary scripts or ad-hoc notes in unrelated directories.
+- Filenames must be descriptive and stable — avoid `temp_`, `new_`, `test2_` prefixes.
+- The repository must remain navigable to a new contributor who has never seen it.
 
-- API clarity,
-- hardware realism,
-- reproducibility,
-- documentation accuracy,
-- compatibility with the supported Quantum Machines stack,
-- usability for experimental workflows,
-- and long-term maintainability.
+### Directory Guide
 
-Agents should prefer changes that make the system:
+| Directory | Contents |
+|---|---|
+| `qubox/` | Main package — public API and modern implementation |
+| `qubox/legacy/` | Full copy of former `qubox_v2_legacy` — do not delete without confirming notebook deps are migrated |
+| `qubox_tools/` | Analysis, fitting, plotting utilities |
+| `qubox_lab_mcp/` | Lab MCP server |
+| `tools/` | Agent and developer utilities |
+| `notebooks/` | Usage examples and workflow demos |
+| `past_prompt/` | Agent prompt logs (append-only) |
+| `docs/` | CHANGELOG and extended documentation |
+| `tests/` | Unit and integration tests |
+| `limitations/` | Known QUA/hardware limitations |
+| `.github/skills/` | GitHub Copilot / agent skill files |
+| `.skills/` | Claude Code skill files |
 
-- easier to maintain,
-- easier to extend to new cQED experiments,
-- easier to validate with simulator-backed checks,
-- and less likely to drift from actual hardware behavior.
+---
 
-The best changes in this repository are those that improve both **user simplicity** and **backend correctness**.
+## 12. Completion Report Template
+
+Fill in and output this report at the end of every substantial task:
+
+```markdown
+## Task Completion Report
+**Date:** YYYY-MM-DD HH:MM
+**Task:** <one-line summary>
+
+### Changes Made
+- ...
+
+### Why
+- ...
+
+### Assumptions
+- ...
+
+### Validation Performed
+- [ ] Compiled successfully
+- [ ] Simulator check passed (host: 10.157.36.68, cluster: Cluster_2)
+- [ ] Standard experiments verified
+- [ ] Unit tests pass
+- [ ] Docs updated (API_REFERENCE.md, docs/CHANGELOG.md, notebooks)
+
+### What Remains Uncertain
+- ...
+
+### Limitations Discovered
+- ...
+```
+
+---
+
+## 13. Design Philosophy Reference
+
+| Value | Meaning |
+|---|---|
+| **User simplicity** | Experiment definitions should read like physics, not boilerplate. Expose only what the user needs to configure. |
+| **Backend fidelity** | The compiled QUA program must match intent. Discrepancies are bugs, not acceptable approximations. |
+| **Inspectability** | Pulse sequences, timing, and control flow must be readable and simulatable. Black-box behavior is not acceptable. |
+| **Reproducibility** | Every experiment run must be re-runnable with the same result from the same config. Log everything. |
+| **Documentation consistency** | Code and docs must stay in sync. Stale documentation is a form of technical debt that breaks real experiments. |
+| **Extensibility** | New cQED experiments should slot in without rewriting existing infrastructure. Follow existing class patterns. |
+| **Practical usability** | The primary users are experimental physicists, not software engineers. Clarity and correctness over elegance. |
+
+> **This repository supports real experimental workflows. Readability, reproducibility, and
+> physical correctness matter more than clever abstraction. When in doubt, be explicit.**

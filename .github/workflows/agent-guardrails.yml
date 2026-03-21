@@ -1,0 +1,167 @@
+name: Agent Guard-Rails
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── 1. Python version check ───────────────────────────────────────────────
+  python-version:
+    name: Python Version Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for forbidden Python version markers
+        run: |
+          # Warn if any file specifies a Python version outside 3.11 or 3.12.
+          # This catches pyproject.toml, setup.cfg, .python-version, tox.ini, etc.
+          FORBIDDEN=$(grep -rn "python_requires.*[<>=!]*3\.\([0-9]\|10\)\b" \
+                        pyproject.toml setup.cfg setup.py tox.ini 2>/dev/null || true)
+          if [ -n "$FORBIDDEN" ]; then
+            echo "::warning::Python version policy requires 3.12.x or 3.11.x only."
+            echo "$FORBIDDEN"
+          fi
+
+      - name: Check .python-version file
+        run: |
+          if [ -f .python-version ]; then
+            VER=$(cat .python-version | tr -d '[:space:]')
+            case "$VER" in
+              3.12.*|3.11.*) echo "Python version OK: $VER" ;;
+              *) echo "::error::.python-version specifies $VER — must be 3.12.x or 3.11.x"; exit 1 ;;
+            esac
+          fi
+
+  # ── 2. Docs sync check ───────────────────────────────────────────────────
+  docs-sync:
+    name: Documentation Sync Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check qubox/ changes have docs updates
+        run: |
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+
+          QUBOX_CHANGED=$(echo "$CHANGED" | grep '^qubox/' | grep -v '__pycache__' || true)
+          API_CHANGED=$(echo "$CHANGED" | grep 'API_REFERENCE\.md' || true)
+          CHANGELOG_CHANGED=$(echo "$CHANGED" | grep 'docs/CHANGELOG\.md' || true)
+
+          if [ -n "$QUBOX_CHANGED" ]; then
+            echo "qubox/ files changed:"
+            echo "$QUBOX_CHANGED"
+
+            if [ -z "$API_CHANGED" ] && [ -z "$CHANGELOG_CHANGED" ]; then
+              echo "::warning::qubox/ files changed but neither API_REFERENCE.md nor docs/CHANGELOG.md was updated. Per AGENTS.md §9: documentation updates belong in the same task as code changes."
+            else
+              echo "Docs updated: OK"
+            fi
+          fi
+
+  # ── 3. Standard experiments check ────────────────────────────────────────
+  standard-experiments:
+    name: Standard Experiments Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect compilation-path changes
+        id: detect
+        run: |
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          PULSE_CHANGED=$(echo "$CHANGED" | grep -E \
+            'qubox/(legacy/programs|legacy/experiments|backends/qm|experiments/templates)' \
+            || true)
+          if [ -n "$PULSE_CHANGED" ]; then
+            echo "pulse_path_changed=true" >> "$GITHUB_OUTPUT"
+            echo "Pulse-path files changed:"
+            echo "$PULSE_CHANGED"
+          else
+            echo "pulse_path_changed=false" >> "$GITHUB_OUTPUT"
+            echo "No pulse-path files changed — skipping standard experiments check."
+          fi
+
+      - name: Set up Python
+        if: steps.detect.outputs.pulse_path_changed == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        if: steps.detect.outputs.pulse_path_changed == 'true'
+        run: |
+          pip install -e ".[dev]" --quiet || pip install -e "." --quiet
+
+      - name: Run standard experiments (offline / dry-run)
+        if: steps.detect.outputs.pulse_path_changed == 'true'
+        env:
+          QM_HOST: "10.157.36.68"
+          QM_CLUSTER: "Cluster_2"
+        run: |
+          # Run the standard experiments validation in dry-run / offline mode.
+          # The script should exit 0 if all experiments compile correctly.
+          python tools/validate_standard_experiments_simulation.py \
+            --dry-run --report ci_standard_experiments_report.json 2>&1 || \
+          echo "::warning::Standard experiments validation failed or server unreachable. Review before merging."
+
+      - name: Upload standard experiments report
+        if: steps.detect.outputs.pulse_path_changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: standard-experiments-report
+          path: ci_standard_experiments_report.json
+          if-no-files-found: ignore
+
+  # ── 4. Prompt log check ──────────────────────────────────────────────────
+  prompt-log:
+    name: Prompt Log Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for prompt log in agent-generated PRs
+        run: |
+          # If the PR was agent-generated (commit message contains [agent] or [ai]
+          # or [claude] or [AI-generated]), verify past_prompt/ has a new entry.
+          COMMIT_MSGS=$(git log origin/${{ github.base_ref }}..HEAD --oneline)
+          IS_AGENT=$(echo "$COMMIT_MSGS" | grep -iE '\[agent\]|\[ai\]|\[claude\]|\[AI-generated\]' || true)
+
+          if [ -n "$IS_AGENT" ]; then
+            echo "Agent-generated PR detected."
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+            PROMPT_LOG=$(echo "$CHANGED" | grep '^past_prompt/' || true)
+            if [ -z "$PROMPT_LOG" ]; then
+              echo "::warning::This appears to be an agent-generated PR but no new file was added to past_prompt/. Per AGENTS.md §5: every agent task must be logged."
+            else
+              echo "Prompt log found: $PROMPT_LOG"
+            fi
+          else
+            echo "Not an agent-generated PR — skipping prompt log check."
+          fi
+
+  # ── 5. Legacy import check ───────────────────────────────────────────────
+  no-legacy-imports:
+    name: No Direct qubox_v2_legacy Imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for direct qubox_v2_legacy imports in qubox/
+        run: |
+          VIOLATIONS=$(grep -rn "from qubox_v2_legacy\|import qubox_v2_legacy" qubox/ \
+                         --include="*.py" 2>/dev/null | \
+                       grep -v "^.*#\|^\s*#" || true)
+          if [ -n "$VIOLATIONS" ]; then
+            echo "::error::Direct imports from qubox_v2_legacy found in qubox/. Use qubox.legacy.* instead."
+            echo "$VIOLATIONS"
+            exit 1
+          else
+            echo "No direct qubox_v2_legacy imports found: OK"
+          fi
