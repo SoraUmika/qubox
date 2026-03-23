@@ -1,8 +1,8 @@
 # Legacy Code Elimination Report
 
-**Date:** 2026-03-22  
+**Date:** 2026-03-22 (migration), 2026-03-23 (deletion + final verification)  
 **Scope:** Merge `qubox/legacy/` (~150 Python files) into `qubox/` so the repository has a single canonical implementation.  
-**Status:** **COMPLETE** — all code merged, all imports updated, 26/26 experiments compile on new config.
+**Status:** **COMPLETE** — all code merged, all imports updated, 26/26 experiments compile, legacy directory deleted.
 
 ---
 
@@ -16,6 +16,8 @@ This migration:
 - **Updated** all 22 external Python files that referenced `qubox.legacy.*`.
 - **Rewrote** the compatibility layer (`qubox/compat/notebook.py`) — replaced lazy proxy with direct imports.
 - **Verified** 20/20 import checks pass and 26/26 QUA programs compile.
+- **Deleted** `qubox/legacy/` directory and cleared all `__pycache__` directories.
+- **Re-verified** all imports and compilation after deletion — 20/20 pass, 26/26 compile.
 
 ---
 
@@ -177,10 +179,7 @@ Zero notebook cells contain `import qubox.legacy` — all 21 notebooks (07-27) i
 
 2. **Unicode logging on Windows**: `\u2192` (→) in `hardware/controller.py` log messages causes `UnicodeEncodeError` when stdout uses CP1252. Non-blocking; only affects redirected output.
 
-3. **`qubox/legacy/` directory still exists**: Rename/deletion was blocked by file locks and policy. The directory is now **orphaned** — no code imports from it. It can be safely deleted:
-   ```powershell
-   Remove-Item -Recurse -Force E:\qubox\qubox\legacy
-   ```
+3. **`qubox/legacy/` directory deleted** (2026-03-23): Successfully removed via `shutil.rmtree()`. All 30 `__pycache__` directories cleared. Post-deletion verification: 20/20 imports pass, return code 0.
 
 ---
 
@@ -212,5 +211,5 @@ qubox/
 ├── backends/            # QM backend
 ├── autotune/            # Auto-calibration
 ├── optimization/        # Optimization algorithms
-└── [legacy/]            # ORPHANED — safe to delete
+└── (legacy/ deleted)    # Removed 2026-03-23
 ```
