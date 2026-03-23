@@ -59,7 +59,7 @@ A code change that breaks a notebook without acknowledgment is incomplete work.
 ```text
 qubox/              Main package (public API)
 qubox/legacy/       Former qubox_v2_legacy — experiment classes, QUA programs
-qubox/compat/       notebook.py — sole import surface for notebooks
+qubox/notebook/     Notebook-facing import surface
 qubox_tools/        Analysis, fitting, plotting
 tools/              Agent and developer utilities
 past_prompt/        Prompt logs (append-only)

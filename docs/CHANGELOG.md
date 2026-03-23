@@ -31,6 +31,57 @@ Each entry must include:
 
 ## Entries
 
+### 2026-03-23 — Remove All Backward-Compatibility Shims
+
+**Classification: Major**
+
+**Summary:**
+
+Removed the `qubox/compat/` and `qubox_tools/compat/` directories entirely.
+All backward-compatibility shims that redirected imports to `qubox.notebook`
+have been deleted. `qubox.notebook` is now the sole notebook import surface
+with no legacy indirection layer.
+
+**Changes:**
+- **Deleted:** `qubox/compat/__init__.py`, `qubox/compat/notebook.py`, `qubox/compat/notebook_runtime.py`, `qubox/compat/notebook_workflow.py`
+- **Deleted:** `qubox_tools/compat/__init__.py`, `qubox_tools/compat/legacy_analysis.py`
+- **Updated:** `qubox/__init__.py` — removed `qubox.compat` from subpackage docstring
+- **Updated:** `qubox_tools/__init__.py` — removed `compat` from `_SUBMODULES` and `__all__`
+- **Updated:** `qubox/notebook/__init__.py`, `qubox/notebook/runtime.py`, `qubox/notebook/workflow.py` — removed historical migration references from docstrings
+- **Updated:** `tests/test_qubox_public_api.py` — renamed compat test to `test_notebook_surface_is_lazy`, imports `qubox.notebook` directly
+- **Updated:** `test_migration.py` — renamed compat check label
+- **Updated:** `notebooks/verify_compilation.py`, `notebooks/COMPILATION_VERIFICATION_REPORT.md`, `notebooks/migration_plan.md`, `notebooks/post_cavity_experiment_context.ipynb`
+- **Updated:** `API_REFERENCE.md` — removed `qubox.compat` and `qubox_tools.compat` rows
+- **Updated:** `.clinerules`, `.cursorrules`, `.windsurfrules`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.skills/repo-onboarding/SKILL.md`
+
+---
+
+### 2026-03-23 — Promote qubox.notebook as First-Class Import Surface
+
+**Classification: Major**
+
+**Summary:**
+
+Moved the notebook import surface from `qubox.compat.notebook` to `qubox.notebook`.
+Created a new `qubox/notebook/` subpackage containing:
+- `__init__.py` — primary import surface (200+ re-exported symbols)
+- `runtime.py` — shared session bootstrap, lifecycle management
+- `workflow.py` — stage context, checkpoints, fit helpers, primitive rotations
+
+The former `qubox/compat/` modules (`notebook.py`, `notebook_runtime.py`,
+`notebook_workflow.py`) are now thin backward-compatibility shims that redirect
+to `qubox.notebook.*`. All 30 experiment notebooks, tests, tutorials, and
+documentation have been updated to import from `qubox.notebook`.
+
+**Files affected:**
+
+- **Created:** `qubox/notebook/__init__.py`, `qubox/notebook/runtime.py`, `qubox/notebook/workflow.py`
+- **Modified (shims):** `qubox/compat/__init__.py`, `qubox/compat/notebook.py`, `qubox/compat/notebook_runtime.py`, `qubox/compat/notebook_workflow.py`
+- **Modified (imports):** `qubox/__init__.py`, all 30 notebooks in `notebooks/`, `test_migration.py`, `tests/test_notebook_runtime.py`, `tests/test_notebook_workflow.py`, `tests/test_qubox_public_api.py`, `tutorials/01_getting_started_basic_experiments.ipynb`
+- **Modified (docs):** `API_REFERENCE.md`, `README.md`, `CLAUDE.md`, `.clinerules`, `.cursorrules`, `.windsurfrules`, `.skills/repo-onboarding/SKILL.md`
+
+---
+
 ### 2026-03-22 — Remove Legacy cqed_params Comparisons from Numbered Notebooks
 
 **Classification: Moderate**

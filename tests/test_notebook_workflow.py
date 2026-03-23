@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from qubox.compat import notebook_workflow
+from qubox.notebook import workflow as notebook_workflow
 
 
 class FakeRegistry:

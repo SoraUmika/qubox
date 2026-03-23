@@ -2,6 +2,12 @@
 
 ``qubox`` is the unified package for cQED experiment orchestration,
 hardware control, and analysis.
+
+Subpackages
+-----------
+qubox.notebook
+    Notebook-facing import surface: experiment classes, calibration stack,
+    session bootstrap, and workflow helpers.
 """
 from __future__ import annotations
 

@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from qubox import ExperimentResult, Session
 from qubox.calibration import CalibrationProposal
-from qubox.compat import notebook as notebook_compat
+from qubox import notebook
 from qubox.data import ExecutionRequest
 
 
@@ -177,16 +177,16 @@ def test_result_proposal_round_trip():
     assert preview["n_updates"] == 1
 
 
-def test_notebook_compat_surface_is_lazy():
-    assert "QubitSpectroscopy" in notebook_compat.__all__
-    assert "measureMacro" in notebook_compat.__all__
-    assert "RunResult" in notebook_compat.__all__
-    assert "save_run_summary" in notebook_compat.__all__
-    assert "HardwareDefinition" in notebook_compat.__all__
-    assert "open_shared_session" in notebook_compat.__all__
-    assert "require_shared_session" in notebook_compat.__all__
-    assert "resolve_active_mixer_targets" in notebook_compat.__all__
-    assert "open_notebook_stage" in notebook_compat.__all__
-    assert "save_stage_checkpoint" in notebook_compat.__all__
-    assert "preview_or_apply_patch_ops" in notebook_compat.__all__
-    assert "ensure_primitive_rotations" in notebook_compat.__all__
+def test_notebook_surface_is_lazy():
+    assert "QubitSpectroscopy" in notebook.__all__
+    assert "measureMacro" in notebook.__all__
+    assert "RunResult" in notebook.__all__
+    assert "save_run_summary" in notebook.__all__
+    assert "HardwareDefinition" in notebook.__all__
+    assert "open_shared_session" in notebook.__all__
+    assert "require_shared_session" in notebook.__all__
+    assert "resolve_active_mixer_targets" in notebook.__all__
+    assert "open_notebook_stage" in notebook.__all__
+    assert "save_stage_checkpoint" in notebook.__all__
+    assert "preview_or_apply_patch_ops" in notebook.__all__
+    assert "ensure_primitive_rotations" in notebook.__all__

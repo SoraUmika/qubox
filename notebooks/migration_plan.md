@@ -1,7 +1,7 @@
-# Migration Plan: Legacy Notebook → qubox Notebooks
+# Migration Plan: Legacy Notebook â†’ qubox Notebooks
 
 > **Source**: `post_cavity_experiment_legacy.ipynb` (94 experiments, ~11,800 lines, 343 cells)
-> **Target**: `E:\qubox\notebooks/` — individual, modular notebooks using qubox v3 Session API
+> **Target**: `E:\qubox\notebooks/` â€” individual, modular notebooks using qubox v3 Session API
 > **Reference**: `post_cavity_experiment_legacy_migration_survey.md` (full 94-experiment catalog)
 
 ---
@@ -10,8 +10,8 @@
 
 1. [Migration Principles](#1-migration-principles)
 2. [Architecture Overview](#2-architecture-overview)
-3. [Already-Migrated Notebooks (00–06)](#3-already-migrated-notebooks-0006)
-4. [New Notebook Plan (07–24)](#4-new-notebook-plan-0724)
+3. [Already-Migrated Notebooks (00â€“06)](#3-already-migrated-notebooks-0006)
+4. [New Notebook Plan (07â€“24)](#4-new-notebook-plan-0724)
 5. [Experiment-to-Notebook Assignment Matrix](#5-experiment-to-notebook-assignment-matrix)
 6. [API Coverage Summary](#6-api-coverage-summary)
 7. [Calibration State Flow](#7-calibration-state-flow)
@@ -25,12 +25,12 @@
 ## 1. Migration Principles
 
 ### 1.1 One Experiment Per Migration Task
-Per `AGENTS.md §14`, each experiment is migrated independently. Legacy is the source of truth. Validation follows the **compile → simulate → compare** pipeline.
+Per `AGENTS.md Â§14`, each experiment is migrated independently. Legacy is the source of truth. Validation follows the **compile â†’ simulate â†’ compare** pipeline.
 
 ### 1.2 Import Discipline
-- **Sole import surface**: `from qubox.compat.notebook import ...`
+- **Sole import surface**: `from qubox.notebook import ...`
 - **Native API**: `session.exp.<category>.<method>(...)` for standard experiments
-- **Legacy proxy**: `qubox.compat.notebook.<ExperimentClass>` for classes not yet wrapped
+- **Legacy proxy**: `qubox.notebook.<ExperimentClass>` for classes not yet wrapped
 - **Banned**: Never import `qubox_v2_legacy` or `qubox.legacy.*` directly
 
 ### 1.3 Notebook Conventions
@@ -58,7 +58,7 @@ Per `AGENTS.md §14`, each experiment is migrated independently. Legacy is the s
 
 ### 2.2 Session Lifecycle
 ```python
-from qubox.compat.notebook import *
+from qubox.notebook import *
 
 session = Session.open(
     sample_id="seq_1",
@@ -97,25 +97,25 @@ save_stage_checkpoint(session, "06_coherence_experiments")
 
 ---
 
-## 3. Already-Migrated Notebooks (00–06)
+## 3. Already-Migrated Notebooks (00â€“06)
 
-These notebooks are complete and define the calibration pipeline baseline. They cover legacy experiments 1–7, 11, 20, 22, 26.
+These notebooks are complete and define the calibration pipeline baseline. They cover legacy experiments 1â€“7, 11, 20, 22, 26.
 
 | Notebook | Legacy Exp | Description | Checkpoint |
 |----------|-----------|-------------|------------|
 | `00_hardware_definition.ipynb` | Exp 1 | Bootstrap, SampleRegistry, Session.open, preflight | `00_hardware_definition` |
 | `01_mixer_calibrations.ipynb` | Exp 2 | Auto/manual mixer cal via MixerCalibrationConfig, SA helper | `01_mixer_calibrations` |
-| `02_time_of_flight.ipynb` | Exp 4 | ReadoutTrace — ADC envelope timing | `02_time_of_flight` |
+| `02_time_of_flight.ipynb` | Exp 4 | ReadoutTrace â€” ADC envelope timing | `02_time_of_flight` |
 | `03_resonator_spectroscopy.ipynb` | Exp 5 | ResonatorSpectroscopy + frequency patch | `03_resonator_spectroscopy` |
 | `04_resonator_power_chevron.ipynb` | Exp 6 | ResonatorPowerSpectroscopy (2D; no calibration applied) | `04_resonator_power_chevron` |
 | `05_qubit_spectroscopy_pulse_calibration.ipynb` | Exp 7, 11 | QubitSpectroscopy + PowerRabi + TemporalRabi, ref_r180 seed | `05_qubit_spectroscopy_pulse_calibration` |
 | `06_coherence_experiments.ipynb` | Exp 20, 22, 26 | T1, T2 Ramsey, T2 Echo w/ optional freq correction | `06_coherence_experiments` |
 
-**Remaining**: 84 experiments across Exp 3, 8–10, 12–19, 21, 23–25, 27–94.
+**Remaining**: 84 experiments across Exp 3, 8â€“10, 12â€“19, 21, 23â€“25, 27â€“94.
 
 ---
 
-## 4. New Notebook Plan (07–24)
+## 4. New Notebook Plan (07â€“24)
 
 New notebooks are organized by **experimental domain**, grouping related experiments that share calibration prerequisites and analysis patterns.
 
@@ -154,32 +154,32 @@ New notebooks are organized by **experimental domain**, grouping related experim
 
 | Legacy Exp | Experiment Title | Target Notebook | qubox API | Migration Type |
 |-----------|-----------------|----------------|-----------|---------------|
-| **Exp 1** | System Initialization | **00** (done) | `Session.open()` | ✅ Migrated |
-| **Exp 2** | Mixer Calibration | **01** (done) | `MixerCalibrationConfig` | ✅ Migrated |
+| **Exp 1** | System Initialization | **00** (done) | `Session.open()` | âœ… Migrated |
+| **Exp 2** | Mixer Calibration | **01** (done) | `MixerCalibrationConfig` | âœ… Migrated |
 | **Exp 3** | CW Diagnostics | **07** | `continuous_wave()` (legacy proxy) | Legacy proxy |
-| **Exp 4** | Time of Flight | **02** (done) | `session.exp.readout.trace()` | ✅ Migrated |
-| **Exp 5** | Resonator Spectroscopy | **03** (done) | `session.exp.resonator.spectroscopy()` | ✅ Migrated |
-| **Exp 6** | Resonator Amplitude Chevron | **04** (done) | `session.exp.resonator.power_spectroscopy()` | ✅ Migrated |
-| **Exp 7** | Qubit Spectroscopy (g→e) | **05** (done) | `session.exp.qubit.spectroscopy()` | ✅ Migrated |
-| **Exp 8** | Pulse Waveform — Constant | **08** | `register_rotations_from_ref_iq()` | Workflow |
-| **Exp 9** | Pulse Waveform — DRAG (g→e) | **08** | `drag_gaussian_pulse_waveforms()` | Workflow |
-| **Exp 10** | Pulse Waveform — DRAG (e→f) | **08** | `drag_gaussian_pulse_waveforms()` | Workflow |
-| **Exp 11** | Power Rabi (g→e) | **05** (done) | `session.exp.qubit.power_rabi()` | ✅ Migrated |
-| **Exp 12** | Power Rabi (e→f) | **09** | `PowerRabi` (proxy, e→f config) | Legacy proxy + custom |
+| **Exp 4** | Time of Flight | **02** (done) | `session.exp.readout.trace()` | âœ… Migrated |
+| **Exp 5** | Resonator Spectroscopy | **03** (done) | `session.exp.resonator.spectroscopy()` | âœ… Migrated |
+| **Exp 6** | Resonator Amplitude Chevron | **04** (done) | `session.exp.resonator.power_spectroscopy()` | âœ… Migrated |
+| **Exp 7** | Qubit Spectroscopy (gâ†’e) | **05** (done) | `session.exp.qubit.spectroscopy()` | âœ… Migrated |
+| **Exp 8** | Pulse Waveform â€” Constant | **08** | `register_rotations_from_ref_iq()` | Workflow |
+| **Exp 9** | Pulse Waveform â€” DRAG (gâ†’e) | **08** | `drag_gaussian_pulse_waveforms()` | Workflow |
+| **Exp 10** | Pulse Waveform â€” DRAG (eâ†’f) | **08** | `drag_gaussian_pulse_waveforms()` | Workflow |
+| **Exp 11** | Power Rabi (gâ†’e) | **05** (done) | `session.exp.qubit.power_rabi()` | âœ… Migrated |
+| **Exp 12** | Power Rabi (eâ†’f) | **09** | `PowerRabi` (proxy, eâ†’f config) | Legacy proxy + custom |
 | **Exp 13** | Single Qubit Sequential Rotations | **14** | Custom sequence via `session.ops` | Custom sequence |
 | **Exp 14** | IQ Blob (g/e/f) | **16** | `IQBlob` (proxy) / `session.exp.readout.iq_blobs()` | Native + proxy |
-| **Exp 15** | Qubit e→f Spectroscopy | **09** | `QubitSpectroscopyEF` (proxy) | Legacy proxy |
+| **Exp 15** | Qubit eâ†’f Spectroscopy | **09** | `QubitSpectroscopyEF` (proxy) | Legacy proxy |
 | **Exp 16** | GF Readout Sideband Spectroscopy | **10** | `readout_sideband_reset_spectroscopy()` | API method |
 | **Exp 17** | Readout-GF Sideband Power Rabi | **10** | Custom power sweep | Custom sequence |
 | **Exp 18** | GF Storage Sideband Spectroscopy | **10** | `gf_storage_sideband_spectroscopy()` | API method |
 | **Exp 19** | Storage-GF Sideband Power Rabi | **10** | Custom power sweep | Custom sequence |
-| **Exp 20** | T1 Relaxation | **06** (done) | `session.exp.qubit.t1()` | ✅ Migrated |
+| **Exp 20** | T1 Relaxation | **06** (done) | `session.exp.qubit.t1()` | âœ… Migrated |
 | **Exp 21** | T1 vs. Second Pump (2D) | **11** | Loop `T1Relaxation` + SignalCore | Workflow (ext. instrument) |
-| **Exp 22** | T2 Ramsey | **06** (done) | `session.exp.qubit.ramsey()` | ✅ Migrated |
-| **Exp 23** | T2/Detuning vs. Pump — Wide | **11** | Loop `T2Ramsey` + SignalCore | Workflow (ext. instrument) |
-| **Exp 24** | T2/Detuning vs. Pump — Symmetric | **11** | Loop `T2Ramsey` + SignalCore | Workflow (ext. instrument) |
+| **Exp 22** | T2 Ramsey | **06** (done) | `session.exp.qubit.ramsey()` | âœ… Migrated |
+| **Exp 23** | T2/Detuning vs. Pump â€” Wide | **11** | Loop `T2Ramsey` + SignalCore | Workflow (ext. instrument) |
+| **Exp 24** | T2/Detuning vs. Pump â€” Symmetric | **11** | Loop `T2Ramsey` + SignalCore | Workflow (ext. instrument) |
 | **Exp 25** | T1 from Detunings (companion) | **11** | Loop `T1Relaxation` + SignalCore | Workflow (ext. instrument) |
-| **Exp 26** | T2 Echo | **06** (done) | `session.exp.qubit.echo()` | ✅ Migrated |
+| **Exp 26** | T2 Echo | **06** (done) | `session.exp.qubit.echo()` | âœ… Migrated |
 | **Exp 27** | Time Rabi Chevron | **12** | `session.exp.qubit.time_rabi_chevron()` | Native API |
 | **Exp 28** | Power Rabi Chevron | **12** | `session.exp.qubit.power_rabi_chevron()` | Native API |
 | **Exp 29** | Ramsey Chevron | **12** | `ramsey_chevron()` | API method |
@@ -187,8 +187,8 @@ New notebooks are organized by **experimental domain**, grouping related experim
 | **Exp 31** | DRAG Calibration (Yale) | **14** | `session.exp.calibration.drag()` | Native API |
 | **Exp 32** | All-XY | **14** | `session.exp.calibration.all_xy()` | Native API |
 | **Exp 33** | Randomized Benchmarking | **14** | `RandomizedBenchmarking` (proxy) | Legacy proxy |
-| **Exp 34** | Interleaved RB — Unselective | **14** | `RandomizedBenchmarking` (IRB config) | Legacy proxy + config |
-| **Exp 35** | Interleaved RB — Selective | **14** | `RandomizedBenchmarking` (IRB config) | Legacy proxy + config |
+| **Exp 34** | Interleaved RB â€” Unselective | **14** | `RandomizedBenchmarking` (IRB config) | Legacy proxy + config |
+| **Exp 35** | Interleaved RB â€” Selective | **14** | `RandomizedBenchmarking` (IRB config) | Legacy proxy + config |
 | **Exp 36** | Qubit State Tomography | **15** | `session.exp.tomography.qubit_state()` | Native API |
 | **Exp 37** | Convention Calibration (Pulse Suite) | **15** | `qubit_state_tomography()` loop | Workflow |
 | **Exp 38** | Tomography Pulse Train | **15** | `qubit_state_tomography()` + N-loop | Workflow |
@@ -198,7 +198,7 @@ New notebooks are organized by **experimental domain**, grouping related experim
 | **Exp 42** | Readout g/e Raw Trace | **16** | `readout_ge_raw_trace()` | API method |
 | **Exp 43** | Readout g/e Discrimination | **16** | `ReadoutGEDiscrimination` (proxy) | Legacy proxy |
 | **Exp 44** | Readout g/e Integrated Trace | **16** | `readout_ge_integrated_trace()` | API method |
-| **Exp 45** | Readout Loss κ Measurement | **16** | `readout_ge_raw_trace()` + ring-down fit | Workflow |
+| **Exp 45** | Readout Loss Îº Measurement | **16** | `readout_ge_raw_trace()` + ring-down fit | Workflow |
 | **Exp 46** | Residual Photon Ramsey | **16** | `residual_photon_ramsey()` | API method |
 | **Exp 47** | Butterfly Measurement | **16** | `session.exp.readout.butterfly()` | Native API |
 | **Exp 48** | Active Qubit Reset Benchmarking | **18** | `qubit_reset_benchmark()` | API method |
@@ -218,7 +218,7 @@ New notebooks are organized by **experimental domain**, grouping related experim
 | **Exp 62** | Storage T1 Decay | **21** | `session.exp.storage.t1_decay()` | Native API |
 | **Exp 63** | Storage Chi Ramsey | **21** | `storage_chi_ramsey()` | API method |
 | **Exp 64** | Kerr Ramsey | **21** | `storage_chi_ramsey()` (variant) | API method (renamed) |
-| **Exp 65** | α=1 Displacement Calibration | **22** | `fock_resolved_spectroscopy()` sweep | Workflow |
+| **Exp 65** | Î±=1 Displacement Calibration | **22** | `fock_resolved_spectroscopy()` sweep | Workflow |
 | **Exp 66** | Fock-Resolved Spectroscopy | **22** | `fock_resolved_spectroscopy()` | API method |
 | **Exp 67** | Fock-Resolved Power Rabi | **22** | `fock_resolved_power_rabi()` | API method |
 | **Exp 68** | Fock-Resolved T1 | **22** | `fock_resolved_T1_relaxation()` | API method |
@@ -227,23 +227,23 @@ New notebooks are organized by **experimental domain**, grouping related experim
 | **Exp 71** | Quick Fock-Resolved State Tomo | **22** | `fock_resolved_state_tomography()` | API method |
 | **Exp 72** | Storage Raman 2-Tone Power Chevron | **21** | `storage_raman_two_tone_power_chevron()` | API method |
 | **Exp 73** | Number-Splitting Spectroscopy | **21** | `fock_resolved_spectroscopy()` + fit | API method (workaround) |
-| **Exp 74** | Displacement Calibration (α) | **21** | `fock_resolved_spectroscopy()` sweep | Workflow |
+| **Exp 74** | Displacement Calibration (Î±) | **21** | `fock_resolved_spectroscopy()` sweep | Workflow |
 | **Exp 75** | SQR Gate Test | **23** | `session.ops.sqr()` + tomography | Custom sequence |
-| **Exp 76** | Fock |1⟩ Prep (D-SNAP-D) | **23** | `session.ops.displacement()` + `SNAPOptimization` | Custom sequence |
-| **Exp 77** | Fock |2⟩ Prep (D-SNAP-D×3) | **23** | Multi-gate composition | Custom sequence |
+| **Exp 76** | Fock |1âŸ© Prep (D-SNAP-D) | **23** | `session.ops.displacement()` + `SNAPOptimization` | Custom sequence |
+| **Exp 77** | Fock |2âŸ© Prep (D-SNAP-DÃ—3) | **23** | Multi-gate composition | Custom sequence |
 | **Exp 78** | SNAP Rotation Opt (8-param) | **23** | `snap_optimization()` | API method |
-| **Exp 79** | SNAP Rotation Opt — Fast 2-Stage | **23** | `snap_optimization()` (multi-fidelity) | API method |
+| **Exp 79** | SNAP Rotation Opt â€” Fast 2-Stage | **23** | `snap_optimization()` (multi-fidelity) | API method |
 | **Exp 80** | SNAP Phase Optimization | **23** | Placeholder (incomplete in legacy) | Deferred |
 | **Exp 81** | Wigner Tomography | **23** | `session.exp.tomography.wigner()` | Native API |
 | **Exp 82** | Free Evolution State Tomo | **24** | `free_evolution_state_tomography()` | API method |
 | **Exp 83** | Fock-Resolved Free Evo Tomo | **24** | `free_evolution_fock_state_tomography()` | API method |
 | **Exp 84** | Context-Aware SQR Calibration | **25** | Domain workflow (context_aware_sqr) | Workflow |
 | **Exp 85** | Sequential Wigner Tomo | **26** | Loop `session.exp.tomography.wigner()` | Workflow |
-| **Exp 86** | Sequential Sim — ZZ (v1) | **26** | `sequential_simulation()` | API method |
-| **Exp 87** | Sequential Sim — X, Y, Z | **26** | `sequential_simulation()` | API method |
-| **Exp 88** | Sequential Sim — ZZ (v2) | **26** | `sequential_simulation()` | API method |
-| **Exp 89** | Sequential Sim — XX | **26** | `sequential_simulation()` | API method |
-| **Exp 90** | Sequential Sim — YY | **26** | `sequential_simulation()` | API method |
+| **Exp 86** | Sequential Sim â€” ZZ (v1) | **26** | `sequential_simulation()` | API method |
+| **Exp 87** | Sequential Sim â€” X, Y, Z | **26** | `sequential_simulation()` | API method |
+| **Exp 88** | Sequential Sim â€” ZZ (v2) | **26** | `sequential_simulation()` | API method |
+| **Exp 89** | Sequential Sim â€” XX | **26** | `sequential_simulation()` | API method |
+| **Exp 90** | Sequential Sim â€” YY | **26** | `sequential_simulation()` | API method |
 | **Exp 91** | Cluster State Evolution | **27** | Simulation + hardware comparison | Workflow (holographic_sim) |
 | **Exp 92** | Active Reset Debug | **18** | `session.ops.reset(mode="active")` | Custom sequence |
 | **Exp 93** | CASE_A Ideal Reference | **25** | Simulation-only | Workflow |
@@ -255,13 +255,13 @@ New notebooks are organized by **experimental domain**, grouping related experim
 
 | Migration Type | Count | Description |
 |---------------|-------|-------------|
-| ✅ **Already migrated** (00–06) | 10 | Complete in existing notebooks |
-| 🟢 **Native API** (`session.exp.*`) | 14 | Direct ExperimentLibrary calls |
-| 🔵 **API method** (cQED_experiments) | 28 | Available via cQED experiment API |
-| 🟡 **Legacy proxy** (compat.notebook) | 13 | Lazy-loaded from qubox_v2_legacy |
-| 🟠 **Workflow** (notebook-level) | 23 | Composition of API calls + analysis loops |
-| 🔴 **Custom sequence** | 5 | Build from ops + custom QUA programs |
-| ⚪ **Deferred** | 1 | Exp 80 — incomplete in legacy |
+| âœ… **Already migrated** (00â€“06) | 10 | Complete in existing notebooks |
+| ðŸŸ¢ **Native API** (`session.exp.*`) | 14 | Direct ExperimentLibrary calls |
+| ðŸ”µ **API method** (cQED_experiments) | 28 | Available via cQED experiment API |
+| ðŸŸ¡ **Legacy proxy** (compat.notebook) | 13 | Lazy-loaded from qubox_v2_legacy |
+| ðŸŸ  **Workflow** (notebook-level) | 23 | Composition of API calls + analysis loops |
+| ðŸ”´ **Custom sequence** | 5 | Build from ops + custom QUA programs |
+| âšª **Deferred** | 1 | Exp 80 â€” incomplete in legacy |
 | **Total** | **94** | |
 
 ---
@@ -272,49 +272,49 @@ New notebooks are organized by **experimental domain**, grouping related experim
 
 ```
 00_hardware_definition
- ↓
+ â†“
 01_mixer_calibrations
- ↓
+ â†“
 02_time_of_flight
- ↓
-03_resonator_spectroscopy ──────────────────────┐
- ↓                                               │
-04_resonator_power_chevron (advisory)            │
- ↓                                               │
-05_qubit_spectroscopy_pulse_calibration          │
- ↓                                               │
-06_coherence_experiments                         │
- ├──────────────────────────┐                    │
- │                          │                    │
- ↓                          ↓                    ↓
+ â†“
+03_resonator_spectroscopy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+ â†“                                               â”‚
+04_resonator_power_chevron (advisory)            â”‚
+ â†“                                               â”‚
+05_qubit_spectroscopy_pulse_calibration          â”‚
+ â†“                                               â”‚
+06_coherence_experiments                         â”‚
+ â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”                    â”‚
+ â”‚                          â”‚                    â”‚
+ â†“                          â†“                    â†“
 07_cw_diagnostics      08_pulse_waveform    13_dispersive_shift
-                        ↓
+                        â†“
                    09_qutrit_spectroscopy
-                    ↓
+                    â†“
                    10_sideband_transitions
-                    ↓                              
-          ┌─────────┤
-          ↓         ↓
+                    â†“                              
+          â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
+          â†“         â†“
     11_2d_pump   12_chevron
-          │
-          ↓
-    14_gate_benchmarking ─────→ 15_qubit_state_tomography
-          │
-          ↓
-    16_readout_calibration ──→ 17_bayesian_opt
-          │                 └─→ 18_active_reset
-          │                 └─→ 19_spa_optimization
-          │                 └─→ 20_readout_leakage
-          ↓
-    21_storage_cavity ──────→ 22_fock_resolved
-                                ↓
+          â”‚
+          â†“
+    14_gate_benchmarking â”€â”€â”€â”€â”€â†’ 15_qubit_state_tomography
+          â”‚
+          â†“
+    16_readout_calibration â”€â”€â†’ 17_bayesian_opt
+          â”‚                 â””â”€â†’ 18_active_reset
+          â”‚                 â””â”€â†’ 19_spa_optimization
+          â”‚                 â””â”€â†’ 20_readout_leakage
+          â†“
+    21_storage_cavity â”€â”€â”€â”€â”€â”€â†’ 22_fock_resolved
+                                â†“
                            23_quantum_state_prep
-                                ↓
+                                â†“
                            24_free_evolution_tomo
-                                ↓
+                                â†“
                            25_sqr_calibration
-                                ↓
-                           26_sequential_sim ──→ 27_cluster_state
+                                â†“
+                           26_sequential_sim â”€â”€â†’ 27_cluster_state
 ```
 
 ### 7.2 Checkpoint Dependencies
@@ -347,21 +347,21 @@ New notebooks are organized by **experimental domain**, grouping related experim
 
 ## 8. Migration Priority & Phasing
 
-### Phase 0 — Validation of Existing (Done)
-Verify notebooks 00–06 against legacy experiments. Confirm checkpoint compatibility.
+### Phase 0 â€” Validation of Existing (Done)
+Verify notebooks 00â€“06 against legacy experiments. Confirm checkpoint compatibility.
 
-### Phase 1 — Core Calibration Pipeline (High Priority)
+### Phase 1 â€” Core Calibration Pipeline (High Priority)
 Target: Complete the fundamental experiment chain that all downstream notebooks depend on.
 
 | Priority | Notebook | Rationale |
 |----------|---------|-----------|
 | P1.1 | **08** Pulse Waveform Definition | Required for selective pi pulses (Fock operations, sidebands) |
-| P1.2 | **09** Qutrit Spectroscopy | Required for e→f transitions, 3-level readout |
+| P1.2 | **09** Qutrit Spectroscopy | Required for eâ†’f transitions, 3-level readout |
 | P1.3 | **10** Sideband Transitions | Required for storage operations, cavity reset |
 | P1.4 | **13** Dispersive Shift | Required for accurate readout modeling |
 | P1.5 | **16** Readout Calibration | 14 experiments; gate-keeping for all subsequent work |
 
-### Phase 2 — Characterization & Benchmarking (Medium-High Priority)
+### Phase 2 â€” Characterization & Benchmarking (Medium-High Priority)
 Target: Complete qubit and readout characterization.
 
 | Priority | Notebook | Rationale |
@@ -372,7 +372,7 @@ Target: Complete qubit and readout characterization.
 | P2.4 | **18** Active Reset | Enables fast experiment repetition |
 | P2.5 | **19** SPA Optimization | Enables high-fidelity readout |
 
-### Phase 3 — Storage Cavity & Fock-Space (Medium Priority)
+### Phase 3 â€” Storage Cavity & Fock-Space (Medium Priority)
 Target: Enable bosonic qubit experiments.
 
 | Priority | Notebook | Rationale |
@@ -382,7 +382,7 @@ Target: Enable bosonic qubit experiments.
 | P3.3 | **23** Quantum State Preparation | SQR, SNAP, Wigner |
 | P3.4 | **24** Free Evolution Tomography | Cavity dynamics diagnostics |
 
-### Phase 4 — Advanced Workflows (Lower Priority)
+### Phase 4 â€” Advanced Workflows (Lower Priority)
 Target: Research-specific notebooks.
 
 | Priority | Notebook | Rationale |
@@ -399,7 +399,7 @@ Target: Research-specific notebooks.
 
 ## 9. Per-Notebook Specifications
 
-### 9.1 — Notebook 07: CW Diagnostics
+### 9.1 â€” Notebook 07: CW Diagnostics
 
 **File**: `07_cw_diagnostics.ipynb`
 **Legacy**: Exp 3
@@ -407,7 +407,7 @@ Target: Research-specific notebooks.
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
     continuous_wave,
 )
@@ -416,7 +416,7 @@ from qubox.compat.notebook import (
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("06_coherence_experiments")`
 2. Configure CW target elements (qubit, readout, storage)
-3. Run CW program — `continuous_wave(session, elements=[...])`
+3. Run CW program â€” `continuous_wave(session, elements=[...])`
 4. Manual SA verification (markdown instructions)
 5. `save_stage_checkpoint(session, "07_cw_diagnostics")`
 
@@ -424,15 +424,15 @@ from qubox.compat.notebook import (
 
 ---
 
-### 9.2 — Notebook 08: Pulse Waveform Definition
+### 9.2 â€” Notebook 08: Pulse Waveform Definition
 
 **File**: `08_pulse_waveform_definition.ipynb`
 **Legacy**: Exp 8, 9, 10, 59
-**Experiments**: Define constant, DRAG-Gaussian (g→e, e→f), and number-selective waveforms
+**Experiments**: Define constant, DRAG-Gaussian (gâ†’e, eâ†’f), and number-selective waveforms
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
     drag_gaussian_pulse_waveforms, kaiser_pulse_waveforms,
     register_rotations_from_ref_iq, ensure_displacement_ops,
@@ -443,27 +443,27 @@ from qubox.compat.notebook import (
 **Cells**:
 1. Session bootstrap + load checkpoint
 2. Define constant (square) pulse parameters for Fock-selective rotations
-3. Build DRAG-Gaussian waveforms for g→e transition — `drag_gaussian_pulse_waveforms()`
-4. Build DRAG-Gaussian waveforms for e→f transition
-5. Register all rotations — `register_rotations_from_ref_iq()`
-6. Set up displacement operations — `ensure_displacement_ops()`
+3. Build DRAG-Gaussian waveforms for gâ†’e transition â€” `drag_gaussian_pulse_waveforms()`
+4. Build DRAG-Gaussian waveforms for eâ†’f transition
+5. Register all rotations â€” `register_rotations_from_ref_iq()`
+6. Set up displacement operations â€” `ensure_displacement_ops()`
 7. Validate waveform shapes (plot)
-8. Apply to calibration store — `preview_or_apply_patch_ops()`
+8. Apply to calibration store â€” `preview_or_apply_patch_ops()`
 9. `save_stage_checkpoint(session, "08_pulse_waveform")`
 
 **Migration Notes**: This consolidates 4 legacy experiments into a single setup notebook. All waveform generators are already migrated (not proxied).
 
 ---
 
-### 9.3 — Notebook 09: Qutrit Spectroscopy & Calibration
+### 9.3 â€” Notebook 09: Qutrit Spectroscopy & Calibration
 
 **File**: `09_qutrit_spectroscopy_calibration.ipynb`
 **Legacy**: Exp 12, 15
-**Experiments**: e→f spectroscopy & power Rabi for qutrit operations
+**Experiments**: eâ†’f spectroscopy & power Rabi for qutrit operations
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
     QubitSpectroscopyEF, PowerRabi,
     CalibrationOrchestrator, preview_or_apply_patch_ops,
@@ -472,10 +472,10 @@ from qubox.compat.notebook import (
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("08_pulse_waveform")`
-2. Run e→f spectroscopy — `QubitSpectroscopyEF(session, ...)`
-3. Analyze & fit e→f frequency (anharmonicity)
-4. Run Power Rabi (e→f) — `PowerRabi(session, transition="ef", ...)`
-5. Fit e→f π-pulse amplitude
+2. Run eâ†’f spectroscopy â€” `QubitSpectroscopyEF(session, ...)`
+3. Analyze & fit eâ†’f frequency (anharmonicity)
+4. Run Power Rabi (eâ†’f) â€” `PowerRabi(session, transition="ef", ...)`
+5. Fit eâ†’f Ï€-pulse amplitude
 6. Apply calibration patches
 7. `save_stage_checkpoint(session, "09_qutrit")`
 
@@ -483,7 +483,7 @@ from qubox.compat.notebook import (
 
 ---
 
-### 9.4 — Notebook 10: Sideband Transitions
+### 9.4 â€” Notebook 10: Sideband Transitions
 
 **File**: `10_sideband_transitions.ipynb`
 **Legacy**: Exp 16, 17, 18, 19
@@ -491,7 +491,7 @@ from qubox.compat.notebook import (
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
     CalibrationOrchestrator, preview_or_apply_patch_ops,
 )
@@ -500,10 +500,10 @@ from qubox.compat.notebook import (
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("09_qutrit")`
-2. GF Readout sideband spectroscopy — find |f,0_r⟩ ↔ |g,1_r⟩
-3. Readout-GF sideband power Rabi — calibrate sideband π-pulse
-4. GF Storage sideband spectroscopy — find |g,1⟩ ↔ |f,0⟩
-5. Storage-GF sideband power Rabi — calibrate amplitude
+2. GF Readout sideband spectroscopy â€” find |f,0_râŸ© â†” |g,1_râŸ©
+3. Readout-GF sideband power Rabi â€” calibrate sideband Ï€-pulse
+4. GF Storage sideband spectroscopy â€” find |g,1âŸ© â†” |f,0âŸ©
+5. Storage-GF sideband power Rabi â€” calibrate amplitude
 6. Apply sideband calibration patches
 7. `save_stage_checkpoint(session, "10_sideband")`
 
@@ -511,15 +511,15 @@ from qubox.compat.notebook import (
 
 ---
 
-### 9.5 — Notebook 11: Coherence 2D Pump Sweeps
+### 9.5 â€” Notebook 11: Coherence 2D Pump Sweeps
 
 **File**: `11_coherence_2d_pump_sweeps.ipynb`
 **Legacy**: Exp 21, 23, 24, 25
-**Experiments**: T1 and T2 vs. second pump tone (power × detuning 2D sweeps)
+**Experiments**: T1 and T2 vs. second pump tone (power Ã— detuning 2D sweeps)
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
     T1Relaxation, T2Ramsey,
 )
@@ -529,19 +529,19 @@ from qubox.compat.notebook import (
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("06_coherence_experiments")`
 2. Configure SignalCore synthesizer (pump frequency, power grid)
-3. T1 vs. pump (2D sweep) — nested loop: set pump → run `T1Relaxation` → collect
+3. T1 vs. pump (2D sweep) â€” nested loop: set pump â†’ run `T1Relaxation` â†’ collect
 4. Heatmap visualization: T1(power, detuning)
-5. T2 Ramsey vs. pump — wide detuning (Exp 23)
-6. T2 Ramsey vs. pump — symmetric detuning (Exp 24)
+5. T2 Ramsey vs. pump â€” wide detuning (Exp 23)
+6. T2 Ramsey vs. pump â€” symmetric detuning (Exp 24)
 7. T1 companion measurements at same grid points (Exp 25)
 8. AC Stark shift analysis
 9. `save_stage_checkpoint(session, "11_2d_pump")`
 
-**Migration Notes**: Requires external SignalCore instrument control. This is a **workflow notebook** — no new API classes needed, just parameter grid loops over existing experiments. SignalCore communication needs a clean abstraction (currently hardcoded COM port in legacy).
+**Migration Notes**: Requires external SignalCore instrument control. This is a **workflow notebook** â€” no new API classes needed, just parameter grid loops over existing experiments. SignalCore communication needs a clean abstraction (currently hardcoded COM port in legacy).
 
 ---
 
-### 9.6 — Notebook 12: Chevron Experiments
+### 9.6 â€” Notebook 12: Chevron Experiments
 
 **File**: `12_chevron_experiments.ipynb`
 **Legacy**: Exp 27, 28, 29
@@ -549,34 +549,34 @@ from qubox.compat.notebook import (
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
 )
 ```
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("06_coherence_experiments")`
-2. Time Rabi Chevron — `session.exp.qubit.time_rabi_chevron()`
-3. Plot 2D (detuning × duration)
-4. Power Rabi Chevron — `session.exp.qubit.power_rabi_chevron()`
-5. Plot 2D (detuning × gain)
-6. Ramsey Chevron — `ramsey_chevron()` (if available as API; else custom)
-7. Plot 2D (frequency × wait)
+2. Time Rabi Chevron â€” `session.exp.qubit.time_rabi_chevron()`
+3. Plot 2D (detuning Ã— duration)
+4. Power Rabi Chevron â€” `session.exp.qubit.power_rabi_chevron()`
+5. Plot 2D (detuning Ã— gain)
+6. Ramsey Chevron â€” `ramsey_chevron()` (if available as API; else custom)
+7. Plot 2D (frequency Ã— wait)
 8. `save_stage_checkpoint(session, "12_chevron")`
 
-**Migration Notes**: Time Rabi and Power Rabi chevrons have native `session.exp.qubit.*` support. Ramsey Chevron (Exp 29) was flagged as a copy-paste duplicate in legacy — verify implementation.
+**Migration Notes**: Time Rabi and Power Rabi chevrons have native `session.exp.qubit.*` support. Ramsey Chevron (Exp 29) was flagged as a copy-paste duplicate in legacy â€” verify implementation.
 
 ---
 
-### 9.7 — Notebook 13: Dispersive Shift Measurement
+### 9.7 â€” Notebook 13: Dispersive Shift Measurement
 
 **File**: `13_dispersive_shift_measurement.ipynb`
 **Legacy**: Exp 30
-**Experiments**: Resonator spectroscopy with and without π-pulse for χ measurement
+**Experiments**: Resonator spectroscopy with and without Ï€-pulse for Ï‡ measurement
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
     ResonatorSpectroscopyX180,
     CalibrationOrchestrator, preview_or_apply_patch_ops,
@@ -586,14 +586,14 @@ from qubox.compat.notebook import (
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("06_coherence_experiments")`
 2. Run resonator spectroscopy (ground state, from notebook 03)
-3. Run resonator spectroscopy w/ x180 pre-pulse — `ResonatorSpectroscopyX180(session, ...)`
-4. Extract dispersive shift χ = f_g - f_e
-5. Update `cqed_params.json` with measured χ
+3. Run resonator spectroscopy w/ x180 pre-pulse â€” `ResonatorSpectroscopyX180(session, ...)`
+4. Extract dispersive shift Ï‡ = f_g - f_e
+5. Update `cqed_params.json` with measured Ï‡
 6. `save_stage_checkpoint(session, "13_dispersive")`
 
 ---
 
-### 9.8 — Notebook 14: Gate Calibration & Benchmarking
+### 9.8 â€” Notebook 14: Gate Calibration & Benchmarking
 
 **File**: `14_gate_calibration_benchmarking.ipynb`
 **Legacy**: Exp 13, 31, 32, 33, 34, 35
@@ -601,7 +601,7 @@ from qubox.compat.notebook import (
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
     RandomizedBenchmarking,
     CalibrationOrchestrator, preview_or_apply_patch_ops,
@@ -610,15 +610,15 @@ from qubox.compat.notebook import (
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("06_coherence_experiments")`
-2. Single-qubit sequential rotations — compose via `session.ops` (Exp 13)
-3. DRAG calibration — `session.exp.calibration.drag()` (Exp 31)
+2. Single-qubit sequential rotations â€” compose via `session.ops` (Exp 13)
+3. DRAG calibration â€” `session.exp.calibration.drag()` (Exp 31)
 4. Apply DRAG coefficient to calibration store
-5. All-XY — `session.exp.calibration.all_xy()` (Exp 32)
+5. All-XY â€” `session.exp.calibration.all_xy()` (Exp 32)
 6. Analyze all-XY deviation pattern
-7. Standard RB — `RandomizedBenchmarking(session, ...)` (Exp 33)
+7. Standard RB â€” `RandomizedBenchmarking(session, ...)` (Exp 33)
 8. Report: average Clifford gate fidelity
-9. Interleaved RB — unselective pulses (Exp 34) — configure `RandomizedBenchmarking` with interleaving gate
-10. Interleaved RB — selective pulses (Exp 35)
+9. Interleaved RB â€” unselective pulses (Exp 34) â€” configure `RandomizedBenchmarking` with interleaving gate
+10. Interleaved RB â€” selective pulses (Exp 35)
 11. Report: per-gate fidelities
 12. `save_stage_checkpoint(session, "14_gate_benchmarking")`
 
@@ -626,7 +626,7 @@ from qubox.compat.notebook import (
 
 ---
 
-### 9.9 — Notebook 15: Qubit State Tomography
+### 9.9 â€” Notebook 15: Qubit State Tomography
 
 **File**: `15_qubit_state_tomography.ipynb`
 **Legacy**: Exp 36, 37, 38
@@ -634,32 +634,32 @@ from qubox.compat.notebook import (
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
 )
 ```
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("14_gate_benchmarking")`
-2. Single-state tomography — `session.exp.tomography.qubit_state()` (Exp 36)
+2. Single-state tomography â€” `session.exp.tomography.qubit_state()` (Exp 36)
 3. Plot Bloch vector
-4. Convention calibration — loop named pulses through tomography (Exp 37)
+4. Convention calibration â€” loop named pulses through tomography (Exp 37)
 5. Cross-validate named pulse vs. parametric `QubitRotation` angles
-6. Pulse train error amplification — sweep N repetitions (Exp 38)
+6. Pulse train error amplification â€” sweep N repetitions (Exp 38)
 7. Plot accumulated error vs. N
 8. `save_stage_checkpoint(session, "15_tomography")`
 
 ---
 
-### 9.10 — Notebook 16: Readout Calibration
+### 9.10 â€” Notebook 16: Readout Calibration
 
 **File**: `16_readout_calibration.ipynb`
 **Legacy**: Exp 14, 39, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 53, 54
-**Experiments**: Comprehensive readout pipeline — 14 experiments
+**Experiments**: Comprehensive readout pipeline â€” 14 experiments
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
     IQBlob, ReadoutGEDiscrimination, ReadoutWeightsOptimization,
     CalibrateReadoutFull, ReadoutButterflyMeasurement,
@@ -669,21 +669,21 @@ from qubox.compat.notebook import (
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("06_coherence_experiments")`
-2. **IQ Blob (g/e/f)** — `IQBlob(session, ...)` → 3-state scatter (Exp 14)
-3. **CLEAR readout registration** — build CLEAR waveform, register (Exp 39)
-4. **Square readout baseline** — `readout_ge_integrated_trace()` (Exp 40)
-5. **CLEAR readout test** — same with CLEAR waveform (Exp 41)
-6. **Readout g/e raw trace** — `readout_ge_raw_trace()` (Exp 42)
-7. **Readout g/e discrimination** — `ReadoutGEDiscrimination(session, ...)` (Exp 43)
-8. **Readout g/e integrated trace** — time-resolved IQ (Exp 44)
-9. **Readout κ measurement** — ring-down fit from raw trace (Exp 45)
-10. **Residual photon Ramsey** — `residual_photon_ramsey()` (Exp 46)
-11. **Butterfly measurement** — `session.exp.readout.butterfly()` (Exp 47)
-12. **Readout amp & length optimization** — `readout_amp_len_opt()` (Exp 49)
-13. **Readout frequency optimization** — `readout_frequency_optimization()` (Exp 50)
-14. **CLEAR variant comparison** (Int. Trace + Butterfly) — side-by-side (Exp 51)
-15. **Readout weight optimization** — `ReadoutWeightsOptimization(session, ...)` (Exp 53)
-16. **Readout full calibration** — `CalibrateReadoutFull(session, ...)` (Exp 54)
+2. **IQ Blob (g/e/f)** â€” `IQBlob(session, ...)` â†’ 3-state scatter (Exp 14)
+3. **CLEAR readout registration** â€” build CLEAR waveform, register (Exp 39)
+4. **Square readout baseline** â€” `readout_ge_integrated_trace()` (Exp 40)
+5. **CLEAR readout test** â€” same with CLEAR waveform (Exp 41)
+6. **Readout g/e raw trace** â€” `readout_ge_raw_trace()` (Exp 42)
+7. **Readout g/e discrimination** â€” `ReadoutGEDiscrimination(session, ...)` (Exp 43)
+8. **Readout g/e integrated trace** â€” time-resolved IQ (Exp 44)
+9. **Readout Îº measurement** â€” ring-down fit from raw trace (Exp 45)
+10. **Residual photon Ramsey** â€” `residual_photon_ramsey()` (Exp 46)
+11. **Butterfly measurement** â€” `session.exp.readout.butterfly()` (Exp 47)
+12. **Readout amp & length optimization** â€” `readout_amp_len_opt()` (Exp 49)
+13. **Readout frequency optimization** â€” `readout_frequency_optimization()` (Exp 50)
+14. **CLEAR variant comparison** (Int. Trace + Butterfly) â€” side-by-side (Exp 51)
+15. **Readout weight optimization** â€” `ReadoutWeightsOptimization(session, ...)` (Exp 53)
+16. **Readout full calibration** â€” `CalibrateReadoutFull(session, ...)` (Exp 54)
 17. Apply all readout calibration patches
 18. `save_stage_checkpoint(session, "16_readout")`
 
@@ -691,15 +691,15 @@ from qubox.compat.notebook import (
 
 ---
 
-### 9.11 — Notebook 17: Readout Bayesian Optimization
+### 9.11 â€” Notebook 17: Readout Bayesian Optimization
 
 **File**: `17_readout_bayesian_optimization.ipynb`
 **Legacy**: Exp 52
-**Experiments**: Automated Bayesian optimization of readout F×Q
+**Experiments**: Automated Bayesian optimization of readout FÃ—Q
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
 )
 import ipywidgets
@@ -708,44 +708,44 @@ from skopt import gp_minimize  # scikit-optimize
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("16_readout")`
-2. Define objective function: F×Q from butterfly + discrimination
+2. Define objective function: FÃ—Q from butterfly + discrimination
 3. Define parameter bounds (amplitude, length, frequency, SPA power)
 4. Interactive widget: configure Bayesian optimization parameters
-5. Run optimization loop — `gp_minimize(objective, bounds, n_calls=...)`
+5. Run optimization loop â€” `gp_minimize(objective, bounds, n_calls=...)`
 6. Plot convergence and parameter landscape
 7. Apply best parameters
 8. `save_stage_checkpoint(session, "17_bayesian_opt")`
 
-**Migration Notes**: External dependency on `scikit-optimize` and `ipywidgets`. Pure workflow notebook — no new API classes.
+**Migration Notes**: External dependency on `scikit-optimize` and `ipywidgets`. Pure workflow notebook â€” no new API classes.
 
 ---
 
-### 9.12 — Notebook 18: Active Reset Benchmarking
+### 9.12 â€” Notebook 18: Active Reset Benchmarking
 
 **File**: `18_active_reset_benchmarking.ipynb`
 **Legacy**: Exp 48, 55, 92
-**Experiments**: Active qubit reset protocol — QUA-level feedback + benchmarking
+**Experiments**: Active qubit reset protocol â€” QUA-level feedback + benchmarking
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
 )
 ```
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("16_readout")`
-2. Active reset benchmarking — `qubit_reset_benchmark()` (Exp 48)
+2. Active reset benchmarking â€” `qubit_reset_benchmark()` (Exp 48)
 3. Plot: reset fidelity vs. number of mid-circuit measurements
-4. Qubit reset benchmark — `qubit_reset_benchmark()` variant (Exp 55)
+4. Qubit reset benchmark â€” `qubit_reset_benchmark()` variant (Exp 55)
 5. Compare passive vs. active reset residual excitation
-6. Debug active reset QUA program (Exp 92) — `session.ops.reset(mode="active", ...)`
+6. Debug active reset QUA program (Exp 92) â€” `session.ops.reset(mode="active", ...)`
 7. Validate conditional feedback timing
 8. `save_stage_checkpoint(session, "18_active_reset")`
 
 ---
 
-### 9.13 — Notebook 19: SPA Optimization
+### 9.13 â€” Notebook 19: SPA Optimization
 
 **File**: `19_spa_optimization.ipynb`
 **Legacy**: Exp 56, 57
@@ -753,7 +753,7 @@ from qubox.compat.notebook import (
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
     SPAFluxOptimization, SPAPumpFrequencyOptimization,
 )
@@ -761,10 +761,10 @@ from qubox.compat.notebook import (
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("16_readout")`
-2. SPA DC flux tune-up — `SPAFluxOptimization(session, ...)` (Exp 56)
+2. SPA DC flux tune-up â€” `SPAFluxOptimization(session, ...)` (Exp 56)
 3. Find & lock optimal DC bias point
-4. SPA pump power/frequency optimization — `SPAPumpFrequencyOptimization(session, ...)` (Exp 57)
-5. 2D sweep: pump frequency × pump power
+4. SPA pump power/frequency optimization â€” `SPAPumpFrequencyOptimization(session, ...)` (Exp 57)
+5. 2D sweep: pump frequency Ã— pump power
 6. Apply optimal SPA parameters
 7. `save_stage_checkpoint(session, "19_spa")`
 
@@ -772,7 +772,7 @@ from qubox.compat.notebook import (
 
 ---
 
-### 9.14 — Notebook 20: Readout Leakage Benchmarking
+### 9.14 â€” Notebook 20: Readout Leakage Benchmarking
 
 **File**: `20_readout_leakage_benchmarking.ipynb`
 **Legacy**: Exp 58
@@ -780,29 +780,29 @@ from qubox.compat.notebook import (
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
 )
 ```
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("16_readout")`
-2. Run leakage benchmarking — `qubit_readout_leakage_benchmarking()`
+2. Run leakage benchmarking â€” `qubit_readout_leakage_benchmarking()`
 3. Correlate repeated measurement outcomes to bit patterns
 4. Plot: leakage probability vs. measurement count
 5. `save_stage_checkpoint(session, "20_leakage")`
 
 ---
 
-### 9.15 — Notebook 21: Storage Cavity Characterization
+### 9.15 â€” Notebook 21: Storage Cavity Characterization
 
 **File**: `21_storage_cavity_characterization.ipynb`
 **Legacy**: Exp 60, 61, 62, 63, 64, 72, 73, 74
-**Experiments**: Storage cavity spectroscopy, Ramsey, T1, χ, Kerr, Raman, number splitting, displacement
+**Experiments**: Storage cavity spectroscopy, Ramsey, T1, Ï‡, Kerr, Raman, number splitting, displacement
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
     StorageSpectroscopy, NumSplittingSpectroscopy, StorageChiRamsey,
     CalibrationOrchestrator, preview_or_apply_patch_ops,
@@ -811,32 +811,32 @@ from qubox.compat.notebook import (
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("16_readout")`
-2. **Cavity spectroscopy** — `session.exp.storage.spectroscopy()` (Exp 60)
+2. **Cavity spectroscopy** â€” `session.exp.storage.spectroscopy()` (Exp 60)
 3. Fit cavity resonance, update cqed_params
-4. **Storage Ramsey** — `storage_ramsey()` (Exp 61)
+4. **Storage Ramsey** â€” `storage_ramsey()` (Exp 61)
 5. Extract storage T2
-6. **Storage T1** — `session.exp.storage.t1_decay()` (Exp 62)
-7. **Storage Chi Ramsey** — `storage_chi_ramsey()` (Exp 63)
-8. Extract dispersive shift χ_s
-9. **Kerr Ramsey** — `storage_chi_ramsey()` variant w/ 2D amplitude sweep (Exp 64)
+6. **Storage T1** â€” `session.exp.storage.t1_decay()` (Exp 62)
+7. **Storage Chi Ramsey** â€” `storage_chi_ramsey()` (Exp 63)
+8. Extract dispersive shift Ï‡_s
+9. **Kerr Ramsey** â€” `storage_chi_ramsey()` variant w/ 2D amplitude sweep (Exp 64)
 10. Extract self-Kerr K
-11. **Raman two-tone power chevron** — `storage_raman_two_tone_power_chevron()` (Exp 72)
-12. **Number-splitting spectroscopy** — `fock_resolved_spectroscopy()` + multi-peak fit (Exp 73)
-13. **Displacement calibration (α)** — sweep DAC amplitude, fit Poisson distribution (Exp 74)
-14. Apply cavity calibration patches (f_cav, χ_s, K, displacement_gain)
+11. **Raman two-tone power chevron** â€” `storage_raman_two_tone_power_chevron()` (Exp 72)
+12. **Number-splitting spectroscopy** â€” `fock_resolved_spectroscopy()` + multi-peak fit (Exp 73)
+13. **Displacement calibration (Î±)** â€” sweep DAC amplitude, fit Poisson distribution (Exp 74)
+14. Apply cavity calibration patches (f_cav, Ï‡_s, K, displacement_gain)
 15. `save_stage_checkpoint(session, "21_storage")`
 
 ---
 
-### 9.16 — Notebook 22: Fock-Resolved Experiments
+### 9.16 â€” Notebook 22: Fock-Resolved Experiments
 
 **File**: `22_fock_resolved_experiments.ipynb`
 **Legacy**: Exp 65, 66, 67, 68, 69, 70, 71
-**Experiments**: Per-Fock-level characterization — spectroscopy, Rabi, T1, T2, affine cal, tomography
+**Experiments**: Per-Fock-level characterization â€” spectroscopy, Rabi, T1, T2, affine cal, tomography
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
     FockResolvedSpectroscopy, FockResolvedT1, FockResolvedRamsey,
     FockResolvedPowerRabi,
@@ -846,25 +846,25 @@ from qubox.compat.notebook import (
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("21_storage")`
-2. **α=1 displacement calibration** — sweep gain, fit ⟨n⟩=1 (Exp 65)
-3. **Fock-resolved spectroscopy** — `fock_resolved_spectroscopy()` (Exp 66)
+2. **Î±=1 displacement calibration** â€” sweep gain, fit âŸ¨nâŸ©=1 (Exp 65)
+3. **Fock-resolved spectroscopy** â€” `fock_resolved_spectroscopy()` (Exp 66)
 4. Fit per-Fock qubit frequencies
-5. **Fock-resolved power Rabi** — `fock_resolved_power_rabi()` (Exp 67)
-6. Calibrate selective π-pulse gains per |n⟩
-7. **Fock-resolved T1** — `fock_resolved_T1_relaxation()` (Exp 68)
+5. **Fock-resolved power Rabi** â€” `fock_resolved_power_rabi()` (Exp 67)
+6. Calibrate selective Ï€-pulse gains per |nâŸ©
+7. **Fock-resolved T1** â€” `fock_resolved_T1_relaxation()` (Exp 68)
 8. Extract per-Fock T1, fit intrinsic cavity T1
-9. **Fock-resolved T2 Ramsey** — `fock_resolved_qb_ramsey()` (Exp 69)
+9. **Fock-resolved T2 Ramsey** â€” `fock_resolved_qb_ramsey()` (Exp 69)
 10. Calibrate number-split frequencies
-11. **Fock-resolved affine readout calibration** — collect → fit affine model (Exp 70)
+11. **Fock-resolved affine readout calibration** â€” collect â†’ fit affine model (Exp 70)
 12. Build per-Fock readout-error correction matrix
-13. **Quick Fock-resolved state tomography** — `fock_resolved_state_tomography()` (Exp 71)
+13. **Quick Fock-resolved state tomography** â€” `fock_resolved_state_tomography()` (Exp 71)
 14. Validate corrected Bloch vectors
 15. Apply Fock-resolved calibration patches
 16. `save_stage_checkpoint(session, "22_fock_resolved")`
 
 ---
 
-### 9.17 — Notebook 23: Quantum State Preparation
+### 9.17 â€” Notebook 23: Quantum State Preparation
 
 **File**: `23_quantum_state_preparation.ipynb`
 **Legacy**: Exp 75, 76, 77, 78, 79, 80, 81
@@ -872,7 +872,7 @@ from qubox.compat.notebook import (
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
     SNAPOptimization,
 )
@@ -880,21 +880,21 @@ from qubox.compat.notebook import (
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("22_fock_resolved")`
-2. **SQR gate test** — build sequence via `session.ops.sqr()` + tomography (Exp 75)
+2. **SQR gate test** â€” build sequence via `session.ops.sqr()` + tomography (Exp 75)
 3. Visualize SQR pulse and Fock-space rotation
-4. **Fock |1⟩ prep (D-SNAP-D)** — compose: `displacement → sqr/snap → displacement` (Exp 76)
+4. **Fock |1âŸ© prep (D-SNAP-D)** â€” compose: `displacement â†’ sqr/snap â†’ displacement` (Exp 76)
 5. Verify via Fock-resolved tomography
-6. **Fock |2⟩ prep (D-SNAP-D-SNAP-D-SNAP)** — 6-gate sequence (Exp 77)
-7. **SNAP rotation optimization (8-param Bayesian)** — `snap_optimization()` (Exp 78)
-8. **SNAP rotation optimization (fast 2-stage)** — multi-fidelity (Exp 79)
-9. **SNAP phase optimization** — Exp 80 (deferred/placeholder — mark as TODO)
-10. **Wigner tomography** — `session.exp.tomography.wigner()` (Exp 81)
+6. **Fock |2âŸ© prep (D-SNAP-D-SNAP-D-SNAP)** â€” 6-gate sequence (Exp 77)
+7. **SNAP rotation optimization (8-param Bayesian)** â€” `snap_optimization()` (Exp 78)
+8. **SNAP rotation optimization (fast 2-stage)** â€” multi-fidelity (Exp 79)
+9. **SNAP phase optimization** â€” Exp 80 (deferred/placeholder â€” mark as TODO)
+10. **Wigner tomography** â€” `session.exp.tomography.wigner()` (Exp 81)
 11. Plot Wigner function
 12. `save_stage_checkpoint(session, "23_state_prep")`
 
 ---
 
-### 9.18 — Notebook 24: Free Evolution Tomography
+### 9.18 â€” Notebook 24: Free Evolution Tomography
 
 **File**: `24_free_evolution_tomography.ipynb`
 **Legacy**: Exp 82, 83
@@ -902,24 +902,24 @@ from qubox.compat.notebook import (
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
 )
 ```
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("22_fock_resolved")`
-2. **Free evolution state tomography** — `free_evolution_state_tomography()` (Exp 82)
+2. **Free evolution state tomography** â€” `free_evolution_state_tomography()` (Exp 82)
 3. Plot: Bloch vector components vs. time
 4. Fit: extract precession frequencies and decay rates
-5. **Fock-resolved free evolution** — `free_evolution_fock_state_tomography()` (Exp 83)
+5. **Fock-resolved free evolution** â€” `free_evolution_fock_state_tomography()` (Exp 83)
 6. Plot: per-Fock frequency trajectories
-7. Extract χ-dependent frequencies, compare to calibrated values
+7. Extract Ï‡-dependent frequencies, compare to calibrated values
 8. `save_stage_checkpoint(session, "24_free_evo_tomo")`
 
 ---
 
-### 9.19 — Notebook 25: Context-Aware SQR Calibration
+### 9.19 â€” Notebook 25: Context-Aware SQR Calibration
 
 **File**: `25_context_aware_sqr_calibration.ipynb`
 **Legacy**: Exp 84, 93, 94
@@ -927,7 +927,7 @@ from qubox.compat.notebook import (
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
 )
 # Domain-specific imports from calibrations/
@@ -940,10 +940,10 @@ from calibrations.context_aware_sqr_workflow import (
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("23_state_prep")`
 2. Load decomposition manifest from `decomposition/` directory
-3. **CASE_A ideal reference computation** — simulation baseline (Exp 93)
-4. **Context-aware SQR workflow** — prefix tomography, compare to ideal (Exp 84)
+3. **CASE_A ideal reference computation** â€” simulation baseline (Exp 93)
+4. **Context-aware SQR workflow** â€” prefix tomography, compare to ideal (Exp 84)
 5. Analyze systematic errors
-6. **SQR artifact single-gate swap** — transfer simulator-optimized gate to hardware (Exp 94)
+6. **SQR artifact single-gate swap** â€” transfer simulator-optimized gate to hardware (Exp 94)
 7. Validate via decomposition patching
 8. `save_stage_checkpoint(session, "25_sqr_calibration")`
 
@@ -951,7 +951,7 @@ from calibrations.context_aware_sqr_workflow import (
 
 ---
 
-### 9.20 — Notebook 26: Sequential Simulation Benchmarking
+### 9.20 â€” Notebook 26: Sequential Simulation Benchmarking
 
 **File**: `26_sequential_simulation_benchmarking.ipynb`
 **Legacy**: Exp 85, 86, 87, 88, 89, 90
@@ -959,7 +959,7 @@ from calibrations.context_aware_sqr_workflow import (
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
 )
 # Holographic sim imports
@@ -968,21 +968,21 @@ from holographic_sim_updated import sequential_simulator  # or equivalent
 
 **Cells**:
 1. Session bootstrap + `load_stage_checkpoint("23_state_prep")`
-2. **Sequential Wigner tomography** — loop decomposition + `session.exp.tomography.wigner()` (Exp 85)
+2. **Sequential Wigner tomography** â€” loop decomposition + `session.exp.tomography.wigner()` (Exp 85)
 3. Visualize cavity state evolution through gate sequence
-4. **Sequential simulation — ZZ v1** — `sequential_simulation()` (Exp 86)
-5. **Sequential simulation — X, Y, Z** — `sequential_simulation()` variations (Exp 87)
-6. **Sequential simulation — ZZ v2** — error decomposition analysis (Exp 88)
-7. **Sequential simulation — XX** (Exp 89)
-8. **Sequential simulation — YY** (Exp 90)
+4. **Sequential simulation â€” ZZ v1** â€” `sequential_simulation()` (Exp 86)
+5. **Sequential simulation â€” X, Y, Z** â€” `sequential_simulation()` variations (Exp 87)
+6. **Sequential simulation â€” ZZ v2** â€” error decomposition analysis (Exp 88)
+7. **Sequential simulation â€” XX** (Exp 89)
+8. **Sequential simulation â€” YY** (Exp 90)
 9. Compare hardware vs. simulation predictions across all correlators
 10. `save_stage_checkpoint(session, "26_sequential_sim")`
 
-**Migration Notes**: Depends on `holographic_sim_updated/` package. The `sequential_simulation()` function is parametrized by gate type — a single experiment with different configurations.
+**Migration Notes**: Depends on `holographic_sim_updated/` package. The `sequential_simulation()` function is parametrized by gate type â€” a single experiment with different configurations.
 
 ---
 
-### 9.21 — Notebook 27: Cluster State Evolution
+### 9.21 â€” Notebook 27: Cluster State Evolution
 
 **File**: `27_cluster_state_evolution.ipynb`
 **Legacy**: Exp 91
@@ -990,7 +990,7 @@ from holographic_sim_updated import sequential_simulator  # or equivalent
 
 **Imports**:
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     Session, load_stage_checkpoint, save_stage_checkpoint,
 )
 from holographic_sim_updated import cluster_state_evolution  # or equivalent
@@ -1015,8 +1015,8 @@ from holographic_sim_updated import cluster_state_evolution  # or equivalent
 | Interleaved RB (Exp 34, 35) | `RandomizedBenchmarking` proxy with IRB config | `session.exp.calibration.interleaved_rb()` |
 | Number-Splitting Spectroscopy (Exp 73) | `fock_resolved_spectroscopy()` + multi-peak fit | `session.exp.storage.num_splitting()` |
 | Kerr Ramsey (Exp 64) | `storage_chi_ramsey()` with 2D amplitude sweep | `session.exp.storage.kerr_ramsey()` or parameter overload |
-| e→f Power Rabi (Exp 12) | `PowerRabi` proxy with `transition="ef"` | `session.exp.qubit.power_rabi(transition="ef")` |
-| e→f Spectroscopy (Exp 15) | `QubitSpectroscopyEF` proxy | `session.exp.qubit.spectroscopy_ef()` |
+| eâ†’f Power Rabi (Exp 12) | `PowerRabi` proxy with `transition="ef"` | `session.exp.qubit.power_rabi(transition="ef")` |
+| eâ†’f Spectroscopy (Exp 15) | `QubitSpectroscopyEF` proxy | `session.exp.qubit.spectroscopy_ef()` |
 
 ### 10.2 External Instrument Dependencies
 
@@ -1045,7 +1045,7 @@ from holographic_sim_updated import cluster_state_evolution  # or equivalent
 
 ## 11. Validation Protocol
 
-Per `AGENTS.md §14`, each migrated experiment must pass:
+Per `AGENTS.md Â§14`, each migrated experiment must pass:
 
 ### 11.1 Compile Validation
 ```python
@@ -1085,38 +1085,38 @@ assert np.allclose(new_result.data, legacy_result.data, atol=tolerance)
 
 ```
 E:\qubox\notebooks\
-├── 00_hardware_definition.ipynb         ← existing
-├── 01_mixer_calibrations.ipynb          ← existing
-├── 02_time_of_flight.ipynb              ← existing
-├── 03_resonator_spectroscopy.ipynb      ← existing
-├── 04_resonator_power_chevron.ipynb     ← existing
-├── 05_qubit_spectroscopy_pulse_calibration.ipynb  ← existing
-├── 06_coherence_experiments.ipynb       ← existing
-├── 07_cw_diagnostics.ipynb              ← NEW
-├── 08_pulse_waveform_definition.ipynb   ← NEW
-├── 09_qutrit_spectroscopy_calibration.ipynb  ← NEW
-├── 10_sideband_transitions.ipynb        ← NEW
-├── 11_coherence_2d_pump_sweeps.ipynb    ← NEW
-├── 12_chevron_experiments.ipynb         ← NEW
-├── 13_dispersive_shift_measurement.ipynb ← NEW
-├── 14_gate_calibration_benchmarking.ipynb ← NEW
-├── 15_qubit_state_tomography.ipynb      ← NEW
-├── 16_readout_calibration.ipynb         ← NEW
-├── 17_readout_bayesian_optimization.ipynb ← NEW
-├── 18_active_reset_benchmarking.ipynb   ← NEW
-├── 19_spa_optimization.ipynb            ← NEW
-├── 20_readout_leakage_benchmarking.ipynb ← NEW
-├── 21_storage_cavity_characterization.ipynb ← NEW
-├── 22_fock_resolved_experiments.ipynb   ← NEW
-├── 23_quantum_state_preparation.ipynb   ← NEW
-├── 24_free_evolution_tomography.ipynb   ← NEW
-├── 25_context_aware_sqr_calibration.ipynb ← NEW
-├── 26_sequential_simulation_benchmarking.ipynb ← NEW
-├── 27_cluster_state_evolution.ipynb     ← NEW
-├── helper/                              ← shared utilities
-├── post_cavity_experiment_context.ipynb  ← reference (keep)
-├── post_cavity_experiment_quantum_circuit.ipynb ← reference (keep)
-└── migration_plan.md                    ← this document
+â”œâ”€â”€ 00_hardware_definition.ipynb         â† existing
+â”œâ”€â”€ 01_mixer_calibrations.ipynb          â† existing
+â”œâ”€â”€ 02_time_of_flight.ipynb              â† existing
+â”œâ”€â”€ 03_resonator_spectroscopy.ipynb      â† existing
+â”œâ”€â”€ 04_resonator_power_chevron.ipynb     â† existing
+â”œâ”€â”€ 05_qubit_spectroscopy_pulse_calibration.ipynb  â† existing
+â”œâ”€â”€ 06_coherence_experiments.ipynb       â† existing
+â”œâ”€â”€ 07_cw_diagnostics.ipynb              â† NEW
+â”œâ”€â”€ 08_pulse_waveform_definition.ipynb   â† NEW
+â”œâ”€â”€ 09_qutrit_spectroscopy_calibration.ipynb  â† NEW
+â”œâ”€â”€ 10_sideband_transitions.ipynb        â† NEW
+â”œâ”€â”€ 11_coherence_2d_pump_sweeps.ipynb    â† NEW
+â”œâ”€â”€ 12_chevron_experiments.ipynb         â† NEW
+â”œâ”€â”€ 13_dispersive_shift_measurement.ipynb â† NEW
+â”œâ”€â”€ 14_gate_calibration_benchmarking.ipynb â† NEW
+â”œâ”€â”€ 15_qubit_state_tomography.ipynb      â† NEW
+â”œâ”€â”€ 16_readout_calibration.ipynb         â† NEW
+â”œâ”€â”€ 17_readout_bayesian_optimization.ipynb â† NEW
+â”œâ”€â”€ 18_active_reset_benchmarking.ipynb   â† NEW
+â”œâ”€â”€ 19_spa_optimization.ipynb            â† NEW
+â”œâ”€â”€ 20_readout_leakage_benchmarking.ipynb â† NEW
+â”œâ”€â”€ 21_storage_cavity_characterization.ipynb â† NEW
+â”œâ”€â”€ 22_fock_resolved_experiments.ipynb   â† NEW
+â”œâ”€â”€ 23_quantum_state_preparation.ipynb   â† NEW
+â”œâ”€â”€ 24_free_evolution_tomography.ipynb   â† NEW
+â”œâ”€â”€ 25_context_aware_sqr_calibration.ipynb â† NEW
+â”œâ”€â”€ 26_sequential_simulation_benchmarking.ipynb â† NEW
+â”œâ”€â”€ 27_cluster_state_evolution.ipynb     â† NEW
+â”œâ”€â”€ helper/                              â† shared utilities
+â”œâ”€â”€ post_cavity_experiment_context.ipynb  â† reference (keep)
+â”œâ”€â”€ post_cavity_experiment_quantum_circuit.ipynb â† reference (keep)
+â””â”€â”€ migration_plan.md                    â† this document
 ```
 
 ## Appendix B: Notebook Template
@@ -1125,7 +1125,7 @@ Every new notebook follows this skeleton:
 
 ```python
 # Cell 1: Imports & Bootstrap
-from qubox.compat.notebook import *
+from qubox.notebook import *
 
 # Cell 2: Session Open
 session = Session.open(sample_id="...", cooldown_id="...", config_dir="...")
@@ -1145,24 +1145,24 @@ Use this table to track progress as experiments are migrated:
 
 | Notebook | Status | Date Created | Notes |
 |----------|--------|-------------|-------|
-| 07 | ✅ Created | 2025-07 | CW diagnostics — SA verification |
-| 08 | ✅ Created | 2025-07 | Pulse waveforms (const, DRAG, displacement) |
-| 09 | ✅ Created | 2025-07 | Qutrit spectroscopy + e→f Rabi |
-| 10 | ✅ Created | 2025-07 | Sideband transitions (GF spec + Rabi) |
-| 11 | ✅ Created | 2025-07 | 2D pump sweeps (T1/T2 vs SignalCore) |
-| 12 | ✅ Created | 2025-07 | Chevron experiments (Time/Power Rabi, Ramsey) |
-| 13 | ✅ Created | 2025-07 | Dispersive shift χ measurement |
-| 14 | ✅ Created | 2025-07 | Gate cal + benchmarking (DRAG, AllXY, RB, IRB) |
-| 15 | ✅ Created | 2025-07 | Qubit state + Wigner tomography |
-| 16 | ✅ Created | 2025-07 | Full readout calibration (14 experiments) |
-| 17 | ✅ Created | 2025-07 | Bayesian readout optimization (skopt) |
-| 18 | ✅ Created | 2025-07 | Active reset + pulse-train calibration |
-| 19 | ✅ Created | 2025-07 | SPA optimization (flux, pump, discrim, IQ) |
-| 20 | ✅ Created | 2025-07 | Readout leakage benchmarking |
-| 21 | ✅ Created | 2025-07 | Storage cavity characterization (5 experiments) |
-| 22 | ✅ Created | 2025-07 | Fock-resolved Ramsey, Power Rabi, cavity T2 |
-| 23 | ✅ Created | 2025-07 | Quantum state prep (SNAP, ECD, GRAPE, cat) |
-| 24 | ✅ Created | 2025-07 | Free evolution + time-resolved Wigner tomo |
-| 25 | ✅ Created | 2025-07 | Context-aware SQR calibration pipeline |
-| 26 | ✅ Created | 2025-07 | Sequential Trotter simulation |
-| 27 | ✅ Created | 2025-07 | Cluster state evolution + Wigner verification |
+| 07 | âœ… Created | 2025-07 | CW diagnostics â€” SA verification |
+| 08 | âœ… Created | 2025-07 | Pulse waveforms (const, DRAG, displacement) |
+| 09 | âœ… Created | 2025-07 | Qutrit spectroscopy + eâ†’f Rabi |
+| 10 | âœ… Created | 2025-07 | Sideband transitions (GF spec + Rabi) |
+| 11 | âœ… Created | 2025-07 | 2D pump sweeps (T1/T2 vs SignalCore) |
+| 12 | âœ… Created | 2025-07 | Chevron experiments (Time/Power Rabi, Ramsey) |
+| 13 | âœ… Created | 2025-07 | Dispersive shift Ï‡ measurement |
+| 14 | âœ… Created | 2025-07 | Gate cal + benchmarking (DRAG, AllXY, RB, IRB) |
+| 15 | âœ… Created | 2025-07 | Qubit state + Wigner tomography |
+| 16 | âœ… Created | 2025-07 | Full readout calibration (14 experiments) |
+| 17 | âœ… Created | 2025-07 | Bayesian readout optimization (skopt) |
+| 18 | âœ… Created | 2025-07 | Active reset + pulse-train calibration |
+| 19 | âœ… Created | 2025-07 | SPA optimization (flux, pump, discrim, IQ) |
+| 20 | âœ… Created | 2025-07 | Readout leakage benchmarking |
+| 21 | âœ… Created | 2025-07 | Storage cavity characterization (5 experiments) |
+| 22 | âœ… Created | 2025-07 | Fock-resolved Ramsey, Power Rabi, cavity T2 |
+| 23 | âœ… Created | 2025-07 | Quantum state prep (SNAP, ECD, GRAPE, cat) |
+| 24 | âœ… Created | 2025-07 | Free evolution + time-resolved Wigner tomo |
+| 25 | âœ… Created | 2025-07 | Context-aware SQR calibration pipeline |
+| 26 | âœ… Created | 2025-07 | Sequential Trotter simulation |
+| 27 | âœ… Created | 2025-07 | Cluster state evolution + Wigner verification |

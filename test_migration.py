@@ -77,10 +77,10 @@ check("devices (manager + resolver)", lambda: (
     __import__("qubox.devices", fromlist=["DeviceManager", "ContextResolver", "SampleRegistry"])
 ))
 
-# --- Compat notebook layer ---
-check("compat.notebook (full surface)", lambda: (
+# --- Notebook import surface ---
+check("notebook (full surface)", lambda: (
     exec("""
-from qubox.compat.notebook import (
+from qubox.notebook import (
     QubitSpectroscopy, PowerRabi, measureMacro, RunResult,
     CalibrationStore, SampleRegistry, HardwareDefinition,
     readout_mod, gates_mod

@@ -12,7 +12,6 @@ from .fitting.routines import build_fit_legend, fit_and_wrap, generalized_fit
 
 _SUBMODULES = {
     "algorithms",
-    "compat",
     "data",
     "fitting",
     "optimization",
@@ -43,7 +42,6 @@ __all__ = [
     "PostSelectionConfig",
     "algorithms",
     "build_fit_legend",
-    "compat",
     "data",
     "fit_and_wrap",
     "fitting",

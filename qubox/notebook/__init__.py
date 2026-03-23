@@ -1,16 +1,13 @@
-﻿"""Notebook-facing compatibility surface under the ``qubox`` namespace.
+"""Notebook-facing import surface for the ``qubox`` package.
 
-This module centralises runtime symbols needed by notebooks so they can import
-only from ``qubox``, ``qubox.compat``, and ``qubox_tools``.
-
-All symbols are now served from the unified ``qubox`` package — no legacy
-proxy layer remains.
+``qubox.notebook`` centralises all runtime symbols needed by experiment
+notebooks so they can import from a single, stable location.
 """
 
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
-# MIGRATED: waveform generators now live in qubox.tools
+# Waveform generators (qubox.tools)
 # ---------------------------------------------------------------------------
 from ..tools.waveforms import (
     drag_gaussian_pulse_waveforms,
@@ -22,7 +19,7 @@ from ..tools.generators import (
 )
 
 # ---------------------------------------------------------------------------
-# MIGRATED: calibration stack now lives in qubox.calibration
+# Calibration stack (qubox.calibration)
 # ---------------------------------------------------------------------------
 from ..calibration import (
     CalibrationOrchestrator,
@@ -54,15 +51,17 @@ from ..calibration import (
     load_snapshot as load_calibration_snapshot,
     diff_snapshots as diff_calibration_snapshots,
     default_patch_rules,
+    MixerCalibrationConfig,
+    SAMeasurementHelper,
 )
 
 # ---------------------------------------------------------------------------
-# MIGRATED: device registry now lives in qubox.devices
+# Device registry (qubox.devices)
 # ---------------------------------------------------------------------------
 from ..devices import SampleRegistry, SampleInfo
 
 # ---------------------------------------------------------------------------
-# MIGRATED: artifacts now live in qubox.artifacts
+# Artifacts (qubox.artifacts)
 # ---------------------------------------------------------------------------
 from ..artifacts import (
     ArtifactManager,
@@ -72,16 +71,24 @@ from ..artifacts import (
 )
 
 # ---------------------------------------------------------------------------
-# MIGRATED: preflight check now lives in qubox.preflight
+# Preflight (qubox.preflight)
 # ---------------------------------------------------------------------------
 from ..preflight import preflight_check
 
 # ---------------------------------------------------------------------------
-# MIGRATED: schema validation now lives in qubox.schemas
+# Schemas (qubox.schemas)
 # ---------------------------------------------------------------------------
 from ..schemas import validate_config_dir, ValidationResult
+
+# ---------------------------------------------------------------------------
+# Hardware definition (qubox.core)
+# ---------------------------------------------------------------------------
 from ..core.hardware_definition import HardwareDefinition
-from .notebook_runtime import (
+
+# ---------------------------------------------------------------------------
+# Notebook runtime — session bootstrap and sharing
+# ---------------------------------------------------------------------------
+from .runtime import (
     NotebookSessionBootstrap,
     close_shared_session,
     get_notebook_session_bootstrap_path,
@@ -94,7 +101,11 @@ from .notebook_runtime import (
     restore_shared_session,
     save_notebook_session_bootstrap,
 )
-from .notebook_workflow import (
+
+# ---------------------------------------------------------------------------
+# Notebook workflow — stage management, checkpoints, fit helpers
+# ---------------------------------------------------------------------------
+from .workflow import (
     NotebookStageContext,
     NotebookWorkflowConfig,
     build_notebook_workflow_config,
@@ -110,15 +121,14 @@ from .notebook_workflow import (
 )
 
 # ---------------------------------------------------------------------------
-# MIGRATED: core types, errors, context
+# Core types, errors, context
 # ---------------------------------------------------------------------------
 from ..core.errors import ContextMismatchError
-from ..core.hardware_definition import HardwareDefinition
 from ..session.context import ExperimentContext, compute_wiring_rev
 from ..session.state import SessionState
 
 # ---------------------------------------------------------------------------
-# Experiment classes (now in qubox.experiments)
+# Experiment classes (qubox.experiments)
 # ---------------------------------------------------------------------------
 from ..experiments import (
     # Spectroscopy
@@ -166,11 +176,6 @@ from ..experiments.calibration.readout import CalibrateReadoutFull as Calibratio
 from ..experiments.result import RunResult, AnalysisResult, ProgramBuildResult
 
 # ---------------------------------------------------------------------------
-# Calibration utilities
-# ---------------------------------------------------------------------------
-from ..calibration import MixerCalibrationConfig, SAMeasurementHelper
-
-# ---------------------------------------------------------------------------
 # Hardware / program utilities
 # ---------------------------------------------------------------------------
 from ..programs.macros.measure import measureMacro
@@ -183,7 +188,7 @@ from ..hardware.program_runner import QuboxSimulationConfig
 from ..verification.waveform_regression import run_all_checks
 
 # ---------------------------------------------------------------------------
-# Module aliases for backward compat
+# Module aliases
 # ---------------------------------------------------------------------------
 from ..experiments.calibration import readout as readout_mod  # noqa: F811
 from ..experiments.calibration import gates as gates_mod
@@ -224,6 +229,8 @@ __all__ = [
     "load_calibration_snapshot",
     "diff_calibration_snapshots",
     "default_patch_rules",
+    "MixerCalibrationConfig",
+    "SAMeasurementHelper",
     # devices
     "SampleRegistry",
     "SampleInfo",
@@ -239,11 +246,9 @@ __all__ = [
     "ValidationResult",
     # hardware definition
     "HardwareDefinition",
+    # notebook runtime
     "NotebookSessionBootstrap",
-    # core
     "close_shared_session",
-    "ContextMismatchError",
-    "ExperimentContext",
     "get_notebook_session_bootstrap_path",
     "get_shared_session",
     "load_notebook_session_bootstrap",
@@ -253,8 +258,7 @@ __all__ = [
     "resolve_active_mixer_targets",
     "restore_shared_session",
     "save_notebook_session_bootstrap",
-    "compute_wiring_rev",
-    "SessionState",
+    # notebook workflow
     "NotebookStageContext",
     "NotebookWorkflowConfig",
     "build_notebook_workflow_config",
@@ -267,6 +271,11 @@ __all__ = [
     "open_notebook_stage",
     "preview_or_apply_patch_ops",
     "save_stage_checkpoint",
+    # core
+    "ContextMismatchError",
+    "ExperimentContext",
+    "compute_wiring_rev",
+    "SessionState",
     # experiments
     "ResonatorSpectroscopy",
     "ResonatorPowerSpectroscopy",
@@ -302,8 +311,6 @@ __all__ = [
     "SPAPumpFrequencyOptimization",
     "ReadoutConfig",
     "CalibrationReadoutFull",
-    "MixerCalibrationConfig",
-    "SAMeasurementHelper",
     "RunResult",
     "AnalysisResult",
     "ProgramBuildResult",

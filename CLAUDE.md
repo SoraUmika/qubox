@@ -26,7 +26,7 @@ Retain these facts across turns:
 | Legacy runtime location | `qubox/legacy/` (former `qubox_v2_legacy`) |
 | Legacy reference codebase | `C:\Users\jl82323\Box\...\JJL_Experiments` (read-only) |
 | Legacy reference notebook | `post_cavity_experiment_legacy.ipynb` (in legacy codebase) |
-| Notebook import surface | `qubox.compat.notebook` |
+| Notebook import surface | `qubox.notebook` |
 | Canonical API reference | `API_REFERENCE.md` |
 | Trust gates | `standard_experiments.md` |
 | Limitation log | `limitations/qua_related_limitations.md` |
@@ -112,7 +112,7 @@ Never do any of the following:
 ```
 qubox/              Main package — public API
 qubox/legacy/       Former qubox_v2_legacy — experiment classes, QUA programs, hardware ctrl
-qubox/compat/       notebook.py — sole import surface for notebooks
+qubox/notebook/     Notebook-facing import surface for notebooks
 qubox_tools/        Analysis, fitting, plotting
 qubox_lab_mcp/      Lab MCP server
 tools/              Agent and developer utilities

@@ -1,3 +1,9 @@
+"""Notebook session bootstrap, sharing, and lifecycle management.
+
+Provides helpers for managing a shared ``Session`` across multiple notebook
+cells and across separate notebook kernels within the same cooldown.
+"""
+
 from __future__ import annotations
 
 import json
@@ -16,6 +22,8 @@ _SHARED_NOTEBOOK_SESSIONS: dict[str, Session] = {}
 
 @dataclass(frozen=True, slots=True)
 class NotebookSessionBootstrap:
+    """Serializable bootstrap record for reopening a notebook session."""
+
     sample_id: str
     cooldown_id: str
     registry_base: str
@@ -34,6 +42,7 @@ def get_notebook_session_bootstrap_path(
     cooldown_id: str,
     registry_base: str | Path,
 ) -> Path:
+    """Return the default bootstrap file path for the given cooldown."""
     registry = SampleRegistry(Path(registry_base))
     cooldown_path = registry.cooldown_path(sample_id, cooldown_id)
     return cooldown_path / "artifacts" / "runtime" / _BOOTSTRAP_FILE_NAME
@@ -44,6 +53,7 @@ def save_notebook_session_bootstrap(
     *,
     path: str | Path | None = None,
 ) -> Path:
+    """Persist a bootstrap record to disk."""
     target = Path(path) if path is not None else get_notebook_session_bootstrap_path(
         sample_id=bootstrap.sample_id,
         cooldown_id=bootstrap.cooldown_id,
@@ -55,11 +65,13 @@ def save_notebook_session_bootstrap(
 
 
 def load_notebook_session_bootstrap(path: str | Path) -> NotebookSessionBootstrap:
+    """Load a bootstrap record from disk."""
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     return NotebookSessionBootstrap(**payload)
 
 
 def get_shared_session(*, session_key: str | None = None) -> Session | None:
+    """Return the currently registered shared session, or *None*."""
     key = session_key or _DEFAULT_SHARED_SESSION_KEY
     if key is None:
         return None
@@ -73,6 +85,7 @@ def register_shared_session(
     persist_bootstrap: bool = True,
     set_default: bool = True,
 ) -> Session:
+    """Register *session* as the shared notebook session."""
     global _DEFAULT_SHARED_SESSION_KEY
 
     _SHARED_NOTEBOOK_SESSIONS[bootstrap.session_key] = session
@@ -98,6 +111,7 @@ def open_shared_session(
     set_default: bool = True,
     **kwargs: Any,
 ) -> Session:
+    """Open (or reuse) a shared notebook session for the given cooldown."""
     bootstrap = NotebookSessionBootstrap(
         sample_id=sample_id,
         cooldown_id=cooldown_id,
@@ -146,6 +160,7 @@ def restore_shared_session(
     set_default: bool = True,
     **kwargs: Any,
 ) -> Session:
+    """Restore a shared session from a persisted bootstrap file."""
     bootstrap = load_notebook_session_bootstrap(path)
     return open_shared_session(
         sample_id=bootstrap.sample_id,
@@ -177,6 +192,7 @@ def require_shared_session(
     force_reopen: bool = False,
     **kwargs: Any,
 ) -> Session:
+    """Return the shared session, opening one if necessary."""
     existing = get_shared_session()
     if existing is not None and reuse_existing and not force_reopen:
         return existing
@@ -211,6 +227,7 @@ def require_shared_session(
 
 
 def close_shared_session(*, session_key: str | None = None) -> None:
+    """Close and deregister the shared notebook session."""
     global _DEFAULT_SHARED_SESSION_KEY
 
     key = session_key or _DEFAULT_SHARED_SESSION_KEY
@@ -225,6 +242,7 @@ def close_shared_session(*, session_key: str | None = None) -> None:
 
 
 def resolve_active_mixer_targets(session: Session, *, include_skipped: bool = False) -> dict[str, Any]:
+    """Return a dict of active mixer elements and their LO/IF/RF frequencies."""
     resolved = session.hw.get_active_mixer_elements(include_skipped=True)
     active_elements = list(resolved.get("active", []))
     skipped_elements = list(resolved.get("skipped", []))

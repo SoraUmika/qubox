@@ -39,7 +39,7 @@ qubox is a cQED experiment orchestration framework for Quantum Machines hardware
 | `qubox/calibration/` | CalibrationStore, CalibrationOrchestrator, patch rules |
 | `qubox/session/` | Session, ExperimentContext, SessionState |
 | `qubox/experiments/` | ExperimentLibrary, templates, workflows |
-| `qubox/compat/` | `notebook.py` — sole import surface for notebooks |
+| `qubox/notebook/` | Notebook-facing import surface: experiment classes, calibration, session helpers |
 | `qubox/legacy/` | Full copy of former qubox_v2_legacy (experiment classes, QUA programs, hardware ctrl) |
 | `qubox_tools/` | Analysis, fitting, plotting, cQED models |
 | `qubox_lab_mcp/` | Lab MCP server |
@@ -61,13 +61,13 @@ qubox is a cQED experiment orchestration framework for Quantum Machines hardware
 | `standard_experiments.md` | Trust-gate QUA protocols |
 | `limitations/qua_related_limitations.md` | Known hardware/compilation mismatches |
 | `docs/CHANGELOG.md` | Append-only change log |
-| `qubox/compat/notebook.py` | Sole import surface for notebooks |
+| `qubox/notebook/__init__.py` | Primary import surface for notebooks |
 
 ### User-Facing Workflow
 
 ```python
-# Notebook usage (all imports via qubox.compat.notebook)
-from qubox.compat.notebook import (
+# Notebook usage (all imports via qubox.notebook)
+from qubox.notebook import (
     CalibrationStore, CalibrationOrchestrator,
     QubitSpectroscopy, T1Relaxation, ...
 )
@@ -82,7 +82,7 @@ result = session.exp.qubit.spectroscopy(frequencies=..., n_avg=100)
 
 - `qubox/legacy/` contains all experiment classes and QUA program builders from the
   former `qubox_v2_legacy` package.
-- `qubox.compat.notebook` exposes them via lazy proxy so notebooks need only one import.
+- `qubox.notebook` exposes them as the primary import surface so notebooks need only one import.
 - Do not import directly from `qubox_v2_legacy` (deprecated package). Use `qubox.legacy.*`.
 
 ## Python Version and Hardware

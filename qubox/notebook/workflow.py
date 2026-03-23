@@ -1,3 +1,10 @@
+"""Notebook stage workflow helpers.
+
+Provides structured stage management, checkpoint persistence, calibration
+patch preview/apply, fit quality gates, and primitive-rotation seeding
+for numbered experiment notebooks.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,7 +19,7 @@ from ..calibration import CalibrationOrchestrator, Patch
 from ..devices import SampleRegistry
 from ..tools.generators import register_rotations_from_ref_iq
 from ..tools.waveforms import drag_gaussian_pulse_waveforms
-from .notebook_runtime import (
+from .runtime import (
     close_shared_session,
     get_notebook_session_bootstrap_path,
     get_shared_session,
@@ -22,6 +29,8 @@ from .notebook_runtime import (
 
 @dataclass(frozen=True, slots=True)
 class NotebookWorkflowConfig:
+    """Immutable configuration for a multi-notebook experiment workflow."""
+
     registry_base: Path
     sample_id: str
     cooldown_id: str
@@ -40,6 +49,8 @@ class NotebookWorkflowConfig:
 
 @dataclass(slots=True)
 class NotebookStageContext:
+    """Context object returned by :func:`open_notebook_stage`."""
+
     workflow: NotebookWorkflowConfig
     stage_name: str
     session: Any
@@ -73,6 +84,7 @@ def build_notebook_workflow_config(
     cluster_name: str,
     legacy_cqed_params_path: str | Path | None = None,
 ) -> NotebookWorkflowConfig:
+    """Construct a :class:`NotebookWorkflowConfig`."""
     return NotebookWorkflowConfig(
         registry_base=Path(registry_base),
         sample_id=sample_id,
@@ -84,6 +96,7 @@ def build_notebook_workflow_config(
 
 
 def load_legacy_reference(path: str | Path | None) -> dict[str, Any]:
+    """Load a legacy cQED-params reference file, returning ``{}`` if absent."""
     if path is None:
         return {}
     reference_path = Path(path)
@@ -99,6 +112,7 @@ def get_notebook_stage_checkpoint_path(
     cooldown_id: str,
     stage_name: str,
 ) -> Path:
+    """Return the checkpoint file path for a given stage."""
     registry = SampleRegistry(registry_base)
     runtime_dir = registry.cooldown_path(sample_id, cooldown_id) / "artifacts" / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -118,6 +132,7 @@ def open_notebook_stage(
     force_reopen: bool = False,
     close_existing: bool = True,
 ) -> NotebookStageContext:
+    """Open a numbered-notebook stage, returning a context bundle."""
     workflow = build_notebook_workflow_config(
         registry_base=registry_base,
         sample_id=sample_id,
@@ -174,6 +189,7 @@ def save_stage_checkpoint(
     notes: Sequence[str] | None = None,
     metrics: dict[str, Any] | None = None,
 ) -> Path:
+    """Persist a stage checkpoint to the cooldown runtime artifacts."""
     checkpoint_path = get_notebook_stage_checkpoint_path(
         registry_base=registry_base,
         sample_id=sample_id,
@@ -205,6 +221,7 @@ def load_stage_checkpoint(
     cooldown_id: str,
     stage_name: str,
 ) -> dict[str, Any] | None:
+    """Load a stage checkpoint, returning ``None`` if the file does not exist."""
     checkpoint_path = get_notebook_stage_checkpoint_path(
         registry_base=registry_base,
         sample_id=sample_id,
@@ -224,6 +241,7 @@ def preview_or_apply_patch_ops(
     apply: bool = False,
     print_fn=print,
 ) -> tuple[Patch | None, dict[str, Any] | None, dict[str, Any] | None]:
+    """Preview or apply a set of calibration patch operations."""
     patch_ops = list(proposed_patch_ops)
     if not patch_ops:
         print_fn(f"{reason}: no calibration updates were proposed by the fit.")
@@ -253,6 +271,7 @@ def preview_or_apply_patch_ops(
 
 
 def fit_quality_gate(analysis: Any, *, r_squared_min: float = 0.5) -> tuple[bool, str]:
+    """Check whether a fit result meets quality thresholds."""
     fit = getattr(analysis, "fit", None)
     if fit is None or not getattr(fit, "params", None):
         return False, "fit produced no parameters"
@@ -270,6 +289,7 @@ def fit_center_inside_window(
     *,
     margin_points: int = 2,
 ) -> tuple[bool, str]:
+    """Check whether a fitted center frequency lies inside the scan window."""
     frequencies = np.asarray(list(frequencies_hz), dtype=float)
     if frequencies.size == 0 or not np.isfinite(fitted_value_hz):
         return False, "fit produced no finite center frequency"
@@ -300,6 +320,7 @@ def ensure_primitive_rotations(
     override: bool = True,
     force_register: bool = False,
 ) -> dict[str, Any]:
+    """Seed primitive DRAG rotation pulses on a session's pulse manager."""
     pulse_mgr = session_obj.pulse_mgr
     missing_required_ops: list[str] = []
     for op_name in required_ops:

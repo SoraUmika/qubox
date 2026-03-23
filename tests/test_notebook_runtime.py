@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from qubox.compat import notebook_runtime
+from qubox.notebook import runtime as notebook_runtime
 
 
 def test_open_shared_session_reuses_live_session_and_persists_bootstrap(monkeypatch, tmp_path):

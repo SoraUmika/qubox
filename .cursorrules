@@ -61,7 +61,7 @@ correctness is never optional.
 
 - `qubox_v2_legacy` is deprecated. All legacy code now lives in `qubox/legacy/`.
 - Do not add new imports from `qubox_v2_legacy` — use `qubox.legacy.*` instead.
-- The notebook import surface is `qubox.compat.notebook`.
+- The notebook import surface is `qubox.notebook`.
 
 ## Prompt Logging
 

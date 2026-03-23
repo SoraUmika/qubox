@@ -149,9 +149,9 @@ Several experiments required calibration values that are not present in the defa
 
 ## Legacy Dependency Analysis
 
-- **Notebooks 07–27:** ZERO direct legacy imports — all experiment access is via `qubox.compat.notebook`
-- **`qubox.compat.notebook`:** Uses `_LEGACY_ATTR_MAP` to lazily proxy 29 experiment classes from `qubox.legacy`
-- **Runtime path:** Still executes legacy code; the compat layer provides clean namespace isolation
+- **Notebooks 07–27:** ZERO direct legacy imports — all experiment access is via `qubox.notebook`
+- **`qubox.notebook`:** Re-exports 29 experiment classes from `qubox.legacy`
+- **Runtime path:** Still executes legacy code; the notebook surface provides clean namespace isolation
 - **No native QUA builders:** qubox v3 does not yet have non-legacy program builders
 
 ---

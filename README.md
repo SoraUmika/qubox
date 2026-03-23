@@ -9,9 +9,11 @@ This repository currently contains three relevant Python package surfaces:
 ## Current Recommendation
 
 Use `qubox` for experiment execution and `qubox_tools` for reusable analysis.
+Notebooks import from `qubox.notebook` for experiment classes, calibration, and session helpers.
 
 ```python
 from qubox import Session
+from qubox.notebook import QubitSpectroscopy, PowerRabi, CalibrationOrchestrator
 from qubox_tools import generalized_fit
 ```
 

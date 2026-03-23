@@ -32,7 +32,7 @@
 14. [Calibration](#14-calibration)
 15. [Analysis Pipelines](#15-analysis-pipelines)
 16. [QM Backend Runtime](#16-qm-backend-runtime)
-17. [Compatibility Layer (qubox.compat)](#17-compatibility-layer-quboxcompat)
+17. [Notebook Import Surface (qubox.notebook)](#17-notebook-import-surface-quboxnotebook)
 18. [qubox_tools — Analysis Toolkit](#18-qubox_tools--analysis-toolkit)
 19. [Legacy Internals (qubox_v2_legacy)](#19-legacy-internals-qubox_v2_legacy)
 20. [Examples and Minimal Usage Patterns](#20-examples-and-minimal-usage-patterns)
@@ -148,7 +148,7 @@ qubox/
 | `qubox.analysis` | `run_named_pipeline()` — lightweight named analysis pipelines for custom experiments |
 | `qubox.experiments` | `ExperimentLibrary` (20 standard experiments) and `WorkflowLibrary` — template-based runners |
 | `qubox.backends.qm` | `QMRuntime` — QM-specific execution: lowers sequences to QUA programs via legacy adapter |
-| `qubox.compat` | Compatibility shims for notebooks still importing legacy classes |
+| `qubox.notebook` | Primary notebook import surface: experiment classes, calibration, session helpers, stage workflow |
 | `qubox.examples` | Runnable example scripts demonstrating the API |
 
 ### 2.3 Layering
@@ -1636,7 +1636,7 @@ The full `run → analyze → patch → apply` lifecycle is available through
 the legacy compatibility layer:
 
 ```python
-from qubox.compat.notebook import CalibrationOrchestrator, Patch
+from qubox.notebook import CalibrationOrchestrator, Patch
 
 orch = CalibrationOrchestrator(session.legacy_session)
 cycle = orch.run_analysis_patch_cycle(experiment_cls, **kwargs)
@@ -1749,37 +1749,29 @@ in the body, a measurement is automatically appended.
 
 ---
 
-## 17. Compatibility Layer (qubox.compat)
+## 17. Notebook Import Surface (qubox.notebook)
 
 ### 17.1 Purpose
 
-`qubox.compat.notebook` provides lazy re-exports of legacy classes from
-`qubox_v2_legacy` (previously `qubox_v2`) so that existing notebooks and
-scripts can import from `qubox` without modification.
+`qubox.notebook` is the primary import surface for notebook-based
+experiment workflows. It re-exports experiment classes, calibration
+utilities, hardware authoring helpers, and session/stage lifecycle
+functions so that notebooks need only a single import statement.
 
-It also exposes notebook-first hardware authoring helpers such as
-`HardwareDefinition`, which generates sample-level `hardware.json`,
-`cqed_params.json`, and `devices.json` from explicit notebook input.
-
-For multi-notebook workflows it also exposes shared runtime helpers:
-`open_shared_session()` registers a live session for the current kernel and
-persists a small bootstrap JSON under the cooldown artifacts directory, while
-`require_shared_session()` reuses that live session when available or reopens
-the same sample or cooldown session from the bootstrap file when a later
-notebook starts in a fresh kernel.
-
-For numbered operator workflows it also exposes stage helpers through
-`qubox.compat.notebook`: `open_notebook_stage()` standardizes forced reopen and
-context loading, `save_stage_checkpoint()` and `load_stage_checkpoint()` persist
-the stage contract under cooldown runtime artifacts, `preview_or_apply_patch_ops()`
-wraps the calibration orchestrator's transactional patch preview and apply path,
-and `ensure_primitive_rotations()` centralizes primitive reference-pulse seeding
-for notebooks that still use legacy experiment classes.
+`qubox.notebook` exposes:
+- **Experiment classes** (30+) for spectroscopy, time-domain, readout, gate calibration, storage/cavity, and tomography.
+- **Calibration stack:** `CalibrationOrchestrator`, `CalibrationStore`, `Patch`, `UpdateOp`, data models.
+- **Hardware authoring:** `HardwareDefinition` for generating sample-level config files.
+- **Session lifecycle:** `open_shared_session()`, `require_shared_session()`, `close_shared_session()`, `restore_shared_session()` for multi-notebook shared sessions.
+- **Stage workflow:** `open_notebook_stage()`, `save_stage_checkpoint()`, `load_stage_checkpoint()`, `preview_or_apply_patch_ops()`, `fit_quality_gate()`, `fit_center_inside_window()`, `ensure_primitive_rotations()`.
+- **Device/artifact management:** `SampleRegistry`, `ArtifactManager`, `preflight_check`, `validate_config_dir`.
+- **Waveform tools:** `drag_gaussian_pulse_waveforms`, `kaiser_pulse_waveforms`, `register_rotations_from_ref_iq`, `ensure_displacement_ops`.
+- **Program utilities:** `measureMacro`, `continuous_wave`, `QuboxSimulationConfig`.
 
 ### 17.2 Usage
 
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     # Experiment classes
     ResonatorSpectroscopy,
     QubitSpectroscopy,
@@ -1880,9 +1872,9 @@ The full list of re-exported names includes:
 **Hardware / Programs:**
 `measureMacro`, `continuous_wave`, `QuboxSimulationConfig`
 
-> **Migration note:** These re-exports exist for backward compatibility.
-> New code should prefer the `qubox` API (`Session`, `session.exp.*`,
-> `session.ops.*`, etc.) for all supported workflows.
+> **Note:** These re-exports provide a single-import convenience for notebooks.
+> For programmatic workflows, prefer the `qubox` API (`Session`, `session.exp.*`,
+> `session.ops.*`, etc.).
 
 ---
 
@@ -1921,7 +1913,6 @@ because analysis utilities are backend-independent.
 | `qubox_tools.algorithms` | Post-processing algorithms (post-selection, etc.) |
 | `qubox_tools.data` | Data containers (`Output`, `OutputArray`) |
 | `qubox_tools.optimization` | Optimization utilities |
-| `qubox_tools.compat` | Compatibility helpers for legacy imports |
 
 ### 18.5 Example
 
@@ -1964,8 +1955,8 @@ the execution engine behind `qubox`. It contains:
 | 30+ experiment classes | `qubox_v2_legacy.experiments` | Physics-specific experiment implementations |
 
 > **Users should not import directly from `qubox_v2_legacy`** in new code.
-> Use `qubox` for the public API, and `qubox.compat.notebook` for legacy
-> compatibility when needed.
+> Use `qubox` for the public API, and `qubox.notebook` for experiment
+> classes and calibration helpers.
 
 ### 19.1 Key Internal Concepts
 
@@ -2122,10 +2113,10 @@ result = session.exp.custom(
 ### 20.4 Notebook Pattern with Legacy Compatibility
 
 This is the pattern used in the tutorial notebook. It mixes the new `qubox`
-session API with legacy experiment classes imported through `qubox.compat`:
+session API with legacy experiment classes imported through `qubox.notebook`:
 
 ```python
-from qubox.compat.notebook import (
+from qubox.notebook import (
     get_notebook_session_bootstrap_path,
     open_shared_session,
     ResonatorSpectroscopy,
@@ -2208,7 +2199,7 @@ Only five experiment templates are currently registered in `QMRuntime`:
 
 The 25+ other experiments (T1, AllXY, DRAG, Fock-resolved, tomography, etc.)
 are accessible only through:
-- Legacy compatibility imports (`qubox.compat.notebook`), or
+- Legacy compatibility imports (`qubox.notebook`), or
 - Custom sequence/circuit composition (`session.exp.custom()`).
 
 ### 21.3 qubox_v2_legacy Naming
@@ -2217,7 +2208,7 @@ The legacy package was renamed from `qubox_v2` to `qubox_v2_legacy` as part
 of the migration. All internal references (compat layer, tests, tools) now
 correctly use `qubox_v2_legacy` as the import target.
 
-> **Status:** Resolved. The compat layer (`qubox.compat.notebook`) and all
+> **Status:** Resolved. The compat layer (`qubox.notebook`) and all
 > internal code reference `qubox_v2_legacy` consistently.
 
 ### 21.4 Sweep Axis Center Resolution
@@ -2336,10 +2327,10 @@ session.close()
 |-------------------|---------------|
 | `from qubox_v2.experiments.session import SessionManager` | `from qubox import Session` |
 | `SessionManager(...).open()` | `Session.open(...)` |
-| `from qubox_v2.experiments import PowerRabi` | `session.exp.qubit.power_rabi(...)` or `from qubox.compat.notebook import PowerRabi` |
-| `from qubox_v2.calibration import CalibrationOrchestrator` | `from qubox.compat.notebook import CalibrationOrchestrator` |
-| `from qubox_v2.devices import SampleRegistry` | `from qubox.compat.notebook import SampleRegistry` |
-| Direct experiment `run()` calls | Template experiments via `session.exp.*` or legacy via `qubox.compat.notebook` |
+| `from qubox_v2.experiments import PowerRabi` | `session.exp.qubit.power_rabi(...)` or `from qubox.notebook import PowerRabi` |
+| `from qubox_v2.calibration import CalibrationOrchestrator` | `from qubox.notebook import CalibrationOrchestrator` |
+| `from qubox_v2.devices import SampleRegistry` | `from qubox.notebook import SampleRegistry` |
+| Direct experiment `run()` calls | Template experiments via `session.exp.*` or legacy via `qubox.notebook` |
 
 ### Workflow Changes
 
@@ -2357,7 +2348,7 @@ session.close()
 - Calibration JSON schema (v5.0.0) is unchanged.
 - `qubox_tools` for analysis is unchanged.
 - Sample/cooldown filesystem layout is unchanged.
-- All 30+ legacy experiment classes are still available via `qubox.compat.notebook`.
+- All 30+ legacy experiment classes are still available via `qubox.notebook`.
 
 ---
 

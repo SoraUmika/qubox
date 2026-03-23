@@ -50,8 +50,8 @@ from qubox.hardware.config_engine import ConfigEngine
 from qubox.pulses.manager import PulseOperationManager
 from qubox.programs.macros.measure import measureMacro
 
-# ── Experiment classes (via compat surface) ─────────────────────────────
-from qubox.compat.notebook import (
+# ── Experiment classes (via notebook surface) ─────────────────────────────────
+from qubox.notebook import (
     # Spectroscopy
     ResonatorSpectroscopy,
     ResonatorPowerSpectroscopy,
@@ -883,10 +883,10 @@ print("    - No native (non-legacy) QUA program builders exist yet in qubox v3")
 print("    - Element naming: legacy 'qubit' -> new 'transmon', 'readout_gf' -> 'resonator_gf'")
 
 print("\n  LEGACY DEPENDENCY ANALYSIS:")
-print("    - Notebooks 07-27: ZERO direct legacy imports (all via qubox.compat.notebook)")
-print("    - qubox.compat.notebook: 1 direct legacy import (HardwareDefinition)")
-print(f"    - qubox.compat.notebook: lazy proxies to {total} experiment classes")
-print("    - Runtime still executes legacy code path; compat layer provides clean isolation")
+print("    - Notebooks 07-27: ZERO direct legacy imports (all via qubox.notebook)")
+print("    - qubox.notebook: 1 direct legacy import (HardwareDefinition)")
+print(f"    - qubox.notebook: lazy proxies to {total} experiment classes")
+print("    - Runtime still executes legacy code path; notebook surface provides clean isolation")
 
 print("\n" + "=" * 72)
 print("VERIFICATION COMPLETE")
