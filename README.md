@@ -80,7 +80,7 @@ popt, _ = qt.generalized_fit(
 
 ## Python Policy
 
-Preferred Python version: `3.12.13`.
+Required Python version: `3.12.10`, using either the workspace `.venv` or a global Python 3.12.10 interpreter.
 
 Fallback version currently allowed for repository compatibility: `3.11.8`.
 

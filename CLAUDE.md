@@ -17,12 +17,15 @@ Retain these facts across turns:
 
 | Fact | Value |
 | --- | --- |
-| Python version | 3.12.13 (fallback: 3.11.8 on ECE-SHANKAR-07 only) |
+| Python version | 3.12.10 via the workspace `.venv` or a global 3.12.10 interpreter (fallback: 3.11.8 on ECE-SHANKAR-07 only) |
+| Python 3.11 fallback interpreter | `E:\Program Files\Python311\python.exe` |
 | QM API version | 1.2.6 |
 | Hardware | OPX+ + Octave |
 | Hosted server host | `10.157.36.68` |
 | Hosted server cluster | `Cluster_2` |
 | Legacy runtime location | `qubox/legacy/` (former `qubox_v2_legacy`) |
+| Legacy reference codebase | `C:\Users\jl82323\Box\...\JJL_Experiments` (read-only) |
+| Legacy reference notebook | `post_cavity_experiment_legacy.ipynb` (in legacy codebase) |
 | Notebook import surface | `qubox.compat.notebook` |
 | Canonical API reference | `API_REFERENCE.md` |
 | Trust gates | `standard_experiments.md` |
@@ -39,6 +42,8 @@ Retain these facts across turns:
 - [ ] Read `standard_experiments.md` if task touches QUA/compilation/pulse sequences
 - [ ] Read `limitations/qua_related_limitations.md` if it exists and task is QUA-related
 - [ ] Read relevant notebooks if task affects usage examples
+- [ ] If migrating an experiment: read legacy reference codebase and `post_cavity_experiment_legacy.ipynb` (§14)
+- [ ] If a package or notebook works in Python 3.11.8 but not 3.12.x, inspect the known-good 3.11.8 install first and mirror the missing dependency before changing qubox code
 
 ## Section Map (AGENTS.md)
 
@@ -56,6 +61,7 @@ Retain these facts across turns:
 | Tool reuse policy | §10 Tooling |
 | Where to put new files | §11 File Hygiene |
 | End-of-task report | §12 Completion Report |
+| Legacy codebase & migration | §14 Legacy Reference |
 
 ## Code Style
 

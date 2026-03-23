@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
@@ -37,7 +37,7 @@ class Session:
         **kwargs: Any,
     ) -> "Session":
         if cls.legacy_session_cls is None:
-            from qubox.legacy.experiments.session import SessionManager
+            from qubox.experiments.session import SessionManager
 
             cls.legacy_session_cls = SessionManager
         legacy = cls.legacy_session_cls(

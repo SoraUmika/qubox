@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
@@ -34,7 +34,7 @@ class ReadoutWorkflowLibrary:
 
         class _ReadoutFullWorkflow:
             def run(self_nonlocal):
-                from qubox.legacy.experiments.calibration.readout import CalibrateReadoutFull
+                from qubox.experiments.calibration.readout import CalibrateReadoutFull
 
                 experiment = CalibrateReadoutFull(session.legacy_session)
                 payload = experiment.build_plan(

@@ -79,7 +79,7 @@ The repository contains three relevant Python packages:
 
 - **Hardware target**: Quantum Machines OPX+ with Octave
 - **QUA / QM API version**: `1.2.6`
-- **Python**: 3.12.13 (preferred), 3.11.8 (fallback)
+- **Python**: 3.12.10 via the workspace `.venv` or a global 3.12.10 interpreter (required), 3.11.8 (fallback)
 
 ---
 
@@ -1757,6 +1757,25 @@ in the body, a measurement is automatically appended.
 `qubox_v2_legacy` (previously `qubox_v2`) so that existing notebooks and
 scripts can import from `qubox` without modification.
 
+It also exposes notebook-first hardware authoring helpers such as
+`HardwareDefinition`, which generates sample-level `hardware.json`,
+`cqed_params.json`, and `devices.json` from explicit notebook input.
+
+For multi-notebook workflows it also exposes shared runtime helpers:
+`open_shared_session()` registers a live session for the current kernel and
+persists a small bootstrap JSON under the cooldown artifacts directory, while
+`require_shared_session()` reuses that live session when available or reopens
+the same sample or cooldown session from the bootstrap file when a later
+notebook starts in a fresh kernel.
+
+For numbered operator workflows it also exposes stage helpers through
+`qubox.compat.notebook`: `open_notebook_stage()` standardizes forced reopen and
+context loading, `save_stage_checkpoint()` and `load_stage_checkpoint()` persist
+the stage contract under cooldown runtime artifacts, `preview_or_apply_patch_ops()`
+wraps the calibration orchestrator's transactional patch preview and apply path,
+and `ensure_primitive_rotations()` centralizes primitive reference-pulse seeding
+for notebooks that still use legacy experiment classes.
+
 ### 17.2 Usage
 
 ```python
@@ -1781,6 +1800,24 @@ from qubox.compat.notebook import (
     CalibrationOrchestrator,
     CalibrationStore,
     Patch,
+
+    # Hardware authoring
+    HardwareDefinition,
+
+    # Shared notebook runtime
+    open_shared_session,
+    require_shared_session,
+    get_notebook_session_bootstrap_path,
+    resolve_active_mixer_targets,
+
+    # Stage workflow helpers
+    open_notebook_stage,
+    load_stage_checkpoint,
+    save_stage_checkpoint,
+    preview_or_apply_patch_ops,
+    fit_quality_gate,
+    fit_center_inside_window,
+    ensure_primitive_rotations,
 
     # Session / Core
     SampleRegistry,
@@ -2088,8 +2125,9 @@ This is the pattern used in the tutorial notebook. It mixes the new `qubox`
 session API with legacy experiment classes imported through `qubox.compat`:
 
 ```python
-from qubox import Session
 from qubox.compat.notebook import (
+    get_notebook_session_bootstrap_path,
+    open_shared_session,
     ResonatorSpectroscopy,
     QubitSpectroscopy,
     PowerRabi,
@@ -2098,14 +2136,18 @@ from qubox.compat.notebook import (
     save_config_snapshot,
 )
 
-# Open session (new API)
-session = Session.open(
+# Open or reuse the shared session opened by notebook 00
+bootstrap_path = get_notebook_session_bootstrap_path(
+    sample_id="post_cavity_sample_A",
+    cooldown_id="cd_2025_02_22",
+    registry_base="E:/qubox",
+)
+session = open_shared_session(
     sample_id="post_cavity_sample_A",
     cooldown_id="cd_2025_02_22",
     registry_base="E:/qubox",
     qop_ip="10.157.36.68",
     cluster_name="Cluster_2",
-    connect=True,
 )
 
 # Use legacy experiment directly

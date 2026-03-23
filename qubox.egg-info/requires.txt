@@ -6,6 +6,7 @@ qm-qua>=1.1
 qualang-tools>=0.15
 tqdm>=4.65
 pandas>=2.0
+PyYAML>=6.0
 
 [dev]
 pytest>=7.0

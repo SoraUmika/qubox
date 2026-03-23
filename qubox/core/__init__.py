@@ -1,7 +1,6 @@
-"""qubox.core — foundational types, errors, and persistence utilities.
+"""qubox.core — foundational types, errors, persistence, configuration, and logging.
 
-All symbols here are free of ``qubox_v2_legacy`` dependencies and can be
-imported safely in any context.
+Unified core module incorporating all formerly-legacy infrastructure.
 """
 
 from .errors import (
@@ -14,12 +13,42 @@ from .errors import (
     CalibrationError,
     ContextMismatchError,
 )
+from .logging import configure_global_logging, get_logger
+from .config import (
+    ControllerConfig,
+    OctaveRFOutput,
+    OctaveRFInput,
+    OctaveConfig,
+    ElementConfig,
+    HardwareConfig,
+    ExternalLOEntry,
+    QuboxExtras,
+)
+from .experiment_context import ExperimentContext
+from .hardware_definition import HardwareDefinition
+from .bindings import (
+    ChannelRef,
+    OutputBinding,
+    InputBinding,
+    ReadoutBinding,
+    ExperimentBindings,
+    DriveTarget,
+    ReadoutCal,
+    ReadoutHandle,
+    ElementFreq,
+    FrequencyPlan,
+    ConfigBuilder,
+)
 from .types import (
     ExecMode,
     PulseType,
     WaveformType,
     DemodMode,
     WeightLabel,
+    WaveformSamples,
+    FrequencyHz,
+    ClockCycles,
+    Nanoseconds,
     MAX_AMPLITUDE,
     BASE_AMPLITUDE,
     CLOCK_CYCLE_NS,
@@ -35,13 +64,44 @@ __all__ = [
     "PulseError",
     "CalibrationError",
     "ContextMismatchError",
-    # types
+    # types & constants
     "ExecMode",
     "PulseType",
     "WaveformType",
     "DemodMode",
     "WeightLabel",
+    "WaveformSamples",
+    "FrequencyHz",
+    "ClockCycles",
+    "Nanoseconds",
     "MAX_AMPLITUDE",
     "BASE_AMPLITUDE",
     "CLOCK_CYCLE_NS",
+    # logging
+    "configure_global_logging",
+    "get_logger",
+    # config models
+    "ControllerConfig",
+    "OctaveRFOutput",
+    "OctaveRFInput",
+    "OctaveConfig",
+    "ElementConfig",
+    "HardwareConfig",
+    "ExternalLOEntry",
+    "QuboxExtras",
+    # context & hardware
+    "ExperimentContext",
+    "HardwareDefinition",
+    # bindings
+    "ChannelRef",
+    "OutputBinding",
+    "InputBinding",
+    "ReadoutBinding",
+    "ExperimentBindings",
+    "ConfigBuilder",
+    "DriveTarget",
+    "ReadoutCal",
+    "ReadoutHandle",
+    "ElementFreq",
+    "FrequencyPlan",
 ]

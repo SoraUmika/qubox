@@ -11,6 +11,7 @@ Requires-Dist: qm-qua>=1.1
 Requires-Dist: qualang-tools>=0.15
 Requires-Dist: tqdm>=4.65
 Requires-Dist: pandas>=2.0
+Requires-Dist: PyYAML>=6.0
 Provides-Extra: simulation
 Requires-Dist: qutip>=5.0; extra == "simulation"
 Provides-Extra: gpu

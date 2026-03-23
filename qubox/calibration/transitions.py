@@ -31,6 +31,10 @@ class Transition(str, Enum):
     EF = "ef"
 
 
+#: Default transition for experiments that don't specify one.
+DEFAULT_TRANSITION: Transition = Transition.GE
+
+
 # ---------------------------------------------------------------------------
 # Canonical pulse name tables
 # ---------------------------------------------------------------------------

@@ -98,7 +98,7 @@ _SCHEMA_DEFS: dict[str, tuple[str, list[Any], list[str]]] = {
     "devices": (
         "schema_version",
         [1],
-        ["devices"],
+        [],
     ),
 }
 
@@ -165,6 +165,8 @@ def validate_schema(
         _validate_hardware(data, errors, warnings)
     elif file_type == "calibration":
         _validate_calibration(data, errors, warnings)
+    elif file_type == "devices":
+        _validate_devices(data, errors)
 
     return ValidationResult(valid=len(errors) == 0, version=version, errors=errors, warnings=warnings)
 
@@ -201,6 +203,20 @@ def _validate_calibration(data: dict, errors: list[str], warnings: list[str]) ->
                 val = context.get(key)
                 if val is not None and not isinstance(val, str):
                     errors.append(f"context.{key} must be a string, got {type(val).__name__}")
+
+
+def _validate_devices(data: dict, errors: list[str]) -> None:
+    if "devices" in data:
+        devices = data.get("devices")
+        if not isinstance(devices, dict):
+            errors.append("devices.json field 'devices' must be a dict")
+            return
+    else:
+        devices = {key: value for key, value in data.items() if key != "schema_version"}
+
+    for name, spec in devices.items():
+        if not isinstance(spec, dict):
+            errors.append(f"Device '{name}' must be a dict")
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,248 @@ Each entry must include:
 
 ## Entries
 
+### 2026-03-22 — Remove Legacy cqed_params Comparisons from Numbered Notebooks
+
+**Classification: Moderate**
+
+**Summary:**
+
+Removed legacy `cqed_params.json` loading and comparison logic from the numbered bring-up notebooks. Notebook 00 now shows runtime-only sanity plots, notebooks 02 through 04 use runtime-only diagnostics for readout and resonator workflows, and notebooks 05 and 06 no longer seed defaults or report deltas from legacy `cqed_params` values.
+
+**Files affected:**
+
+- `docs/CHANGELOG.md`
+- `notebooks/00_hardware_defintion.ipynb`
+- `notebooks/02_time_of_flight.ipynb`
+- `notebooks/03_resonator_spectroscopy.ipynb`
+- `notebooks/04_resonator_power_chevron.ipynb`
+- `notebooks/05_qubit_spectroscopy_pulse_calibration.ipynb`
+- `notebooks/06_coherence_experiments.ipynb`
+
+### 2026-03-22 — Operator Workflow Refactor for Numbered Notebooks
+
+**Classification: Major**
+
+**Summary:**
+
+Redesigned the numbered post-cavity bring-up notebooks around explicit operator-stage contracts instead of notebook-local workflow policy. Added a shared compat helper layer for stage bootstrap, stage checkpoint persistence, calibration patch preview and apply, fit gates, and primitive pulse seeding, then rewired notebooks 03 through 06 to consume that layer. The resonator spectroscopy notebook now records whether its readout-frequency patch was actually applied, the power chevron notebook is explicitly characterization-only with advisory outputs, and the qubit and coherence notebooks now persist stage checkpoints that separate measured results from committed calibration updates.
+
+**Files affected:**
+
+- `docs/CHANGELOG.md`
+- `API_REFERENCE.md`
+- `notebooks/03_resonator_spectroscopy.ipynb`
+- `notebooks/04_resonator_power_chevron.ipynb`
+- `notebooks/05_qubit_spectroscopy_pulse_calibration.ipynb`
+- `notebooks/06_coherence_experiments.ipynb`
+- `notebooks/WORKFLOW_REDESIGN.md`
+- `qubox/compat/notebook.py`
+- `qubox/compat/notebook_workflow.py`
+- `tests/test_notebook_workflow.py`
+- `tests/test_qubox_public_api.py`
+
+### 2026-03-22 — Python 3.12.10 Repository Standardization
+
+**Classification: Minor**
+
+**Summary:**
+
+Updated the repository policy and documentation to make Python 3.12.10 the required interpreter target, explicitly allowing either the workspace `.venv` or a global Python 3.12.10 interpreter. This replaces the previous 3.12.13 guidance while preserving Python 3.11.8 as the machine-specific fallback on ECE-SHANKAR-07.
+
+**Files affected:**
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.github/copilot-instructions.md`
+- `README.md`
+- `API_REFERENCE.md`
+- `.skills/repo-onboarding/SKILL.md`
+- `docs/CHANGELOG.md`
+
+### 2026-03-22 — Projected-Signal Audit for Rabi and Coherence Analysis
+
+**Classification: Moderate**
+
+**Summary:**
+
+Audited the time-domain Rabi and coherence analysis paths to verify that fitted quantities are derived from the projected complex readout signal rather than raw IQ or magnitude data. Tightened `PowerRabi.analyze()` so it fits the direct projected `S_I` trace instead of an offset-restored variant, updated `T1Relaxation`, `T2Ramsey`, `T2Echo`, and `ResidualPhotonRamsey` to persist the exact projected signal used for fitting into `analysis.data["projected_S"]`, and adjusted the matching plot paths to consume that stored projected trace. Added regression tests that monkeypatch the projection and fitting steps to verify the fit input is the projected I-quadrature signal for the Rabi and coherence workflows.
+
+**Files affected:**
+
+- `docs/CHANGELOG.md`
+- `qubox/legacy/experiments/time_domain/rabi.py`
+- `qubox/legacy/experiments/time_domain/relaxation.py`
+- `qubox/legacy/experiments/time_domain/coherence.py`
+- `qubox/legacy/tests/test_projected_signal_analysis.py`
+
+### 2026-03-22 — End-to-End Bring-Up Notebook Verification Pass
+
+**Classification: Moderate**
+
+**Summary:**
+
+Validated the numbered bring-up workflow against the live post-cavity device chain from notebook 00 through notebook 06 using reduced-cost settings and repaired the runtime issues uncovered in the process. Simplified notebook 01 to a single mixer-calibration mode selector and fixed its active-target plotting bug, hardened notebooks 02 through 05 to reopen a fresh shared session after QM restarts, shortened notebook 02 and added an automatic one-time reconnect for dropped QM handles, widened notebook 04's default chevron window and fixed its missing `ro_therm_clks` override, and tightened notebook 06 so non-physical coherence fits such as negative Ramsey `T2*` values no longer apply calibration patches. Re-ran the full sequence live, including mixer calibration, time-of-flight, resonator spectroscopy, resonator power chevron, qubit spectroscopy, Power Rabi, Temporal Rabi, and coherence experiments, and restored the qubit-frequency calibration after the earlier Ramsey gate allowed a bad fit through during validation.
+
+**Files affected:**
+
+- `docs/CHANGELOG.md`
+- `notebooks/01_mixer_calibrations.ipynb`
+- `notebooks/02_time_of_flight.ipynb`
+- `notebooks/03_resonator_spectroscopy.ipynb`
+- `notebooks/04_resonator_power_chevron.ipynb`
+- `notebooks/05_qubit_spectroscopy_pulse_calibration.ipynb`
+- `notebooks/06_coherence_experiments.ipynb`
+
+### 2026-03-21 — Legacy-Style Analysis Pass for Numbered Experiment Notebooks
+
+**Classification: Moderate**
+
+**Summary:**
+
+Finished the numbered post-cavity notebook sequence by aligning the analysis cells with the legacy workflow instead of relying on generic comparison bars. Added an explicit 00→06 sequence map in `notebooks/00_hardware_defintion.ipynb`, replaced notebook 00's startup summary with runtime-versus-legacy delta views, updated notebook 02 to show the legacy-style raw ADC overlay and arrival-envelope analysis, replaced notebook 03 with explicit resonator magnitude and phase traces, replaced notebook 04 with legacy-style chevron `pcolormesh` maps for magnitude and phase, and upgraded notebooks 05 and 06 to show experiment-specific diagnostic plots built from the real spectroscopy, Rabi, and coherence fit outputs. Validated the revised cells in preview mode and executed the updated notebook 00 startup path against a live session state.
+
+**Files affected:**
+
+- `docs/CHANGELOG.md`
+- `notebooks/00_hardware_defintion.ipynb`
+- `notebooks/02_time_of_flight.ipynb`
+- `notebooks/03_resonator_spectroscopy.ipynb`
+- `notebooks/04_resonator_power_chevron.ipynb`
+- `notebooks/05_qubit_spectroscopy_pulse_calibration.ipynb`
+- `notebooks/06_coherence_experiments.ipynb`
+
+### 2026-03-21 — Notebook Preview Validation and Kernel Bootstrap Hardening
+
+**Classification: Moderate**
+
+**Summary:**
+
+Hardened the downstream numbered experiment notebooks so they can bootstrap cleanly in both the workspace virtual environment and the global Python 3.12.10 kernel. Added an explicit repository-root import shim to notebooks 02 through 06, then smoke-tested their non-destructive bootstrap and preview cells with hardware execution flags disabled. Tightened notebook 05's reference-pulse preview plot to avoid complex-value plotting warnings, and updated notebook 06 to surface a resolved `qb_therm_clks` fallback from legacy calibration data while guarding T1 and T2 Echo execution when the runtime session does not expose that calibration yet.
+
+**Files affected:**
+
+- `docs/CHANGELOG.md`
+- `notebooks/02_time_of_flight.ipynb`
+- `notebooks/03_resonator_spectroscopy.ipynb`
+- `notebooks/04_resonator_power_chevron.ipynb`
+- `notebooks/05_qubit_spectroscopy_pulse_calibration.ipynb`
+- `notebooks/06_coherence_experiments.ipynb`
+
+### 2026-03-22 — Numbered Spectroscopy and Rabi Notebook Expansion
+
+**Classification: Moderate**
+
+**Summary:**
+
+Updated `notebooks/01_mixer_calibrations.ipynb` so both the Octave auto-calibration path and the SA-driven manual calibration path operate as single run cells over the full active mixer target set, while keeping both paths preview-first by default. Added `notebooks/02_resonator_spectroscopy.ipynb` for the broad resonator spectroscopy and resonator power chevron workflow, and added `notebooks/03_power_rabi_temporal_rabi.ipynb` for the power Rabi and temporal Rabi workflow using legacy-derived sweep defaults.
+
+**Files affected:**
+
+- `docs/CHANGELOG.md`
+- `notebooks/01_mixer_calibrations.ipynb`
+- `notebooks/02_resonator_spectroscopy.ipynb`
+- `notebooks/03_power_rabi_temporal_rabi.ipynb`
+
+### 2026-03-21 — Shared Notebook Session Reuse and Full Mixer Target Discovery
+
+**Classification: Moderate**
+
+**Summary:**
+
+Added a notebook runtime helper layer so numbered experiment notebooks can reuse
+the live session opened in `00_hardware_defintion.ipynb` when they share a kernel,
+and can reopen the same sample or cooldown session from a persisted bootstrap file
+when started in a fresh kernel. Extended the mixer-calibration flow to derive manual
+calibration targets from the live hardware state instead of hard-coding only the
+readout, qubit, and storage aliases, which allows the notebook workflow to see all
+five active Octave outputs.
+
+**Files affected:**
+
+- `qubox/compat/notebook_runtime.py`
+- `qubox/compat/notebook.py`
+- `tests/test_notebook_runtime.py`
+- `tests/test_qubox_public_api.py`
+- `API_REFERENCE.md`
+- `docs/CHANGELOG.md`
+- `notebooks/00_hardware_defintion.ipynb`
+- `notebooks/01_mixer_calibrations.ipynb`
+
+### 2026-03-21 — Explicit Notebook Hardware Definition Controls
+
+**Classification: Moderate**
+
+**Summary:**
+
+Extended the notebook-facing compat surface with `HardwareDefinition` and updated
+`notebooks/00_hardware_defintion.ipynb` so users can explicitly define sample-level
+hardware bindings, LO and IF settings, aliases, and external device definitions
+before opening a session. This removes the need to rely on opaque copied defaults
+when starting a new hardware campaign.
+
+**Files affected:**
+
+- `qubox/compat/notebook.py`
+- `tests/test_qubox_public_api.py`
+- `API_REFERENCE.md`
+- `docs/CHANGELOG.md`
+- `notebooks/00_hardware_defintion.ipynb`
+
+### 2026-03-21 — Devices Schema Validation Compatibility Fix
+
+**Classification: Moderate**
+
+**Summary:**
+
+Updated schema validation so devices.json accepts the flat top-level device map
+used by the runtime and by HardwareDefinition, while still accepting an optional
+wrapped devices block. This removes the false validation failure reported by
+notebooks/00_hardware_defintion.ipynb during sample-level schema checks.
+
+**Files affected:**
+
+- `qubox/schemas.py`
+- `qubox/legacy/core/schemas.py`
+- `tests/test_schemas.py`
+- `docs/CHANGELOG.md`
+
+### 2026-03-21 — Sequential Notebook Mixer Calibration Follow-On
+
+**Classification: Moderate**
+
+**Summary:**
+
+Added `notebooks/01_mixer_calibrations.ipynb` as the next step in the numbered
+experiment workflow. The notebook extracts the mixer-calibration stage from the
+legacy post-cavity context notebook, reopens the session for the active sample and
+cooldown, summarizes active mixer targets, and exposes both built-in Octave auto
+calibration and SA-driven manual calibration through preview-first controls so the
+notebook can execute safely before enabling live calibration.
+
+**Files affected:**
+
+- `docs/CHANGELOG.md`
+- `notebooks/01_mixer_calibrations.ipynb`
+
+### 2026-03-21 — Sequential Notebook Experiment Workflow Bootstrap
+
+**Classification: Moderate**
+
+**Summary:**
+
+Defined a numbered notebook workflow for experiment execution so future agent-driven
+calibration and experiment tasks create separate notebooks under `notebooks/` rather
+than extending a single monolithic workflow notebook. Added the first required startup
+notebook, `00_hardware_defintion.ipynb`, by extracting the shared hardware definition,
+sample or cooldown bootstrap, session open, and preflight validation steps from the
+existing post-cavity context notebook.
+
+**Files affected:**
+
+- `AGENTS.md`
+- `docs/CHANGELOG.md`
+- `notebooks/00_hardware_defintion.ipynb`
+
 ### 2026-03-14 — Standard Experiment Suite: 20 Canonical Experiments
 
 **Classification: Major**

@@ -1,6 +1,8 @@
-"""qubox.core.errors — exception hierarchy.
+"""qubox.core.errors — unified exception hierarchy.
 
-Migrated from ``qubox_v2_legacy.core.errors`` with no external dependencies.
+Canonical exception hierarchy for the qubox package.  All qubox exceptions
+inherit from :class:`QuboxError` so callers can catch them with a single
+``except QuboxError`` if desired.
 """
 from __future__ import annotations
 
@@ -10,33 +12,32 @@ class QuboxError(Exception):
 
 
 class ConfigError(QuboxError):
-    """Raised for invalid or missing configuration."""
+    """Invalid or missing configuration."""
 
 
 class ConnectionError(QuboxError):  # noqa: A001  (shadows built-in intentionally)
-    """Raised when a hardware connection cannot be established."""
+    """Communication failure with OPX+ / Octave / external instrument."""
 
 
 class JobError(QuboxError):
-    """Raised when a QM job fails or times out."""
+    """QUA job submission, execution, or fetch failure."""
 
 
 class DeviceError(QuboxError):
-    """Raised for device-level failures (calibration state, hardware faults)."""
+    """External-device driver error (SignalCore, OctoDac, etc.)."""
 
 
 class PulseError(QuboxError):
-    """Raised for invalid pulse definitions or registration failures."""
+    """Invalid pulse definition (amplitude, length, waveform reference)."""
 
 
 class CalibrationError(QuboxError):
-    """Raised for calibration data consistency or validation failures."""
+    """Octave or element calibration failure."""
 
 
-class ContextMismatchError(QuboxError):
-    """Raised when the session context does not match the on-disk calibration.
+class ContextMismatchError(ConfigError):
+    """Device/cooldown/wiring context mismatch during calibration load.
 
-    Typical causes:
-    - Loading a calibration file made for a different sample.
-    - Hardware.json has been changed (wiring_rev mismatch).
+    Inherits from :class:`ConfigError` for backward compatibility with
+    legacy code that catches ``ConfigError``.
     """

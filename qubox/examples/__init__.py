@@ -1,3 +1,2 @@
-"""Examples for the canonical `qubox` API."""
-
-__all__: list[str] = []
+# qubox_v2/examples/__init__.py
+"""Example scripts and demos for qubox_v2."""

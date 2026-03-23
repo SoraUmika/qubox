@@ -59,6 +59,7 @@ from .transitions import (
     Transition,
     CANONICAL_REF_PULSES,
     CANONICAL_DERIVED_PULSES,
+    DEFAULT_TRANSITION,
     resolve_pulse_name,
     canonical_ref_pulse,
     canonical_derived_pulse,
@@ -143,4 +144,10 @@ __all__ = [
     "list_snapshots",
     "load_snapshot",
     "diff_snapshots",
+    # Legacy calibration utilities
+    "MixerCalibrationConfig",
+    "SAMeasurementHelper",
 ]
+
+# Legacy calibration utilities (now co-located)
+from .mixer_calibration import MixerCalibrationConfig, SAMeasurementHelper

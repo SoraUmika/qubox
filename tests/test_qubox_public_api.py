@@ -182,3 +182,11 @@ def test_notebook_compat_surface_is_lazy():
     assert "measureMacro" in notebook_compat.__all__
     assert "RunResult" in notebook_compat.__all__
     assert "save_run_summary" in notebook_compat.__all__
+    assert "HardwareDefinition" in notebook_compat.__all__
+    assert "open_shared_session" in notebook_compat.__all__
+    assert "require_shared_session" in notebook_compat.__all__
+    assert "resolve_active_mixer_targets" in notebook_compat.__all__
+    assert "open_notebook_stage" in notebook_compat.__all__
+    assert "save_stage_checkpoint" in notebook_compat.__all__
+    assert "preview_or_apply_patch_ops" in notebook_compat.__all__
+    assert "ensure_primitive_rotations" in notebook_compat.__all__

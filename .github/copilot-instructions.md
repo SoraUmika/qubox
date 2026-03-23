@@ -10,12 +10,14 @@ on real quantum hardware or the QM simulator. **Physical correctness is non-nego
 
 ## Python
 
-- **Required:** Python 3.12.13 (fallback: 3.11.8 on ECE-SHANKAR-07 only)
+- **Required:** Python 3.12.10 via the workspace `.venv` or a global 3.12.10 interpreter (fallback: 3.11.8 on ECE-SHANKAR-07 only)
 - **Forbidden:** all other Python versions
 - Style: PEP 8, ruff linter, 120-char line length
 - `from __future__ import annotations` in every module
 - Pydantic v2 for data models; frozen dataclasses for identity objects
 - Imports: stdlib → third-party → local
+
+If a lab dependency or notebook flow works in the known-good Python 3.11.8 install but fails in 3.12.x, inspect the package name, version, and import location from `E:\Program Files\Python311\python.exe` before changing qubox code. Use that environment as the backup reference for mirroring missing packages into the active 3.12.x environment.
 
 ## QUA Validation Rule
 
@@ -63,6 +65,14 @@ tools/              Agent and developer utilities
 past_prompt/        Prompt logs (append-only)
 limitations/        Known QUA/hardware limitations
 ```
+
+## Legacy Reference Codebase
+
+The legacy codebase at `C:\Users\jl82323\Box\Shyam Shankar Quantum Circuits Group\Users\Users_JianJun\JJL_Experiments`
+is the behavioral ground truth for experiment migration. Refer to `post_cavity_experiment_legacy.ipynb`
+to understand how experiments are defined and run. Experiments there have been validated on real
+hardware and usually produce the correct behavior. The goal is to incrementally migrate experiments
+from legacy to qubox — one at a time — while preserving behavior. See `AGENTS.md §14` for full details.
 
 ## Key Rules
 

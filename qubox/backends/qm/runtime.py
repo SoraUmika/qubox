@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -391,7 +391,7 @@ _ADAPTERS: dict[str, LegacyExperimentAdapter] | None = None
 def _load_adapters() -> dict[str, LegacyExperimentAdapter]:
     global _ADAPTERS
     if _ADAPTERS is None:
-        from qubox.legacy.experiments import (
+        from qubox.experiments import (
             ActiveQubitResetBenchmark,
             AllXY,
             DRAGCalibration,
@@ -614,7 +614,7 @@ class QMRuntime:
         )
         n_shots = int(request.shots or getattr(request.sweep, "averaging", 1) or 1)
         if self.circuit_runner_cls is None:
-            from qubox.legacy.programs.circuit_runner import CircuitRunner
+            from qubox.programs.circuit_runner import CircuitRunner
 
             self.circuit_runner_cls = CircuitRunner
         runner = self.circuit_runner_cls(self.session.legacy_session)

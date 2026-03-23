@@ -1,6 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from qubox.legacy.programs.circuit_runner import (
+from qubox.programs.circuit_runner import (
     Gate as LegacyGate,
     GateCondition as LegacyGateCondition,
     MeasurementRecord,
@@ -8,7 +8,7 @@ from qubox.legacy.programs.circuit_runner import (
     QuantumCircuit as LegacyQuantumCircuit,
     StreamSpec,
 )
-from qubox.legacy.programs.measurement import StateRule
+from qubox.programs.measurement import StateRule
 
 from ...circuit import QuantumCircuit
 from ...sequence import Operation, Sequence, SweepPlan

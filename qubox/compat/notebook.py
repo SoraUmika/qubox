@@ -1,47 +1,13 @@
-"""Notebook-facing compatibility surface under the ``qubox`` namespace.
+﻿"""Notebook-facing compatibility surface under the ``qubox`` namespace.
 
 This module centralises runtime symbols needed by notebooks so they can import
 only from ``qubox``, ``qubox.compat``, and ``qubox_tools``.
 
-Migration status
-----------------
-MIGRATED (no ``qubox_v2_legacy`` dependency):
-    drag_gaussian_pulse_waveforms     → qubox.tools.waveforms
-    kaiser_pulse_waveforms            → qubox.tools.waveforms
-    register_rotations_from_ref_iq    → qubox.tools.generators
-    ensure_displacement_ops           → qubox.tools.generators
-    CalibrationOrchestrator           → qubox.calibration
-    CalibrationStore                  → qubox.calibration
-    Patch, UpdateOp, CalibrationResult, Artifact → qubox.calibration
-    DiscriminationParams, ReadoutQuality, CQEDParams, PulseCalibration, FitRecord
-                                      → qubox.calibration
-    CalibrationData, CalibrationContext → qubox.calibration
-    SampleRegistry, SampleInfo        → qubox.devices
-    ArtifactManager, cleanup_artifacts → qubox.artifacts
-    save_config_snapshot, save_run_summary → qubox.artifacts
-    preflight_check                   → qubox.preflight
-    validate_config_dir               → qubox.schemas
-    ContextMismatchError              → qubox.core.errors
-    ExperimentContext                 → qubox.session.context
-    SessionState                      → qubox.session.state
-
-MIGRATION BLOCKERS (still proxy to ``qubox_v2_legacy``):
-    All experiment classes (QubitSpectroscopy, StorageWignerTomography, …)
-    and low-level hardware utilities (measureMacro, continuous_wave,
-    QuboxSimulationConfig, run_all_checks, readout_mod, gates_mod)
-    remain in ``qubox_v2_legacy`` pending a full QUA-program-layer rewrite.
-    Each entry in ``_LEGACY_ATTR_MAP`` below represents one remaining blocker.
-
-    To complete the migration of an item:
-      1. Implement or move the class/function into the appropriate
-         ``qubox.*`` sub-package.
-      2. Replace its entry in ``_LEGACY_ATTR_MAP`` with a direct import
-         from that sub-package.
+All symbols are now served from the unified ``qubox`` package — no legacy
+proxy layer remains.
 """
 
 from __future__ import annotations
-
-from importlib import import_module
 
 # ---------------------------------------------------------------------------
 # MIGRATED: waveform generators now live in qubox.tools
@@ -114,94 +80,115 @@ from ..preflight import preflight_check
 # MIGRATED: schema validation now lives in qubox.schemas
 # ---------------------------------------------------------------------------
 from ..schemas import validate_config_dir, ValidationResult
+from ..core.hardware_definition import HardwareDefinition
+from .notebook_runtime import (
+    NotebookSessionBootstrap,
+    close_shared_session,
+    get_notebook_session_bootstrap_path,
+    get_shared_session,
+    load_notebook_session_bootstrap,
+    open_shared_session,
+    register_shared_session,
+    require_shared_session,
+    resolve_active_mixer_targets,
+    restore_shared_session,
+    save_notebook_session_bootstrap,
+)
+from .notebook_workflow import (
+    NotebookStageContext,
+    NotebookWorkflowConfig,
+    build_notebook_workflow_config,
+    ensure_primitive_rotations,
+    fit_center_inside_window,
+    fit_quality_gate,
+    get_notebook_stage_checkpoint_path,
+    load_legacy_reference,
+    load_stage_checkpoint,
+    open_notebook_stage,
+    preview_or_apply_patch_ops,
+    save_stage_checkpoint,
+)
 
 # ---------------------------------------------------------------------------
 # MIGRATED: core types, errors, context
 # ---------------------------------------------------------------------------
 from ..core.errors import ContextMismatchError
+from ..core.hardware_definition import HardwareDefinition
 from ..session.context import ExperimentContext, compute_wiring_rev
 from ..session.state import SessionState
 
 # ---------------------------------------------------------------------------
-# MIGRATION BLOCKERS: lazy proxies to qubox_v2_legacy
+# Experiment classes (now in qubox.experiments)
 # ---------------------------------------------------------------------------
-# Each key is the public name exposed to notebooks.
-# Format: "PublicName": ("qubox_v2_legacy.module.path", "ClassName")
-#
-# TODO: as each item is migrated into qubox, replace its entry here with a
-#       direct import and remove it from this map.
+from ..experiments import (
+    # Spectroscopy
+    ResonatorSpectroscopy,
+    ResonatorPowerSpectroscopy,
+    ResonatorSpectroscopyX180,
+    ReadoutTrace,
+    QubitSpectroscopy,
+    QubitSpectroscopyEF,
+    # Time-domain
+    PowerRabi,
+    TemporalRabi,
+    T1Relaxation,
+    T2Ramsey,
+    T2Echo,
+    # Readout calibration
+    IQBlob,
+    ReadoutGEDiscrimination,
+    ReadoutWeightsOptimization,
+    ReadoutButterflyMeasurement,
+    CalibrateReadoutFull,
+    # Gate calibration
+    AllXY,
+    DRAGCalibration,
+    RandomizedBenchmarking,
+    PulseTrainCalibration,
+    # Storage / cavity
+    StorageSpectroscopy,
+    NumSplittingSpectroscopy,
+    StorageChiRamsey,
+    FockResolvedSpectroscopy,
+    FockResolvedT1,
+    FockResolvedRamsey,
+    FockResolvedPowerRabi,
+    # Tomography
+    QubitStateTomography,
+    StorageWignerTomography,
+    SNAPOptimization,
+    # SPA
+    SPAFluxOptimization,
+    SPAPumpFrequencyOptimization,
+)
+from ..experiments.calibration import ReadoutConfig
+from ..experiments.calibration.readout import CalibrateReadoutFull as CalibrationReadoutFull  # noqa: F811
+from ..experiments.result import RunResult, AnalysisResult, ProgramBuildResult
 
 # ---------------------------------------------------------------------------
-# MIGRATION BLOCKERS: lazy proxies to qubox_v2_legacy
+# Calibration utilities
 # ---------------------------------------------------------------------------
-# Only symbols that cannot yet be migrated (QUA-program-coupled experiments
-# and hardware utilities) remain here.  Everything else is imported directly
-# above.
+from ..calibration import MixerCalibrationConfig, SAMeasurementHelper
 
-_LEGACY_ATTR_MAP: dict[str, tuple[str, str]] = {
-    # ── Spectroscopy experiments ──────────────────────────────────────────
-    "ResonatorSpectroscopy":       ("qubox.legacy.experiments", "ResonatorSpectroscopy"),
-    "ResonatorPowerSpectroscopy":  ("qubox.legacy.experiments", "ResonatorPowerSpectroscopy"),
-    "ResonatorSpectroscopyX180":   ("qubox.legacy.experiments", "ResonatorSpectroscopyX180"),
-    "ReadoutTrace":                ("qubox.legacy.experiments", "ReadoutTrace"),
-    "QubitSpectroscopy":           ("qubox.legacy.experiments", "QubitSpectroscopy"),
-    "QubitSpectroscopyEF":         ("qubox.legacy.experiments", "QubitSpectroscopyEF"),
-    # ── Time-domain experiments ───────────────────────────────────────────
-    "PowerRabi":                   ("qubox.legacy.experiments", "PowerRabi"),
-    "TemporalRabi":                ("qubox.legacy.experiments", "TemporalRabi"),
-    "T1Relaxation":                ("qubox.legacy.experiments", "T1Relaxation"),
-    "T2Ramsey":                    ("qubox.legacy.experiments", "T2Ramsey"),
-    "T2Echo":                      ("qubox.legacy.experiments", "T2Echo"),
-    # ── Readout calibration experiments ──────────────────────────────────
-    "IQBlob":                      ("qubox.legacy.experiments", "IQBlob"),
-    "ReadoutGEDiscrimination":     ("qubox.legacy.experiments", "ReadoutGEDiscrimination"),
-    "ReadoutWeightsOptimization":  ("qubox.legacy.experiments", "ReadoutWeightsOptimization"),
-    "ReadoutButterflyMeasurement": ("qubox.legacy.experiments", "ReadoutButterflyMeasurement"),
-    "CalibrateReadoutFull":        ("qubox.legacy.experiments", "CalibrateReadoutFull"),
-    # ── Gate calibration experiments ──────────────────────────────────────
-    "AllXY":                       ("qubox.legacy.experiments", "AllXY"),
-    "DRAGCalibration":             ("qubox.legacy.experiments", "DRAGCalibration"),
-    "RandomizedBenchmarking":      ("qubox.legacy.experiments", "RandomizedBenchmarking"),
-    "PulseTrainCalibration":       ("qubox.legacy.experiments", "PulseTrainCalibration"),
-    # ── Storage / cavity experiments ──────────────────────────────────────
-    "StorageSpectroscopy":         ("qubox.legacy.experiments", "StorageSpectroscopy"),
-    "NumSplittingSpectroscopy":    ("qubox.legacy.experiments", "NumSplittingSpectroscopy"),
-    "StorageChiRamsey":            ("qubox.legacy.experiments", "StorageChiRamsey"),
-    "FockResolvedSpectroscopy":    ("qubox.legacy.experiments", "FockResolvedSpectroscopy"),
-    "FockResolvedT1":              ("qubox.legacy.experiments", "FockResolvedT1"),
-    "FockResolvedRamsey":          ("qubox.legacy.experiments", "FockResolvedRamsey"),
-    "FockResolvedPowerRabi":       ("qubox.legacy.experiments", "FockResolvedPowerRabi"),
-    # ── Tomography experiments ─────────────────────────────────────────────
-    "QubitStateTomography":        ("qubox.legacy.experiments", "QubitStateTomography"),
-    "StorageWignerTomography":     ("qubox.legacy.experiments", "StorageWignerTomography"),
-    "SNAPOptimization":            ("qubox.legacy.experiments", "SNAPOptimization"),
-    # ── SPA experiments ───────────────────────────────────────────────────
-    "SPAFluxOptimization":         ("qubox.legacy.experiments", "SPAFluxOptimization"),
-    "SPAPumpFrequencyOptimization":("qubox.legacy.experiments", "SPAPumpFrequencyOptimization"),
-    # ── Legacy-only experiment infrastructure ─────────────────────────────
-    "ReadoutConfig":               ("qubox.legacy.experiments.calibration", "ReadoutConfig"),
-    "CalibrationReadoutFull":      ("qubox.legacy.experiments.calibration.readout", "CalibrationReadoutFull"),
-    "MixerCalibrationConfig":      ("qubox.legacy.calibration", "MixerCalibrationConfig"),
-    "SAMeasurementHelper":         ("qubox.legacy.calibration", "SAMeasurementHelper"),
-    # ── Experiment result types ────────────────────────────────────────────
-    "RunResult":                   ("qubox.legacy.experiments.result", "RunResult"),
-    "AnalysisResult":              ("qubox.legacy.experiments.result", "AnalysisResult"),
-    "ProgramBuildResult":          ("qubox.legacy.experiments.result", "ProgramBuildResult"),
-    # ── Hardware / program utilities ──────────────────────────────────────
-    "measureMacro":                ("qubox.legacy.programs.macros.measure", "measureMacro"),
-    "continuous_wave":             ("qubox.legacy.programs.builders.utility", "continuous_wave"),
-    "QuboxSimulationConfig":       ("qubox.legacy.hardware.program_runner", "QuboxSimulationConfig"),
-    # ── Verification ──────────────────────────────────────────────────────
-    "run_all_checks":              ("qubox.legacy.verification.waveform_regression", "run_all_checks"),
-}
+# ---------------------------------------------------------------------------
+# Hardware / program utilities
+# ---------------------------------------------------------------------------
+from ..programs.macros.measure import measureMacro
+from ..programs.builders.utility import continuous_wave
+from ..hardware.program_runner import QuboxSimulationConfig
 
-_LEGACY_MODULE_MAP: dict[str, str] = {
-    "readout_mod": "qubox.legacy.experiments.calibration.readout",
-    "gates_mod":   "qubox.legacy.experiments.calibration.gates",
-}
+# ---------------------------------------------------------------------------
+# Verification
+# ---------------------------------------------------------------------------
+from ..verification.waveform_regression import run_all_checks
 
-# Public names directly exported from this module (no lazy loading needed)
-_MIGRATED_NAMES = {
+# ---------------------------------------------------------------------------
+# Module aliases for backward compat
+# ---------------------------------------------------------------------------
+from ..experiments.calibration import readout as readout_mod  # noqa: F811
+from ..experiments.calibration import gates as gates_mod
+
+__all__ = [
     # waveform utilities
     "drag_gaussian_pulse_waveforms",
     "kaiser_pulse_waveforms",
@@ -250,28 +237,82 @@ _MIGRATED_NAMES = {
     # schemas
     "validate_config_dir",
     "ValidationResult",
+    # hardware definition
+    "HardwareDefinition",
+    "NotebookSessionBootstrap",
     # core
+    "close_shared_session",
     "ContextMismatchError",
     "ExperimentContext",
+    "get_notebook_session_bootstrap_path",
+    "get_shared_session",
+    "load_notebook_session_bootstrap",
+    "open_shared_session",
+    "register_shared_session",
+    "require_shared_session",
+    "resolve_active_mixer_targets",
+    "restore_shared_session",
+    "save_notebook_session_bootstrap",
     "compute_wiring_rev",
     "SessionState",
-}
-
-__all__ = sorted([
-    *_MIGRATED_NAMES,
-    *_LEGACY_ATTR_MAP.keys(),
-    *_LEGACY_MODULE_MAP.keys(),
-])
-
-
-def __getattr__(name: str):
-    if name in _LEGACY_ATTR_MAP:
-        module_name, attr_name = _LEGACY_ATTR_MAP[name]
-        value = getattr(import_module(module_name), attr_name)
-        globals()[name] = value
-        return value
-    if name in _LEGACY_MODULE_MAP:
-        module = import_module(_LEGACY_MODULE_MAP[name])
-        globals()[name] = module
-        return module
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    "NotebookStageContext",
+    "NotebookWorkflowConfig",
+    "build_notebook_workflow_config",
+    "ensure_primitive_rotations",
+    "fit_center_inside_window",
+    "fit_quality_gate",
+    "get_notebook_stage_checkpoint_path",
+    "load_legacy_reference",
+    "load_stage_checkpoint",
+    "open_notebook_stage",
+    "preview_or_apply_patch_ops",
+    "save_stage_checkpoint",
+    # experiments
+    "ResonatorSpectroscopy",
+    "ResonatorPowerSpectroscopy",
+    "ResonatorSpectroscopyX180",
+    "ReadoutTrace",
+    "QubitSpectroscopy",
+    "QubitSpectroscopyEF",
+    "PowerRabi",
+    "TemporalRabi",
+    "T1Relaxation",
+    "T2Ramsey",
+    "T2Echo",
+    "IQBlob",
+    "ReadoutGEDiscrimination",
+    "ReadoutWeightsOptimization",
+    "ReadoutButterflyMeasurement",
+    "CalibrateReadoutFull",
+    "AllXY",
+    "DRAGCalibration",
+    "RandomizedBenchmarking",
+    "PulseTrainCalibration",
+    "StorageSpectroscopy",
+    "NumSplittingSpectroscopy",
+    "StorageChiRamsey",
+    "FockResolvedSpectroscopy",
+    "FockResolvedT1",
+    "FockResolvedRamsey",
+    "FockResolvedPowerRabi",
+    "QubitStateTomography",
+    "StorageWignerTomography",
+    "SNAPOptimization",
+    "SPAFluxOptimization",
+    "SPAPumpFrequencyOptimization",
+    "ReadoutConfig",
+    "CalibrationReadoutFull",
+    "MixerCalibrationConfig",
+    "SAMeasurementHelper",
+    "RunResult",
+    "AnalysisResult",
+    "ProgramBuildResult",
+    # hardware / program utilities
+    "measureMacro",
+    "continuous_wave",
+    "QuboxSimulationConfig",
+    "run_all_checks",
+    # module aliases
+    "readout_mod",
+    "gates_mod",
+]

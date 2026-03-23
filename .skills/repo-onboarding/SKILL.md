@@ -89,7 +89,7 @@ result = session.exp.qubit.spectroscopy(frequencies=..., n_avg=100)
 
 | Item | Value |
 | --- | --- |
-| Python version | 3.12.13 (fallback: 3.11.8 on ECE-SHANKAR-07) |
+| Python version | 3.12.10 via the workspace `.venv` or a global 3.12.10 interpreter (fallback: 3.11.8 on ECE-SHANKAR-07) |
 | QM API version | 1.2.6 |
 | Hardware | OPX+ + Octave |
 | Hosted server | host=10.157.36.68, cluster_name=Cluster_2 |

@@ -1,4 +1,4 @@
-"""qubox.calibration.orchestrator — calibration execution and patch lifecycle.
+﻿"""qubox.calibration.orchestrator — calibration execution and patch lifecycle.
 
 Migrated from ``qubox_v2_legacy.calibration.orchestrator``.
 qubox_v2_legacy imports removed; QUA-specific ops (measureMacro sync) are
@@ -184,7 +184,7 @@ class CalibrationOrchestrator:
         sync_ok = True
         # Optional: sync measureMacro (hardware-specific, lazy import)
         try:
-            from qubox.legacy.programs.macros.measure import measureMacro  # type: ignore[import]
+            from qubox.programs.macros.measure import measureMacro  # type: ignore[import]
             ro_el = getattr(self.session.context_snapshot(), "ro_el", None)
             if ro_el is not None:
                 measureMacro.sync_from_calibration(self.session.calibration, ro_el)
@@ -330,7 +330,7 @@ class CalibrationOrchestrator:
 
     def _apply_measure_weights(self, payload: dict[str, Any]) -> None:
         try:
-            from qubox.legacy.programs.macros.measure import measureMacro  # type: ignore[import]
+            from qubox.programs.macros.measure import measureMacro  # type: ignore[import]
         except ImportError:
             _logger.warning("SetMeasureWeights: measureMacro not available — skipping")
             return
@@ -357,7 +357,7 @@ class CalibrationOrchestrator:
 
     def _apply_persist_measure_config(self, payload: dict[str, Any]) -> None:
         try:
-            from qubox.legacy.programs.macros.measure import measureMacro  # type: ignore[import]
+            from qubox.programs.macros.measure import measureMacro  # type: ignore[import]
         except ImportError:
             _logger.warning("PersistMeasureConfig: measureMacro not available — skipping")
             return
@@ -367,7 +367,7 @@ class CalibrationOrchestrator:
 
     def _apply_measure_discrimination(self, payload: dict[str, Any]) -> None:
         try:
-            from qubox.legacy.programs.macros.measure import measureMacro  # type: ignore[import]
+            from qubox.programs.macros.measure import measureMacro  # type: ignore[import]
         except ImportError:
             _logger.warning("SetMeasureDiscrimination: measureMacro not available — skipping")
             return
@@ -375,7 +375,7 @@ class CalibrationOrchestrator:
 
     def _apply_measure_quality(self, payload: dict[str, Any]) -> None:
         try:
-            from qubox.legacy.programs.macros.measure import measureMacro  # type: ignore[import]
+            from qubox.programs.macros.measure import measureMacro  # type: ignore[import]
         except ImportError:
             _logger.warning("SetMeasureQuality: measureMacro not available — skipping")
             return
