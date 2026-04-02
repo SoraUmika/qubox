@@ -1,6 +1,6 @@
 ---
 description: "Use when modifying calibration orchestrator, patch rules, calibration store, calibration history, or calibration transitions. Enforces FitResult.success contract, patch transactionality, and calibration lifecycle invariants."
-applyTo: "qubox_v2_legacy/calibration/**"
+applyTo: "qubox/legacy/calibration/**"
 ---
 
 # Calibration Module Instructions
@@ -18,3 +18,11 @@ applyTo: "qubox_v2_legacy/calibration/**"
 - `Patch` objects are immutable descriptions of intended state changes
 - `CalibrationResult` carries `quality` dict that gates downstream application
 - All `Output` objects pass through `split_output_for_persistence()` before serialization
+
+## Procedure
+
+1. Read the existing `CalibrationOrchestrator` flow before modifying any step.
+2. Verify the FitResult contract on every code path through `analyze()`.
+3. Confirm `apply_patch()` captures a snapshot before mutation and rolls back on exception.
+4. Run `pytest tests/ -k calibration -v` after changes to verify contract compliance.
+5. Use the **calibration-experiment-audit** skill for full lifecycle tracing if the change is non-trivial.

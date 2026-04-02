@@ -81,7 +81,7 @@ Understand where your new experiment fits in this pipeline before writing code.
 
 ### Step 5 — Validate
 
-Use the **qua-validation** skill (`.skills/qua-validation/SKILL.md`) to:
+Use the **qua-validation** skill (`.github/skills/qua-validation/SKILL.md`) to:
 
 1. Compile the QUA program
 2. Simulate on the hosted server

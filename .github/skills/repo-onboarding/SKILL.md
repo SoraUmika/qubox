@@ -49,8 +49,7 @@ qubox is a cQED experiment orchestration framework for Quantum Machines hardware
 | `docs/` | CHANGELOG and extended documentation |
 | `tests/` | Unit and integration tests |
 | `limitations/` | Known QUA/hardware limitations |
-| `.skills/` | Claude Code skill files |
-| `.github/skills/` | GitHub Copilot / IDE agent skill files |
+| `.github/skills/` | Agent skill files (8 skills — see listing below) |
 
 ### Key Files
 
@@ -102,3 +101,4 @@ result = session.exp.qubit.spectroscopy(frequencies=..., n_avg=100)
 - Do not introduce changes inconsistent with the policies in `AGENTS.md`.
 - If the task is QUA-related: also use the **qua-validation** skill.
 - If the task creates or modifies public API: also use the **docs-sync** skill.
+- If migrating legacy → qubox: also use the **legacy-migration** skill.
