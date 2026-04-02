@@ -10,7 +10,6 @@ Migrated from ``qubox_v2_legacy.tools.waveforms``.
 from __future__ import annotations
 
 import math
-import warnings
 from collections.abc import Sequence
 
 import numpy as np
@@ -30,7 +29,6 @@ def drag_gaussian_pulse_waveforms(
     detuning=0.0,
     subtracted=True,
     sampling_rate=1e9,
-    **kwargs,
 ):
     """Create Gaussian-based DRAG waveforms compensating leakage and AC Stark shift.
 
@@ -59,44 +57,21 @@ def drag_gaussian_pulse_waveforms(
     -------
     (I_wf, Q_wf) : tuple[list[float], list[float]]
     """
-    delta = kwargs.get("delta", None)
-    if delta is not None:
-        warnings.warn(
-            "'delta' has been replaced by 'anharmonicity' and will be removed in a future release.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if alpha != 0 and delta == 0:
-            raise Exception("Cannot create a DRAG pulse with `anharmonicity=0`")
-        t = np.arange(length, step=1e9 / sampling_rate)
-        center = (length - 1e9 / sampling_rate) / 2
-        gauss_wave = amplitude * np.exp(-((t - center) ** 2) / (2 * sigma**2))
-        gauss_der_wave = (
-            amplitude * (-2 * 1e9 * (t - center) / (2 * sigma**2))
-            * np.exp(-((t - center) ** 2) / (2 * sigma**2))
-        )
-        if subtracted:
-            gauss_wave = gauss_wave - gauss_wave[-1]
-        z = gauss_wave + 1j * 0
-        if alpha != 0:
-            z += 1j * gauss_der_wave * (alpha / (delta - 2 * np.pi * detuning))
-            z *= np.exp(1j * 2 * np.pi * detuning * t * 1e-9)
-    else:
-        if alpha != 0 and anharmonicity == 0:
-            raise Exception("Cannot create a DRAG pulse with `anharmonicity=0`")
-        t = np.arange(length, step=1e9 / sampling_rate)
-        center = (length - 1e9 / sampling_rate) / 2
-        gauss_wave = amplitude * np.exp(-((t - center) ** 2) / (2 * sigma**2))
-        gauss_der_wave = (
-            amplitude * (-2 * 1e9 * (t - center) / (2 * sigma**2))
-            * np.exp(-((t - center) ** 2) / (2 * sigma**2))
-        )
-        if subtracted:
-            gauss_wave = gauss_wave - gauss_wave[-1]
-        z = gauss_wave + 1j * 0
-        if alpha != 0:
-            z += 1j * gauss_der_wave * (alpha / (2 * np.pi * anharmonicity - 2 * np.pi * detuning))
-            z *= np.exp(1j * 2 * np.pi * detuning * t * 1e-9)
+    if alpha != 0 and anharmonicity == 0:
+        raise Exception("Cannot create a DRAG pulse with `anharmonicity=0`")
+    t = np.arange(length, step=1e9 / sampling_rate)
+    center = (length - 1e9 / sampling_rate) / 2
+    gauss_wave = amplitude * np.exp(-((t - center) ** 2) / (2 * sigma**2))
+    gauss_der_wave = (
+        amplitude * (-2 * 1e9 * (t - center) / (2 * sigma**2))
+        * np.exp(-((t - center) ** 2) / (2 * sigma**2))
+    )
+    if subtracted:
+        gauss_wave = gauss_wave - gauss_wave[-1]
+    z = gauss_wave + 1j * 0
+    if alpha != 0:
+        z += 1j * gauss_der_wave * (alpha / (2 * np.pi * anharmonicity - 2 * np.pi * detuning))
+        z *= np.exp(1j * 2 * np.pi * detuning * t * 1e-9)
     return z.real.tolist(), z.imag.tolist()
 
 
@@ -107,44 +82,23 @@ def drag_cosine_pulse_waveforms(
     anharmonicity,
     detuning=0.0,
     sampling_rate=1e9,
-    **kwargs,
 ):
     """Create cosine-based DRAG waveforms.
 
     Chen et al. PRL 116, 020501 (2016).
     """
-    delta = kwargs.get("delta", None)
-    if delta is not None:
-        warnings.warn(
-            "'delta' has been replaced by 'anharmonicity' and will be removed in a future release.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if alpha != 0 and anharmonicity == 0:
-            raise Exception("Cannot create a DRAG pulse with `anharmonicity=0`")
-        t = np.arange(length, step=1e9 / sampling_rate)
-        end_point = length - 1e9 / sampling_rate
-        cos_wave = 0.5 * amplitude * (1 - np.cos(t * 2 * np.pi / end_point))
-        sin_wave = (
-            0.5 * amplitude * (2 * np.pi / end_point * 1e9) * np.sin(t * 2 * np.pi / end_point)
-        )
-        z = cos_wave + 1j * 0
-        if alpha != 0:
-            z += 1j * sin_wave * (alpha / (delta - 2 * np.pi * detuning))
-            z *= np.exp(1j * 2 * np.pi * detuning * t * 1e-9)
-    else:
-        if alpha != 0 and anharmonicity == 0:
-            raise Exception("Cannot create a DRAG pulse with `anharmonicity=0`")
-        t = np.arange(length, step=1e9 / sampling_rate)
-        end_point = length - 1e9 / sampling_rate
-        cos_wave = 0.5 * amplitude * (1 - np.cos(t * 2 * np.pi / end_point))
-        sin_wave = (
-            0.5 * amplitude * (2 * np.pi / end_point * 1e9) * np.sin(t * 2 * np.pi / end_point)
-        )
-        z = cos_wave + 1j * 0
-        if alpha != 0:
-            z += 1j * sin_wave * (alpha / (2 * np.pi * anharmonicity - 2 * np.pi * detuning))
-            z *= np.exp(1j * 2 * np.pi * detuning * t * 1e-9)
+    if alpha != 0 and anharmonicity == 0:
+        raise Exception("Cannot create a DRAG pulse with `anharmonicity=0`")
+    t = np.arange(length, step=1e9 / sampling_rate)
+    end_point = length - 1e9 / sampling_rate
+    cos_wave = 0.5 * amplitude * (1 - np.cos(t * 2 * np.pi / end_point))
+    sin_wave = (
+        0.5 * amplitude * (2 * np.pi / end_point * 1e9) * np.sin(t * 2 * np.pi / end_point)
+    )
+    z = cos_wave + 1j * 0
+    if alpha != 0:
+        z += 1j * sin_wave * (alpha / (2 * np.pi * anharmonicity - 2 * np.pi * detuning))
+        z *= np.exp(1j * 2 * np.pi * detuning * t * 1e-9)
     return z.real.tolist(), z.imag.tolist()
 
 
@@ -161,7 +115,6 @@ def kaiser_pulse_waveforms(
     sampling_rate=1e9,
     alpha=0.0,
     anharmonicity=0.0,
-    **kwargs,
 ):
     """Create a Kaiser-window pulse (optionally with DRAG quadrature term).
 
@@ -186,15 +139,6 @@ def kaiser_pulse_waveforms(
     anharmonicity : float
         f_21 − f_10 in Hz (required when alpha != 0).
     """
-    delta = kwargs.get("delta", None)
-    if delta is not None:
-        warnings.warn(
-            "'delta' has been replaced by 'anharmonicity' and will be removed in a future release.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        anharmonicity = float(delta)
-
     if alpha != 0.0 and anharmonicity == 0.0:
         raise Exception("Cannot create a DRAG-like pulse with `anharmonicity=0` when alpha != 0.")
 
@@ -230,7 +174,6 @@ def slepian_pulse_waveforms(
     sampling_rate=1e9,
     alpha=0.0,
     anharmonicity=0.0,
-    **kwargs,
 ):
     """Create a Slepian (DPSS) window pulse (optionally with DRAG correction).
 
@@ -241,15 +184,6 @@ def slepian_pulse_waveforms(
     NW : float
         Time-bandwidth product (standard DPSS parameter).
     """
-    delta = kwargs.get("delta", None)
-    if delta is not None:
-        warnings.warn(
-            "'delta' has been replaced by 'anharmonicity' and will be removed in a future release.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        anharmonicity = float(delta)
-
     if alpha != 0.0 and anharmonicity == 0.0:
         raise Exception("Cannot create a DRAG-like pulse with `anharmonicity=0` when alpha != 0.")
 

@@ -1,7 +1,7 @@
 
 from qm.qua import *
 from qualang_tools.loops import from_array
-from ..macros.measure import measureMacro
+from ..macros.measure import emit_measurement
 from ..macros.sequence import sequenceMacros
 import numpy as np
 
@@ -14,7 +14,7 @@ def qubit_state_tomography(
     qb_el: str | None = None,
     x90="x90",
     yn90="yn90",
-    bindings: "ExperimentBindings | None" = None,
+    readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     """
     Return a QUA program that runs qubit state tomography for one or more
@@ -90,15 +90,15 @@ def qubit_state_tomography(
 
         with for_(n, 0, n < n_avg, n + 1):
             for prep_fn in preps:
-                sequenceMacros.qubit_state_tomography(state_x, state_prep=prep_fn, state_st=state_x_st,
+                sequenceMacros.qubit_state_tomography(state_x, readout=readout, state_prep=prep_fn, state_st=state_x_st,
                                                       therm_clks=therm_clks, targets=[I, Q], axis="x", qb_el=qb_el, x90=x90, yn90=yn90)
                 save(I, I_st)
                 save(Q, Q_st)
-                sequenceMacros.qubit_state_tomography(state_y, state_prep=prep_fn, state_st=state_y_st,
+                sequenceMacros.qubit_state_tomography(state_y, readout=readout, state_prep=prep_fn, state_st=state_y_st,
                                                       therm_clks=therm_clks, targets=[I, Q], axis="y", qb_el=qb_el, x90=x90, yn90=yn90)
                 save(I, I_st)
                 save(Q, Q_st)
-                sequenceMacros.qubit_state_tomography(state_z, state_prep=prep_fn, state_st=state_z_st,
+                sequenceMacros.qubit_state_tomography(state_z, readout=readout, state_prep=prep_fn, state_st=state_z_st,
                                                       therm_clks=therm_clks, targets=[I, Q], axis="z", qb_el=qb_el, x90=x90, yn90=yn90)
                 save(I, I_st)
                 save(Q, Q_st)
@@ -130,7 +130,7 @@ def qubit_state_tomography(
 
 
 def fock_resolved_state_tomography(qb_el, state_prep, qb_if, fock_ifs, sel_r180, rxp90,
-                                   rym90, st_therm_clks, tag_off_idle_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
+                                   rym90, st_therm_clks, tag_off_idle_clks, n_avg, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Performs Fock-resolved state tomography using sequenceMacros.
     Separates x, y, z measurements into different streams.
@@ -205,6 +205,7 @@ def fock_resolved_state_tomography(qb_el, state_prep, qb_if, fock_ifs, sel_r180,
                     # 1. Tag Off (Global only)
                     sequenceMacros.qubit_state_tomography(
                         state=state_x_off,
+                                                readout=readout,
                         state_prep=prep_wrapper,
                         state_st=state_x_off_st,
                         targets=[I, Q],
@@ -221,6 +222,7 @@ def fock_resolved_state_tomography(qb_el, state_prep, qb_if, fock_ifs, sel_r180,
 
                     sequenceMacros.qubit_state_tomography(
                         state=state_x_on,
+                                                readout=readout,
                         state_prep=prep_wrapper,
                         state_st=state_x_on_st,
                         targets=[I, Q],
@@ -238,6 +240,7 @@ def fock_resolved_state_tomography(qb_el, state_prep, qb_if, fock_ifs, sel_r180,
                     # 1. Tag Off
                     sequenceMacros.qubit_state_tomography(
                         state=state_y_off,
+                                                readout=readout,
                         state_prep=prep_wrapper,
                         state_st=state_y_off_st,
                         targets=[I, Q],
@@ -255,6 +258,7 @@ def fock_resolved_state_tomography(qb_el, state_prep, qb_if, fock_ifs, sel_r180,
                     # 2. Tag On
                     sequenceMacros.qubit_state_tomography(
                         state=state_y_on,
+                                                readout=readout,
                         state_prep=prep_wrapper,
                         state_st=state_y_on_st,
                         targets=[I, Q],
@@ -272,6 +276,7 @@ def fock_resolved_state_tomography(qb_el, state_prep, qb_if, fock_ifs, sel_r180,
                     # 1. Tag Off
                     sequenceMacros.qubit_state_tomography(
                         state=state_z_off,
+                                                readout=readout,
                         state_prep=prep_wrapper,
                         state_st=state_z_off_st,
                         targets=[I, Q],
@@ -289,6 +294,7 @@ def fock_resolved_state_tomography(qb_el, state_prep, qb_if, fock_ifs, sel_r180,
                     # 2. Tag On
                     sequenceMacros.qubit_state_tomography(
                         state=state_z_on,
+                                                readout=readout,
                         state_prep=prep_wrapper,
                         state_st=state_z_on_st,
                         targets=[I, Q],

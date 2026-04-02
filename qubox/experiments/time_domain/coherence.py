@@ -10,10 +10,10 @@ import matplotlib.pyplot as plt
 from ..experiment_base import ExperimentBase, create_clks_array
 from ..config_builder import ConfigSettings
 from ..result import AnalysisResult, FitResult, ProgramBuildResult
-from ...analysis import post_process as pp
-from ...analysis.fitting import fit_and_wrap, build_fit_legend
-from ...analysis.cQED_models import T2_ramsey_model, T2_echo_model
-from ...analysis.analysis_tools import project_complex_to_line_real
+from qubox_tools.algorithms import post_process as pp
+from qubox_tools.fitting.routines import fit_and_wrap, build_fit_legend
+from qubox_tools.fitting.cqed import T2_ramsey_model, T2_echo_model
+from qubox_tools.algorithms.transforms import project_complex_to_line_real
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
 from ...programs.macros.measure import measureMacro
@@ -65,6 +65,7 @@ class T2Ramsey(ExperimentBase):
             r90, delay_clks, qb_therm_clks, n_avg,
             qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(
@@ -279,6 +280,7 @@ class T2Echo(ExperimentBase):
             r180, r90, half_wait_clks, qb_therm_clks, n_avg,
             qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(
@@ -498,6 +500,7 @@ class ResidualPhotonRamsey(ExperimentBase):
             r90, r180, qb_therm, n_avg,
             qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(

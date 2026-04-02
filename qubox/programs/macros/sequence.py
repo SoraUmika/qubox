@@ -1,7 +1,11 @@
 from qm.qua import *
-from .measure import measureMacro
+from .measure import emit_measurement
 from qualang_tools.loops import from_array
 import numpy as np
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ...core.bindings import ReadoutHandle
 class sequenceMacros:
     @classmethod
     def qubit_ramsey(cls, delay_clk, qb_el, r90_1, r90_2):
@@ -32,6 +36,7 @@ class sequenceMacros:
         cls,
         state,
         *,
+        readout: "ReadoutHandle",
         state_prep: callable = None,
         state_st=None,
         therm_clks=None,
@@ -71,7 +76,7 @@ class sequenceMacros:
             elif axis == "y":
                 play(x90, qb_el)   # Rx(+pi/2) (your convention)
             # align qubit with readout element timing like measureMacro does
-            align(qb_el, measureMacro.active_element())
+            align(qb_el, readout.element)
 
             # 2) Tag (ON) or Dummy (OFF) at the SAME frequency and SAME duration
             if selective_freq is not None:
@@ -87,10 +92,10 @@ class sequenceMacros:
                 # ON: real selective pulse
                 play(selective_pulse, qb_el)
 
-            align(qb_el, measureMacro.active_element())
+            align(qb_el, readout.element)
 
             # 3) Always measure Z (no extra tomography rotation here)
-            measureMacro.measure(with_state=True, targets=targets, state=state,
+            emit_measurement(readout, with_state=True, targets=targets, state=state,
                                 axis="z", qb_el=qb_el)
 
         else:
@@ -100,7 +105,7 @@ class sequenceMacros:
             if qb_probe_if is not None:
                 update_frequency(qb_el, qb_probe_if)
 
-            measureMacro.measure(with_state=True, targets=targets, state=state,
+            emit_measurement(readout, with_state=True, targets=targets, state=state,
                                 axis=axis, x90=x90, yn90=yn90, qb_el=qb_el)
 
         if state_st:
@@ -113,6 +118,7 @@ class sequenceMacros:
     @classmethod
     def num_splitting_spectroscopy(cls, probe_ifs, state_prep, I, Q, I_st, Q_st, st_therm_clks,
         *,
+        readout: "ReadoutHandle",
         qb_el=None,
         st_el=None,
         sel_r180="sel_x180",
@@ -137,14 +143,14 @@ class sequenceMacros:
 
             play(sel_r180, qb_el)
             align()
-            measureMacro.measure(targets=[I, Q])
+            emit_measurement(readout, targets=[I, Q])
             wait(int(st_therm_clks), st_el)
             save(I, I_st)
             save(Q, Q_st)
 
     @classmethod
     def fock_resolved_spectroscopy(cls, fock_ifs, state_prep, I, Q, I_st, Q_st, st_therm_clks,
-        *, qb_el=None, st_el=None, sel_r180="sel_x180",
+        *, readout: "ReadoutHandle", qb_el=None, st_el=None, sel_r180="sel_x180",
         bindings=None,
     ):
         if bindings is not None:
@@ -167,9 +173,9 @@ class sequenceMacros:
             update_frequency(qb_el, f)
             align(qb_el, st_el)
             play(sel_r180, qb_el)
-            align(qb_el, measureMacro.active_element())
+            align(qb_el, readout.element)
 
-            measureMacro.measure(targets=[I, Q])
+            emit_measurement(readout, targets=[I, Q])
             wait(int(st_therm_clks), st_el)
             save(I, I_st)
             save(Q, Q_st)
@@ -178,6 +184,7 @@ class sequenceMacros:
     def prepare_state(
         cls,
         *,
+        readout: "ReadoutHandle",
         target_state: str = "g",           # "g" or "e"
         policy: str | None = None,         # "ZSCORE", "AFFINE", "HYSTERESIS", "BLOBS", "POSTERIOR", or None
         r180: str = "x180",
@@ -395,7 +402,7 @@ class sequenceMacros:
                 cls.conditional_reset_ground(I, thr, r180=r180, qb_el=qb_el)
 
             # Verify via measurement
-            measureMacro.measure(with_state=True, targets=targets, state=state)
+            emit_measurement(readout, with_state=True, targets=targets, state=state)
 
             # Acceptance rule
             if policy_norm == "ZSCORE":
@@ -495,6 +502,7 @@ class sequenceMacros:
     def post_select(
         cls,
         *,
+        readout: "ReadoutHandle",
         accept,                 # QUA bool (passed in) -> assigned True/False here
         I,                      # QUA fixed
         Q=None,                 # QUA fixed (required for AFFINE/BLOBS)
@@ -509,7 +517,7 @@ class sequenceMacros:
         policy_norm = policy.upper() if isinstance(policy, str) else None
 
         # threshold used by default scalar policy (and often for correction outside)
-        thr = float(kwargs.get("threshold", measureMacro._ro_disc_params.get("threshold", 0.0)))
+        thr = float(kwargs.get("threshold", readout.binding.discrimination.get("threshold", 0.0)))
 
         # ---- ZSCORE ----
         if policy_norm == "ZSCORE":

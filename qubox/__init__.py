@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from .calibration import CalibrationProposal, CalibrationSnapshot
 from .circuit import QuantumCircuit, QuantumGate
+from .core.device_metadata import DeviceMetadata
 from .data import ExecutionRequest, ExperimentResult
 from .sequence import AcquisitionSpec, Condition, Operation, Sequence, SweepAxis, SweepPlan
 from .session import Session
@@ -25,6 +26,7 @@ __all__ = [
     "CalibrationProposal",
     "CalibrationSnapshot",
     "Condition",
+    "DeviceMetadata",
     "ExecutionRequest",
     "ExperimentResult",
     "Operation",

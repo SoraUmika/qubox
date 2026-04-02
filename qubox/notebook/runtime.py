@@ -30,6 +30,7 @@ class NotebookSessionBootstrap:
     qop_ip: str | None = None
     cluster_name: str | None = None
     auto_save_calibration: bool = True
+    simulation_mode: bool = True
 
     @property
     def session_key(self) -> str:
@@ -104,6 +105,7 @@ def open_shared_session(
     qop_ip: str | None = None,
     cluster_name: str | None = None,
     auto_save_calibration: bool = True,
+    simulation_mode: bool = True,
     connect: bool = True,
     reuse_existing: bool = True,
     force_reopen: bool = False,
@@ -111,7 +113,17 @@ def open_shared_session(
     set_default: bool = True,
     **kwargs: Any,
 ) -> Session:
-    """Open (or reuse) a shared notebook session for the given cooldown."""
+    """Open (or reuse) a shared notebook session for the given cooldown.
+
+    Parameters
+    ----------
+    simulation_mode:
+        When *True* (the default), the session is opened without activating
+        any hardware outputs (``hardware.open_qm()`` is skipped).  The QM
+        server connection is still established so ``experiment.simulate()``
+        works.  All ``run_program()`` calls raise ``JobError``.  Set to
+        *False* to enable real hardware execution.
+    """
     bootstrap = NotebookSessionBootstrap(
         sample_id=sample_id,
         cooldown_id=cooldown_id,
@@ -119,6 +131,7 @@ def open_shared_session(
         qop_ip=qop_ip,
         cluster_name=cluster_name,
         auto_save_calibration=auto_save_calibration,
+        simulation_mode=simulation_mode,
     )
     existing = get_shared_session(session_key=bootstrap.session_key)
     if existing is not None and reuse_existing and not force_reopen:
@@ -140,6 +153,7 @@ def open_shared_session(
         qop_ip=qop_ip,
         cluster_name=cluster_name,
         auto_save_calibration=auto_save_calibration,
+        simulation_mode=simulation_mode,
         connect=connect,
         **kwargs,
     )
@@ -187,6 +201,7 @@ def require_shared_session(
     qop_ip: str | None = None,
     cluster_name: str | None = None,
     auto_save_calibration: bool = True,
+    simulation_mode: bool = True,
     connect: bool = True,
     reuse_existing: bool = True,
     force_reopen: bool = False,
@@ -219,6 +234,7 @@ def require_shared_session(
         qop_ip=qop_ip,
         cluster_name=cluster_name,
         auto_save_calibration=auto_save_calibration,
+        simulation_mode=simulation_mode,
         connect=connect,
         reuse_existing=reuse_existing,
         force_reopen=force_reopen,
@@ -243,14 +259,14 @@ def close_shared_session(*, session_key: str | None = None) -> None:
 
 def resolve_active_mixer_targets(session: Session, *, include_skipped: bool = False) -> dict[str, Any]:
     """Return a dict of active mixer elements and their LO/IF/RF frequencies."""
-    resolved = session.hw.get_active_mixer_elements(include_skipped=True)
+    resolved = session.hardware.get_active_mixer_elements(include_skipped=True)
     active_elements = list(resolved.get("active", []))
     skipped_elements = list(resolved.get("skipped", []))
 
     active_targets = []
     for element in active_elements:
-        lo_hz = float(session.hw.get_element_lo(element))
-        if_hz = float(session.hw.get_element_if(element))
+        lo_hz = float(session.hardware.get_element_lo(element))
+        if_hz = float(session.hardware.get_element_if(element))
         active_targets.append(
             {
                 "element": element,

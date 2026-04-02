@@ -31,14 +31,14 @@ from typing import TYPE_CHECKING, Any, Callable
 import numpy as np
 
 from ..programs import api as cQED_programs
-from ..analysis import post_process as pp
-from ..analysis.output import Output
+from qubox_tools.algorithms import post_process as pp
+from qubox_tools.data.containers import Output
 from ..core.logging import get_logger
 from ..core.persistence_policy import sanitize_mapping_for_json
 from ..hardware.program_runner import RunResult
 
 if TYPE_CHECKING:
-    from ..analysis.cQED_attributes import cQED_attributes
+    from ..core.device_metadata import DeviceMetadata
     from ..devices.device_manager import DeviceManager
     from ..pulses.manager import PulseOperationManager
 
@@ -181,7 +181,7 @@ class ExperimentBase:
     # Context accessors (work with both legacy and new interfaces)
     # ------------------------------------------------------------------
     @property
-    def attr(self) -> cQED_attributes:
+    def attr(self) -> DeviceMetadata:
         snapshot = getattr(self._ctx, "context_snapshot", None)
         if callable(snapshot):
             return snapshot()
@@ -194,8 +194,7 @@ class ExperimentBase:
 
     @property
     def pulse_mgr(self) -> PulseOperationManager:
-        pm = getattr(self._ctx, "pulseOpMngr",
-                     getattr(self._ctx, "pulse_mgr", None))
+        pm = getattr(self._ctx, "pulse_mgr", None)
         if pm is None:
             raise RuntimeError(
                 "Experiment context has no pulse manager. Check that "
@@ -205,8 +204,8 @@ class ExperimentBase:
 
     @property
     def hw(self):
-        """Hardware controller (QuaProgramManager or HardwareController)."""
-        h = getattr(self._ctx, "quaProgMngr",
+        """Hardware controller (HardwareController)."""
+        h = getattr(self._ctx, "hardware",
                     getattr(self._ctx, "hw", None))
         if h is None:
             raise RuntimeError(
@@ -224,6 +223,17 @@ class ExperimentBase:
         """Access the measurement macro singleton."""
         from ..programs.macros.measure import measureMacro
         return measureMacro
+
+    @property
+    def readout_handle(self):
+        """Build a ReadoutHandle from the current measureMacro state.
+
+        Returns a frozen, immutable snapshot of the current readout
+        configuration.  Pass this to builder functions instead of
+        letting them read from the singleton.
+        """
+        from ..core.bindings import ReadoutHandle
+        return ReadoutHandle.from_measure_macro()
 
     @property
     def bindings(self):
@@ -580,26 +590,18 @@ class ExperimentBase:
         )
 
     def get_displacement_reference(self) -> dict[str, Any]:
-        """Resolve displacement reference parameters from runtime settings first."""
+        """Resolve displacement reference parameters from runtime settings."""
         getter = getattr(self._ctx, "get_displacement_reference", None)
         if callable(getter):
             ref = getter()
             if isinstance(ref, dict):
                 return ref
 
-        out = {
+        return {
             "coherent_amp": getattr(self.attr, "b_coherent_amp", None),
             "coherent_len": getattr(self.attr, "b_coherent_len", None),
             "b_alpha": getattr(self.attr, "b_alpha", None),
         }
-        if any(v is not None for v in out.values()):
-            warnings.warn(
-                "Using deprecated cqed_params displacement reference fields. "
-                "Prefer session runtime settings.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-        return out
 
     def run_program(
         self, prog, *, n_total: int, processors: list | None = None,

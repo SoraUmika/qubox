@@ -3,8 +3,6 @@ import os
 import json
 from pathlib import Path
 
-from qubox.core.persistence import split_output_for_persistence
-
 class Output(dict):
     """
     Output is a subclass of dict used to store and process experiment results.
@@ -73,6 +71,7 @@ class Output(dict):
           path: the file path (including filename) where the data should be saved.
         """
         target = Path(path)
+        from qubox.core.persistence import split_output_for_persistence
         arrays, meta, dropped = split_output_for_persistence(self)
         if dropped:
             meta["_persistence"] = {

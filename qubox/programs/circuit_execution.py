@@ -69,7 +69,7 @@ def run_compiled_circuit(
         )
 
     compiler = CircuitRunner(session)
-    build = compiler.compile_v2(circuit, n_shots=n_shots)
+    build = compiler.compile_program(circuit, n_shots=n_shots)
     diagram_text = circuit.to_diagram_text()
     cluster_candidates = _resolve_cluster_candidates(session)
     connection = {

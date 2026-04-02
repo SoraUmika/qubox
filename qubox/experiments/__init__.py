@@ -15,6 +15,7 @@ Sub-packages group experiments by physics domain:
 
 from .templates import ExperimentLibrary
 from .workflows import WorkflowLibrary
+from .decorator import experiment, get_registered_experiments, lookup_experiment
 
 from .base import ExperimentRunner
 from .experiment_base import ExperimentBase

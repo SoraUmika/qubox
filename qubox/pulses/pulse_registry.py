@@ -18,7 +18,7 @@ from typing import Any, Union
 
 import numpy as np
 
-from ..analysis.pulseOp import PulseOp
+from qubox.core.pulse_op import PulseOp
 from ..core.logging import get_logger
 from ..core.types import MAX_AMPLITUDE, PulseType, WaveformType
 from .integration_weights import IntegrationWeightManager

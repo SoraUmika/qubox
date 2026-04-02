@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 from ..experiment_base import ExperimentBase
 from ..result import AnalysisResult
-from ...analysis import post_process as pp
-from ...analysis.output import Output
+from qubox_tools.algorithms import post_process as pp
+from qubox_tools.data.containers import Output
 from ...hardware.program_runner import ExecMode, RunResult
 from ...programs import api as cQED_programs
 
@@ -67,6 +67,7 @@ class SPAFluxOptimization(ExperimentBase):
                 attr.ro_el, sample_fqs,
                 resolved_ro_depl_clks,
                 n_avg,
+                readout=self.readout_handle,
             )
             rr = self.run_program(
                 prog, n_total=n_avg,
@@ -200,7 +201,7 @@ class SPAFluxOptimization2(ExperimentBase):
             )
 
         # For advanced modes (scout/refine/lock), use the algorithms module
-        from ...analysis.algorithms import (
+        from qubox_tools.algorithms.core import (
             scout_windows, refine_around, lock_to_peak_3pt,
             peak_score_robust,
         )
@@ -227,6 +228,7 @@ class SPAFluxOptimization2(ExperimentBase):
             prog = cQED_programs.SPA_flux_optimization(
                 attr.ro_el, sample_fqs,
                 resolved_ro_depl_clks, n_avg,
+                readout=self.readout_handle,
             )
             rr = self.run_program(
                 prog, n_total=n_avg,
@@ -363,7 +365,7 @@ class SPAPumpFrequencyOptimization(ExperimentBase):
                         Q_g = np.imag(S_g)
                         I_e = np.real(S_e)
                         Q_e = np.imag(S_e)
-                        from ...analysis.analysis_tools import two_state_discriminator
+                        from qubox_tools.algorithms.transforms import two_state_discriminator
                         disc = two_state_discriminator(I_g, Q_g, I_e, Q_e)
                         fid = float(disc.get("fidelity", 0.0))
                         results[i, j] = fid

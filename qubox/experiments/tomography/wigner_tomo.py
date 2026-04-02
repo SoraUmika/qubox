@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase
 from ..result import AnalysisResult, ProgramBuildResult
-from ...analysis import post_process as pp
-from ...analysis.cQED_plottings import plot_wigner
+from qubox_tools.algorithms import post_process as pp
+from qubox_tools.plotting.cqed import plot_wigner
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
 from ...programs.measurement import try_build_readout_snapshot_from_macro
@@ -62,6 +62,7 @@ class StorageWignerTomography(ExperimentBase):
             r90_pulse,
             parity_wait_clks, st_therm, n_avg,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
         return ProgramBuildResult(
             program=prog,
@@ -219,6 +220,7 @@ class SNAPOptimization(ExperimentBase):
             post_meas_wait_clks=post_meas_wait_clks,
             therm_clks=resolved_therm,
             n_avg=n_avg,
+            readout=self.readout_handle,
         )
         return ProgramBuildResult(
             program=prog,

@@ -44,7 +44,7 @@ def test_single_qubit_rotation_override_beats_calibration_and_policy_selection(f
     MeasurementSchema = gate_arch_modules.circuit_runner.MeasurementSchema
     ParameterSource = gate_arch_modules.circuit_runner.ParameterSource
     CalibrationReference = gate_arch_modules.circuit_runner.CalibrationReference
-    CircuitRunnerV2 = gate_arch_modules.circuit_compiler.CircuitRunnerV2
+    CircuitCompiler = gate_arch_modules.circuit_compiler.CircuitCompiler
 
     outputs: dict[str, tuple[list[float], list[float], dict[str, dict[str, object]]]] = {}
     for policy in ("drag_gaussian", "gaussian", "square"):
@@ -74,7 +74,7 @@ def test_single_qubit_rotation_override_beats_calibration_and_policy_selection(f
             metadata={"n_shots": 1},
             measurement_schema=MeasurementSchema(),
         )
-        build = CircuitRunnerV2(fake_session).compile(circuit)
+        build = CircuitCompiler(fake_session).compile(circuit)
         named_gate = circuit.with_stable_gate_names().gates[0]
         pulse = fake_session.pulse_mgr.get_pulseOp_by_element_op("qubit", named_gate.instance_name, strict=False)
         assert pulse is not None
@@ -99,7 +99,7 @@ def test_single_qubit_rotation_override_beats_calibration_and_policy_selection(f
 
 def test_derive_state_supports_rotation_and_sense(gate_arch_modules):
     StateRule = gate_arch_modules.circuit_protocols.StateRule
-    from qubox_v2_legacy.programs.measurement import derive_state as derive_state_helper
+    from qubox.programs.measurement import derive_state as derive_state_helper
 
     iq = {"I": np.array([0.0, 0.3, -0.2]), "Q": np.array([0.0, 0.0, 0.2])}
     gt_rule = StateRule(kind="I_threshold", threshold=0.1, sense="greater", rotation_angle=0.0)
@@ -178,7 +178,7 @@ def test_measurement_schema_validate_rejects_false_state_claim(gate_arch_modules
 
 def test_ramsey_protocol_compilation_sequence_schema_and_diagram(fake_session, gate_arch_modules):
     circuit = gate_arch_modules.circuit_protocols.RamseyProtocol(tau_clks=12, n_shots=3).build()
-    build = gate_arch_modules.circuit_compiler.CircuitRunnerV2(fake_session).compile(circuit)
+    build = gate_arch_modules.circuit_compiler.CircuitCompiler(fake_session).compile(circuit)
 
     assert [gate.gate_type for gate in circuit.gates] == [
         "qubit_rotation",
@@ -208,7 +208,7 @@ def test_ramsey_protocol_compilation_sequence_schema_and_diagram(fake_session, g
 
 def test_echo_protocol_compilation_sequence(fake_session, gate_arch_modules):
     circuit = gate_arch_modules.circuit_protocols.EchoProtocol(tau_clks=20, n_shots=2).build()
-    build = gate_arch_modules.circuit_compiler.CircuitRunnerV2(fake_session).compile(circuit)
+    build = gate_arch_modules.circuit_compiler.CircuitCompiler(fake_session).compile(circuit)
 
     assert [gate.gate_type for gate in circuit.gates] == [
         "qubit_rotation",
@@ -230,11 +230,11 @@ def test_echo_protocol_compilation_sequence(fake_session, gate_arch_modules):
 
 def test_active_reset_defaults_to_analysis_only(fake_session, gate_arch_modules):
     circuit = gate_arch_modules.circuit_protocols.ActiveResetProtocol(iterations=1, n_shots=2).build()
-    build = gate_arch_modules.circuit_compiler.CircuitRunnerV2(fake_session).compile(circuit)
+    build = gate_arch_modules.circuit_compiler.CircuitCompiler(fake_session).compile(circuit)
 
     assert [gate.gate_type for gate in circuit.gates] == ["measure_iq"]
     assert build.metadata["compiler_warnings"] == [
-        "Active reset is analysis-only in compile_v2: MeasureIQ is emitted at program time, then derive_state and next-shot conditional action happen after the run. Set enable_real_time_branching=True to request a real-time branch."
+        "Active reset is analysis-only in CircuitCompiler: MeasureIQ is emitted at program time, then derive_state and next-shot conditional action happen after the run. Set enable_real_time_branching=True to request a real-time branch."
     ]
 
     schema = circuit.measurement_schema.records[0]
@@ -253,7 +253,7 @@ def test_active_reset_defaults_to_analysis_only(fake_session, gate_arch_modules)
 
 def test_active_reset_post_processing_derives_state_after_run(fake_session, gate_arch_modules):
     circuit = gate_arch_modules.circuit_protocols.ActiveResetProtocol(iterations=1, n_shots=2).build()
-    build = gate_arch_modules.circuit_compiler.CircuitRunnerV2(fake_session).compile(circuit)
+    build = gate_arch_modules.circuit_compiler.CircuitCompiler(fake_session).compile(circuit)
     processor = build.processors[0]
 
     output = processor(
@@ -277,7 +277,7 @@ def test_active_reset_real_time_branching_fails_loudly(fake_session, gate_arch_m
     assert "IF active_reset_m0.state" in circuit.to_diagram_text()
 
     with pytest.raises(RuntimeError, match="does not support real-time branching on post-processed derived state"):
-        gate_arch_modules.circuit_compiler.CircuitRunnerV2(fake_session).compile(circuit)
+        gate_arch_modules.circuit_compiler.CircuitCompiler(fake_session).compile(circuit)
 
 
 def test_frequency_resolution_records_base_plan_and_update_order(fake_session, gate_arch_modules):
@@ -295,7 +295,7 @@ def test_frequency_resolution_records_base_plan_and_update_order(fake_session, g
         metadata={"n_shots": 1},
         measurement_schema=MeasurementSchema(records=(measure_record,)),
     )
-    build = gate_arch_modules.circuit_compiler.CircuitRunnerV2(fake_session).compile(circuit)
+    build = gate_arch_modules.circuit_compiler.CircuitCompiler(fake_session).compile(circuit)
 
     assert build.resolved_frequencies == {"qubit": 6.05e9, "readout": 8.10e9}
     trace = build.metadata["instruction_trace"]
@@ -372,13 +372,13 @@ def test_ramsey_diagram_matches_golden(gate_arch_modules):
 
 def test_ramsey_resolution_report_matches_golden(fake_session, gate_arch_modules):
     circuit = gate_arch_modules.circuit_protocols.RamseyProtocol(tau_clks=12, n_shots=3).build()
-    build = gate_arch_modules.circuit_compiler.CircuitRunnerV2(fake_session).compile(circuit)
+    build = gate_arch_modules.circuit_compiler.CircuitCompiler(fake_session).compile(circuit)
     assert build.metadata["resolution_report_text"] == _read_golden("ramsey_resolution.txt")
 
 
 def test_ramsey_measurement_schema_matches_golden(fake_session, gate_arch_modules):
     circuit = gate_arch_modules.circuit_protocols.RamseyProtocol(tau_clks=12, n_shots=3).build()
-    build = gate_arch_modules.circuit_compiler.CircuitRunnerV2(fake_session).compile(circuit)
+    build = gate_arch_modules.circuit_compiler.CircuitCompiler(fake_session).compile(circuit)
     assert _stable_json(build.metadata["measurement_schema"]) == _read_golden("ramsey_measurement_schema.json")
 
 
@@ -393,6 +393,6 @@ def test_active_reset_real_time_circuit_text_matches_golden(gate_arch_modules):
 
 def test_active_reset_analysis_snapshot_matches_golden(fake_session, gate_arch_modules):
     circuit = gate_arch_modules.circuit_protocols.ActiveResetProtocol(iterations=1, n_shots=2).build()
-    build = gate_arch_modules.circuit_compiler.CircuitRunnerV2(fake_session).compile(circuit)
+    build = gate_arch_modules.circuit_compiler.CircuitCompiler(fake_session).compile(circuit)
 
     assert _build_snapshot(build) == _read_golden("active_reset_analysis_snapshot.txt")

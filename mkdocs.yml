@@ -1,0 +1,149 @@
+site_name: qubox
+site_description: A Python cQED experiment framework for Quantum Machines hardware
+site_url: https://soraumika.github.io/qubox/
+repo_url: https://github.com/SoraUmika/qubox
+repo_name: SoraUmika/qubox
+docs_dir: site_docs
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+    logo: material/atom
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  version:
+    provider: mike
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/SoraUmika/qubox
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home:
+    - index.md
+    - Quick Start: getting-started.md
+    - Changelog: changelog.md
+  - Architecture:
+    - architecture/index.md
+    - Package Map: architecture/package-map.md
+    - Execution Flow: architecture/execution-flow.md
+    - Design Principles: architecture/design-principles.md
+    - Refactor Status: architecture/refactor-status.md
+  - API Reference:
+    - api/index.md
+    - Session: api/session.md
+    - Sequence IR: api/sequence.md
+    - Experiments:
+      - api/experiments/index.md
+      - Spectroscopy: api/experiments/spectroscopy.md
+      - Time Domain: api/experiments/time-domain.md
+      - Calibration: api/experiments/calibration.md
+      - Cavity & Storage: api/experiments/cavity.md
+      - Tomography: api/experiments/tomography.md
+      - SPA Optimization: api/experiments/spa.md
+    - Calibration:
+      - api/calibration/index.md
+      - Store & Models: api/calibration/store.md
+      - Orchestrator: api/calibration/orchestrator.md
+      - Patch Rules: api/calibration/patch-rules.md
+      - Transitions: api/calibration/transitions.md
+    - Workflow: api/workflow.md
+    - Notebook Surface: api/notebook.md
+    - Hardware: api/hardware.md
+    - Gates & Circuits: api/gates.md
+  - qubox_tools:
+    - tools/index.md
+    - Fitting: tools/fitting.md
+    - Algorithms: tools/algorithms.md
+    - Plotting: tools/plotting.md
+    - Optimization: tools/optimization.md
+  - Lab MCP:
+    - mcp/index.md
+  - Guides:
+    - guides/index.md
+    - Migration Guide: guides/migration.md
+    - Notebook Workflow: guides/notebooks.md
+    - Standard Experiments: guides/standard-experiments.md
+    - QUA Validation: guides/qua-validation.md

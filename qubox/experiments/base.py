@@ -34,9 +34,9 @@ from ..hardware.program_runner import ExecMode, ProgramRunner, RunResult
 from ..hardware.queue_manager import QueueManager
 from ..pulses.manager import PulseOperationManager
 from ..devices.device_manager import DeviceManager
-from ..analysis.cQED_attributes import cQED_attributes
-from ..analysis.output import Output
-from ..analysis.post_selection import PostSelectionConfig
+from ..core.device_metadata import DeviceMetadata
+from qubox_tools.data.containers import Output
+from qubox_tools.algorithms.post_selection import PostSelectionConfig
 from ..core.persistence_policy import split_output_for_persistence
 
 _logger = get_logger(__name__)
@@ -147,15 +147,19 @@ class ExperimentRunner:
         p = self.experiment_path / "config" / "pulses.json"
         return p if p.exists() else None
 
-    def _load_context_snapshot(self) -> cQED_attributes:
-        """Load or create the legacy-compatible experiment context snapshot."""
-        try:
-            return cQED_attributes.load(self.experiment_path)
-        except FileNotFoundError:
-            _logger.info("No cqed_params.json found — using defaults")
-            return cQED_attributes()
+    def _load_context_snapshot(self) -> DeviceMetadata:
+        """Build a DeviceMetadata from hardware config binding roles.
 
-    def context_snapshot(self) -> cQED_attributes:
+        Element names are resolved from ``__qubox.bindings.roles`` in the
+        hardware JSON.  CalibrationStore provides parameter access.
+        """
+        extras = self.config_engine.hardware_extras or {}
+        qubox = extras.get("__qubox") or {}
+        roles = (qubox.get("bindings") or {}).get("roles") or {}
+        calibration = getattr(self, "calibration", None)
+        return DeviceMetadata.from_roles(roles, calibration=calibration)
+
+    def context_snapshot(self) -> DeviceMetadata:
         """Return the current experiment context snapshot."""
         return self._context_snapshot
 

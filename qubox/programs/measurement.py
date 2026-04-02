@@ -106,21 +106,26 @@ def emit_measurement_spec(
     timestamp_stream: Any = None,
     adc_stream: Any = None,
     readout: Any = None,
+    axis: str = "z",
+    x90: str = "x90",
+    yn90: str = "yn90",
+    qb_el: str | None = None,
 ):
     if readout is not None:
         from .macros.measure import emit_measurement
 
-        if with_state and state is None:
-            from qm.qua import declare
-            state = declare(bool)
-
         return emit_measurement(
             readout,
+            with_state=with_state,
             targets=targets,
-            state=state if with_state else None,
+            state=state,
             gain=gain,
             timestamp_stream=timestamp_stream,
             adc_stream=adc_stream,
+            axis=axis,
+            x90=x90,
+            yn90=yn90,
+            qb_el=qb_el,
         )
 
     from .macros.measure import measureMacro
@@ -134,6 +139,10 @@ def emit_measurement_spec(
             gain=gain,
             timestamp_stream=timestamp_stream,
             adc_stream=adc_stream,
+            axis=axis,
+            x90=x90,
+            yn90=yn90,
+            qb_el=qb_el,
         )
 
     raise ValueError(f"Unsupported measurement kind: {spec.kind!r}")

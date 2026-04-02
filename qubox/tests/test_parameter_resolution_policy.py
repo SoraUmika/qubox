@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from qubox.analysis.cQED_attributes import cQED_attributes
+from qubox.core.device_metadata import DeviceMetadata
 from qubox.calibration.store import CalibrationStore
 from qubox.experiments.calibration.gates import AllXY
 from qubox.experiments.calibration.readout import IQBlob
@@ -54,8 +54,8 @@ class _FakePulseMgr:
 class _FakeCtx:
     def __init__(self, calibration: CalibrationStore) -> None:
         self.calibration = calibration
-        self.hw = _FakeHW()
-        self.pulseOpMngr = _FakePulseMgr()
+        self.hardware = _FakeHW()
+        self.pulse_mgr = _FakePulseMgr()
         self.bindings = SimpleNamespace(
             qubit=SimpleNamespace(lo_frequency=6.0e9),
             readout=SimpleNamespace(
@@ -66,8 +66,8 @@ class _FakeCtx:
         )
         self.experiment_path = Path(".")
 
-    def context_snapshot(self) -> cQED_attributes:
-        return cQED_attributes(qb_el="qubit", ro_el="resonator", st_el="storage")
+    def context_snapshot(self) -> DeviceMetadata:
+        return DeviceMetadata(qb_el="qubit", ro_el="resonator", st_el="storage", _calibration=self.calibration)
 
 
 def _make_ctx(

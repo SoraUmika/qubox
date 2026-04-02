@@ -6,7 +6,7 @@ import warnings
 
 from ..hardware_base import GateHardware
 
-from qubox.analysis.pulseOp import PulseOp
+from qubox.core.pulse_op import PulseOp
 from qubox.core.types import MAX_AMPLITUDE
 
 

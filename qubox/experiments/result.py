@@ -79,6 +79,37 @@ class FitResult:
     metadata: dict[str, Any] = field(default_factory=dict)
     """Additional fit metadata (e.g. bounds, method, n_iterations)."""
 
+    def to_fit_record(self, experiment: str) -> "FitRecord":
+        """Convert to a :class:`~qubox.calibration.store_models.FitRecord` for persistence.
+
+        Parameters
+        ----------
+        experiment : str
+            Name of the experiment that produced this fit.
+
+        Returns
+        -------
+        FitRecord
+        """
+        from qubox.calibration.store_models import FitRecord
+
+        import datetime
+
+        return FitRecord(
+            experiment=experiment,
+            model_name=self.model_name,
+            params=dict(self.params),
+            uncertainties=dict(self.uncertainties) if self.uncertainties else None,
+            reduced_chi2=None,
+            timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            metadata={
+                **(self.metadata or {}),
+                "success": self.success,
+                "reason": self.reason,
+                "r_squared": self.r_squared,
+            },
+        )
+
 
 @dataclass
 class AnalysisResult:

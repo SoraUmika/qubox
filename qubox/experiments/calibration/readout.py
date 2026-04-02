@@ -14,11 +14,11 @@ from qm.qua import dual_demod
 
 from ..experiment_base import ExperimentBase
 from ..result import AnalysisResult, FitResult, ProgramBuildResult
-from ...analysis import post_process as pp
-from ...analysis.analysis_tools import two_state_discriminator
-from ...analysis.output import Output
-from ...analysis.metrics import butterfly_metrics, gaussian2D_score, wilson_interval
-from ...analysis.post_selection import PostSelectionConfig
+from qubox_tools.algorithms import post_process as pp
+from qubox_tools.algorithms.transforms import two_state_discriminator
+from qubox_tools.data.containers import Output
+from qubox_tools.algorithms.metrics import butterfly_metrics, gaussian2D_score, wilson_interval
+from qubox_tools.algorithms.post_selection import PostSelectionConfig
 from ...core.logging import get_logger
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
@@ -149,6 +149,7 @@ class IQBlob(ExperimentBase):
 
         prog = cQED_programs.iq_blobs(
             attr.ro_el, attr.qb_el, r180, qb_therm_clks, n_runs,
+            readout=self.readout_handle,
         )
         return ProgramBuildResult(
             program=prog,
@@ -275,6 +276,7 @@ class ReadoutGERawTrace(ExperimentBase):
 
         prog = cQED_programs.readout_ge_raw_trace(
             attr.qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg,
+            readout=self.readout_handle,
         )
         return ProgramBuildResult(
             program=prog,
@@ -428,6 +430,7 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
         prog = cQED_programs.readout_ge_integrated_trace(
             attr.qb_el, resolved_weights, num_div, div_clks,
             r180, ro_depl_clks if ro_depl_clks is not None else ro_therm_clks, n_avg,
+            readout=self.readout_handle,
         )
 
         # Legacy parity: post-processing to create g_trace/e_trace from II/IQ/QI/QQ
@@ -686,10 +689,12 @@ class ReadoutGEDiscrimination(ExperimentBase):
             except Exception:
                 prog = cQED_programs.iq_blobs(
                     readout_element, attr.qb_el, r180, qb_therm, n_samples,
+                    readout=self.readout_handle,
                 )
         else:
             prog = cQED_programs.iq_blobs(
                 readout_element, attr.qb_el, r180, qb_therm, n_samples,
+                readout=self.readout_handle,
             )
         return ProgramBuildResult(
             program=prog,
@@ -2361,6 +2366,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                     post_sel_kwargs,
                     M0_MAX_TRIALS,
                     n_samples,
+                    readout=self.readout_handle,
                 )
         else:
             prog = cQED_programs.readout_butterfly_measurement(
@@ -2370,6 +2376,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                 post_sel_kwargs,
                 M0_MAX_TRIALS,
                 n_samples,
+                readout=self.readout_handle,
             )
         return ProgramBuildResult(
             program=prog,

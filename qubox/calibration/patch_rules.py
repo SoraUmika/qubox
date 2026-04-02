@@ -11,7 +11,6 @@ translates experiment analysis output into a concrete set of
 """
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -77,17 +76,6 @@ class T1Rule:
             t1_s = float(params["T1_s"])
         elif "T1_ns" in params:
             t1_s = float(params["T1_ns"]) * 1e-9
-        elif "T1" in params:
-            t1_raw = float(params["T1"])
-            if t1_raw > 1e-3:
-                warnings.warn(
-                    f"T1Rule received bare 'T1' key with value {t1_raw:.6g} "
-                    f"which is > 1e-3 — looks like nanoseconds.  "
-                    f"Provide 'T1_s' (seconds) or 'T1_ns' (nanoseconds) for unambiguous behaviour.  "
-                    f"The raw value will be stored as-is (assumed seconds).",
-                    DeprecationWarning, stacklevel=2,
-                )
-            t1_s = t1_raw
 
         if t1_s is not None:
             patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T1", value=t1_s)
@@ -112,14 +100,6 @@ class T2RamseyRule:
 
         if "T2_star_s" in params:
             patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_ramsey", value=float(params["T2_star_s"]))
-        elif "T2_star" in params:
-            warnings.warn(
-                "T2RamseyRule: bare 'T2_star' key is deprecated — provide "
-                "'T2_star_s' (seconds) or 'T2_star_ns' (nanoseconds) instead.  "
-                "The value is currently assumed to be in nanoseconds.",
-                DeprecationWarning, stacklevel=2,
-            )
-            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_ramsey", value=float(params["T2_star"]) * 1e-9)
         elif "T2_star_ns" in params:
             patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_ramsey", value=float(params["T2_star_ns"]) * 1e-9)
 
@@ -144,14 +124,6 @@ class T2EchoRule:
 
         if "T2_echo_s" in params:
             patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_echo", value=float(params["T2_echo_s"]))
-        elif "T2_echo" in params:
-            warnings.warn(
-                "T2EchoRule: bare 'T2_echo' key is deprecated — provide "
-                "'T2_echo_s' (seconds) or 'T2_echo_ns' (nanoseconds) instead.  "
-                "The value is currently assumed to be in nanoseconds.",
-                DeprecationWarning, stacklevel=2,
-            )
-            patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_echo", value=float(params["T2_echo"]) * 1e-9)
         elif "T2_echo_ns" in params:
             patch.add("SetCalibration", path=f"cqed_params.{self.alias}.T2_echo", value=float(params["T2_echo_ns"]) * 1e-9)
 

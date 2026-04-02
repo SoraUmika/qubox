@@ -9,9 +9,9 @@ import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase, create_clks_array
 from ..result import AnalysisResult, FitResult, ProgramBuildResult
-from ...analysis import post_process as pp
-from ...analysis.fitting import fit_and_wrap, build_fit_legend
-from ...analysis.cQED_models import (
+from qubox_tools.algorithms import post_process as pp
+from qubox_tools.fitting.routines import fit_and_wrap, build_fit_legend
+from qubox_tools.fitting.cqed import (
     qubit_spec_model,
     T1_relaxation_model,
     T2_ramsey_model,
@@ -85,6 +85,7 @@ class FockResolvedSpectroscopy(ExperimentBase):
             sel_r180, st_therm_clks, n_avg,
             sel_r180_transfer_calibration=calibrate_ref_r180_S,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(
@@ -263,6 +264,7 @@ class FockResolvedT1(ExperimentBase):
             sel_r180, delay_clks,
             st_therm_clks, n_avg,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(
@@ -473,6 +475,7 @@ class FockResolvedRamsey(ExperimentBase):
             disps, sel_r90, delay_clks,
             st_therm_clks, n_avg,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(
@@ -681,6 +684,7 @@ class FockResolvedPowerRabi(ExperimentBase):
             fock_ifs, sel_qb_pulse,
             st_therm_clks, n_avg,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(

@@ -602,13 +602,21 @@ class CircuitRunner:
             return self._compile_xy_pair(circuit, sweep)
         raise ValueError(f"Unsupported circuit name: {circuit.name!r}")
 
-    def compile_v2(self, circuit: QuantumCircuit, *, n_shots: int | None = None):
-        from .circuit_compiler import CircuitRunnerV2
-
-        return CircuitRunnerV2(self.session).compile(circuit, n_shots=n_shots)
-
     def compile_program(self, circuit: QuantumCircuit, *, n_shots: int | None = None):
-        return self.compile_v2(circuit, n_shots=n_shots)
+        from .circuit_compiler import CircuitCompiler
+
+        return CircuitCompiler(self.session).compile(circuit, n_shots=n_shots)
+
+    def compile_v2(self, circuit: QuantumCircuit, *, n_shots: int | None = None):
+        """Deprecated alias for :meth:`compile_program`."""
+        import warnings as _w
+
+        _w.warn(
+            "CircuitRunner.compile_v2() is deprecated — use compile_program() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.compile_program(circuit, n_shots=n_shots)
 
     def visualize_pulses(
         self,
@@ -815,6 +823,7 @@ class CircuitRunner:
             n_avg,
             qb_el=qb_el,
             bindings=getattr(self.session, "bindings", None),
+            readout=self.session.readout_handle(),
         )
         snapshot = self._maybe_snapshot()
         return CircuitBuildResult(name="PowerRabi", program=prog, sweep=sweep, readout_snapshot=snapshot, metadata=params)
@@ -835,7 +844,7 @@ class CircuitRunner:
         tuning = params.get("tuning") or {}
         params["applied_gain_scale"] = float(tuning.get("amplitude_scale", 1.0))
 
-        prog = cQED_programs.all_xy(qb_el, [(op_a, op_b)], qb_therm_clks, n_avg)
+        prog = cQED_programs.all_xy(qb_el, [(op_a, op_b)], qb_therm_clks, n_avg, readout=self.session.readout_handle())
         snapshot = self._maybe_snapshot()
         return CircuitBuildResult(
             name="XYPair",
@@ -863,6 +872,7 @@ class CircuitRunner:
             n_avg,
             qb_el=qb_el,
             bindings=getattr(self.session, "bindings", None),
+            readout=self.session.readout_handle(),
         )
         snapshot = self._maybe_snapshot()
         return CircuitBuildResult(name="T1Relaxation", program=prog, sweep=sweep, readout_snapshot=snapshot, metadata=params)
@@ -902,7 +912,7 @@ class CircuitRunner:
         )
         measureMacro.set_drive_frequency(drive_frequency)
 
-        prog = cQED_programs.iq_blobs(ro_el, qb_el, r180, qb_therm_clks, n_samples, bindings=getattr(self.session, "bindings", None))
+        prog = cQED_programs.iq_blobs(ro_el, qb_el, r180, qb_therm_clks, n_samples, bindings=getattr(self.session, "bindings", None), readout=self.session.readout_handle())
         snapshot = self._maybe_snapshot()
         return CircuitBuildResult(name="ReadoutGEDiscrimination", program=prog, sweep=sweep or SweepSpec(averaging=n_samples), readout_snapshot=snapshot, metadata=params)
 
@@ -923,6 +933,7 @@ class CircuitRunner:
             max_trials,
             n_samples,
             bindings=getattr(self.session, "bindings", None),
+            readout=self.session.readout_handle(),
         )
         snapshot = self._maybe_snapshot()
         return CircuitBuildResult(name="ReadoutButterflyMeasurement", program=prog, sweep=sweep or SweepSpec(averaging=n_samples), readout_snapshot=snapshot, metadata=params)

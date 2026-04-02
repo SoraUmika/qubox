@@ -8,7 +8,7 @@ statements continue to work.
 """
 from __future__ import annotations
 
-from ..analysis.calibration_algorithms import (  # noqa: F401
+from qubox_tools.fitting.calibration import (  # noqa: F401
     apply_affine_correction,
     compute_corrected_knobs,
     fit_chi_ramsey,

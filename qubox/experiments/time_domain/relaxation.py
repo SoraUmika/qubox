@@ -8,10 +8,10 @@ import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase, create_clks_array
 from ..result import AnalysisResult, FitResult, ProgramBuildResult
-from ...analysis import post_process as pp
-from ...analysis.fitting import fit_and_wrap
-from ...analysis.cQED_models import T1_relaxation_model
-from ...analysis.analysis_tools import project_complex_to_line_real
+from qubox_tools.algorithms import post_process as pp
+from qubox_tools.fitting.routines import fit_and_wrap
+from qubox_tools.fitting.cqed import T1_relaxation_model
+from qubox_tools.algorithms.transforms import project_complex_to_line_real
 from ...hardware.program_runner import RunResult
 from ...programs.circuit_runner import CircuitRunner, make_t1_circuit
 from ...programs import api as cQED_programs
@@ -67,12 +67,14 @@ class T1Relaxation(ExperimentBase):
                     r180, delay_clks, qb_therm_clks, n_avg,
                     qb_el=attr.qb_el,
                     bindings=self._bindings_or_none,
+                    readout=self.readout_handle,
                 )
         else:
             prog = cQED_programs.T1_relaxation(
                 r180, delay_clks, qb_therm_clks, n_avg,
                 qb_el=attr.qb_el,
                 bindings=self._bindings_or_none,
+                readout=self.readout_handle,
             )
 
         return ProgramBuildResult(

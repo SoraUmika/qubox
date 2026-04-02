@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
-import warnings
 
 
 @dataclass
@@ -169,13 +168,6 @@ class ReadoutConfig:
             raise ValueError(
                 f"rotation_method={self.rotation_method!r} not supported; only 'optimal' is valid"
             )
-        if self.weight_extraction_method == "legacy_ge_diff_norm":
-            warnings.warn(
-                "weight_extraction_method='legacy_ge_diff_norm' is deprecated; use 'ge_diff_norm'.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            self.weight_extraction_method = "ge_diff_norm"
         if self.weight_extraction_method not in {"ge_diff_norm"}:
             raise ValueError(
                 "weight_extraction_method must be 'ge_diff_norm'"
@@ -184,13 +176,6 @@ class ReadoutConfig:
             raise ValueError(
                 "histogram_fitting must be 'two_state_discriminator' for parity"
             )
-        if self.threshold_extraction == "legacy_discriminator":
-            warnings.warn(
-                "threshold_extraction='legacy_discriminator' is deprecated; use 'optimal_discriminator'.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            self.threshold_extraction = "optimal_discriminator"
         if self.threshold_extraction not in {"optimal_discriminator"}:
             raise ValueError(
                 "threshold_extraction must be 'optimal_discriminator'"

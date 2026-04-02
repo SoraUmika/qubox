@@ -1,24 +1,34 @@
 """Notebook stage workflow helpers.
 
-Provides structured stage management, checkpoint persistence, calibration
-patch preview/apply, fit quality gates, and primitive-rotation seeding
-for numbered experiment notebooks.
+Thin wrapper around :mod:`qubox.workflow` that adds shared-session integration
+for Jupyter notebook environments.  Core logic (checkpoints, fit gates, patch
+preview, pulse seeding) lives in ``qubox.workflow`` and is reusable from
+scripts and CI without a notebook kernel.
+
+.. deprecated::
+    Direct imports from ``qubox.notebook.workflow`` are still supported but
+    new code should prefer ``qubox.workflow`` for portable primitives.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
-import json
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
-import numpy as np
+# Re-export portable primitives from qubox.workflow
+from ..workflow.stages import (  # noqa: F401
+    WorkflowConfig,
+    build_workflow_config,
+    get_stage_checkpoint_path,
+    load_legacy_reference,
+    load_stage_checkpoint,
+    save_stage_checkpoint,
+)
+from ..workflow.calibration_helpers import preview_or_apply_patch_ops  # noqa: F401
+from ..workflow.fit_gates import fit_center_inside_window, fit_quality_gate  # noqa: F401
+from ..workflow.pulse_seeding import ensure_primitive_rotations  # noqa: F401
 
-from ..calibration import CalibrationOrchestrator, Patch
-from ..devices import SampleRegistry
-from ..tools.generators import register_rotations_from_ref_iq
-from ..tools.waveforms import drag_gaussian_pulse_waveforms
 from .runtime import (
     close_shared_session,
     get_notebook_session_bootstrap_path,
@@ -27,9 +37,17 @@ from .runtime import (
 )
 
 
+# ---------------------------------------------------------------------------
+# Notebook-specific types (add bootstrap_path via shared session)
+# ---------------------------------------------------------------------------
+
 @dataclass(frozen=True, slots=True)
 class NotebookWorkflowConfig:
-    """Immutable configuration for a multi-notebook experiment workflow."""
+    """Immutable configuration for a multi-notebook experiment workflow.
+
+    Extends :class:`~qubox.workflow.WorkflowConfig` with a convenience
+    ``bootstrap_path`` property that uses the notebook runtime helpers.
+    """
 
     registry_base: Path
     sample_id: str
@@ -61,19 +79,9 @@ class NotebookStageContext:
     had_live_session: bool
 
 
-def _json_ready(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(key): _json_ready(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_ready(item) for item in value]
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, np.ndarray):
-        return [_json_ready(item) for item in value.tolist()]
-    if isinstance(value, np.generic):
-        return value.item()
-    return value
-
+# ---------------------------------------------------------------------------
+# Backward-compat aliases
+# ---------------------------------------------------------------------------
 
 def build_notebook_workflow_config(
     *,
@@ -95,30 +103,13 @@ def build_notebook_workflow_config(
     )
 
 
-def load_legacy_reference(path: str | Path | None) -> dict[str, Any]:
-    """Load a legacy cQED-params reference file, returning ``{}`` if absent."""
-    if path is None:
-        return {}
-    reference_path = Path(path)
-    if not reference_path.exists():
-        return {}
-    return json.loads(reference_path.read_text(encoding="utf-8"))
+# Alias so existing notebook code using the old name still works
+get_notebook_stage_checkpoint_path = get_stage_checkpoint_path
 
 
-def get_notebook_stage_checkpoint_path(
-    *,
-    registry_base: str | Path,
-    sample_id: str,
-    cooldown_id: str,
-    stage_name: str,
-) -> Path:
-    """Return the checkpoint file path for a given stage."""
-    registry = SampleRegistry(registry_base)
-    runtime_dir = registry.cooldown_path(sample_id, cooldown_id) / "artifacts" / "runtime"
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    slug = stage_name.strip().lower().replace(" ", "_")
-    return runtime_dir / f"notebook_stage_{slug}.json"
-
+# ---------------------------------------------------------------------------
+# Notebook-specific: open_notebook_stage (requires shared session)
+# ---------------------------------------------------------------------------
 
 def open_notebook_stage(
     *,
@@ -131,8 +122,13 @@ def open_notebook_stage(
     legacy_cqed_params_path: str | Path | None = None,
     force_reopen: bool = False,
     close_existing: bool = True,
+    simulation_mode: bool = True,
 ) -> NotebookStageContext:
-    """Open a numbered-notebook stage, returning a context bundle."""
+    """Open a numbered-notebook stage, returning a context bundle.
+
+    This is the notebook-specific orchestrator that combines workflow config,
+    shared session management, and checkpoint path resolution.
+    """
     workflow = build_notebook_workflow_config(
         registry_base=registry_base,
         sample_id=sample_id,
@@ -151,6 +147,7 @@ def open_notebook_stage(
         cooldown_id=workflow.cooldown_id,
         qop_ip=workflow.qop_ip,
         cluster_name=workflow.cluster_name,
+        simulation_mode=simulation_mode,
         force_reopen=force_reopen,
     )
     context_snapshot = getattr(session, "context_snapshot", None)
@@ -163,7 +160,7 @@ def open_notebook_stage(
         session=session,
         attr=attr,
         bootstrap_path=workflow.bootstrap_path,
-        checkpoint_path=get_notebook_stage_checkpoint_path(
+        checkpoint_path=get_stage_checkpoint_path(
             registry_base=workflow.registry_base,
             sample_id=workflow.sample_id,
             cooldown_id=workflow.cooldown_id,
@@ -174,217 +171,19 @@ def open_notebook_stage(
     )
 
 
-def save_stage_checkpoint(
-    *,
-    registry_base: str | Path,
-    sample_id: str,
-    cooldown_id: str,
-    stage_name: str,
-    status: str,
-    summary: str,
-    consumed_inputs: dict[str, Any] | None = None,
-    persisted_outputs: dict[str, Any] | None = None,
-    advisory_outputs: dict[str, Any] | None = None,
-    next_stage: str | None = None,
-    notes: Sequence[str] | None = None,
-    metrics: dict[str, Any] | None = None,
-) -> Path:
-    """Persist a stage checkpoint to the cooldown runtime artifacts."""
-    checkpoint_path = get_notebook_stage_checkpoint_path(
-        registry_base=registry_base,
-        sample_id=sample_id,
-        cooldown_id=cooldown_id,
-        stage_name=stage_name,
-    )
-    payload = {
-        "stage_name": stage_name,
-        "status": status,
-        "summary": summary,
-        "sample_id": sample_id,
-        "cooldown_id": cooldown_id,
-        "created_at_utc": datetime.now(UTC).isoformat(),
-        "consumed_inputs": consumed_inputs or {},
-        "persisted_outputs": persisted_outputs or {},
-        "advisory_outputs": advisory_outputs or {},
-        "next_stage": next_stage,
-        "notes": list(notes or ()),
-        "metrics": metrics or {},
-    }
-    checkpoint_path.write_text(json.dumps(_json_ready(payload), indent=2, sort_keys=True), encoding="utf-8")
-    return checkpoint_path
-
-
-def load_stage_checkpoint(
-    *,
-    registry_base: str | Path,
-    sample_id: str,
-    cooldown_id: str,
-    stage_name: str,
-) -> dict[str, Any] | None:
-    """Load a stage checkpoint, returning ``None`` if the file does not exist."""
-    checkpoint_path = get_notebook_stage_checkpoint_path(
-        registry_base=registry_base,
-        sample_id=sample_id,
-        cooldown_id=cooldown_id,
-        stage_name=stage_name,
-    )
-    if not checkpoint_path.exists():
-        return None
-    return json.loads(checkpoint_path.read_text(encoding="utf-8"))
-
-
-def preview_or_apply_patch_ops(
-    session_obj: Any,
-    *,
-    reason: str,
-    proposed_patch_ops: Iterable[dict[str, Any]],
-    apply: bool = False,
-    print_fn=print,
-) -> tuple[Patch | None, dict[str, Any] | None, dict[str, Any] | None]:
-    """Preview or apply a set of calibration patch operations."""
-    patch_ops = list(proposed_patch_ops)
-    if not patch_ops:
-        print_fn(f"{reason}: no calibration updates were proposed by the fit.")
-        return None, None, None
-
-    patch = Patch(reason=reason)
-    for patch_op in patch_ops:
-        patch.add(patch_op["op"], **patch_op.get("payload", {}))
-
-    orchestrator = CalibrationOrchestrator(session_obj)
-    preview = orchestrator.apply_patch(patch, dry_run=True)
-    print_fn(f"{reason} patch preview ({preview['n_updates']} updates):")
-    for index, update in enumerate(preview.get("preview", []), start=1):
-        print_fn(f"  {index}. {update['op']}: {update['payload']}")
-
-    apply_result = None
-    if apply:
-        apply_result = orchestrator.apply_patch(patch, dry_run=False)
-        print_fn(
-            f"Applied patch with {apply_result['n_updates']} updates; "
-            f"sync_ok={apply_result['sync_ok']}"
-        )
-    else:
-        print_fn("Patch not applied. Enable the stage apply flag to commit the calibration.")
-
-    return patch, preview, apply_result
-
-
-def fit_quality_gate(analysis: Any, *, r_squared_min: float = 0.5) -> tuple[bool, str]:
-    """Check whether a fit result meets quality thresholds."""
-    fit = getattr(analysis, "fit", None)
-    if fit is None or not getattr(fit, "params", None):
-        return False, "fit produced no parameters"
-    if getattr(fit, "success", True) is False:
-        return False, "fit reported failure"
-    r_squared = getattr(fit, "r_squared", np.nan)
-    if np.isfinite(r_squared) and r_squared < r_squared_min:
-        return False, f"fit r_squared below threshold: {r_squared:.3f} < {r_squared_min:.3f}"
-    return True, "fit quality passed"
-
-
-def fit_center_inside_window(
-    fitted_value_hz: float,
-    frequencies_hz: Iterable[float],
-    *,
-    margin_points: int = 2,
-) -> tuple[bool, str]:
-    """Check whether a fitted center frequency lies inside the scan window."""
-    frequencies = np.asarray(list(frequencies_hz), dtype=float)
-    if frequencies.size == 0 or not np.isfinite(fitted_value_hz):
-        return False, "fit produced no finite center frequency"
-    left_guard = frequencies[min(margin_points, frequencies.size - 1)]
-    right_guard = frequencies[max(0, frequencies.size - 1 - margin_points)]
-    if fitted_value_hz <= left_guard:
-        return False, f"fit center is pinned near the low-frequency edge ({fitted_value_hz / 1e6:.3f} MHz)"
-    if fitted_value_hz >= right_guard:
-        return False, f"fit center is pinned near the high-frequency edge ({fitted_value_hz / 1e6:.3f} MHz)"
-    return True, "fit center lies safely inside the scan window"
-
-
-def ensure_primitive_rotations(
-    session_obj: Any,
-    *,
-    qb_element: str,
-    amplitude: float,
-    length: int,
-    sigma: float,
-    alpha: float,
-    anharmonicity_hz: float,
-    detuning_hz: float = 0.0,
-    sampling_rate: float = 1e9,
-    required_ops: Sequence[str] = ("x180", "x90"),
-    rotations: Sequence[str] = ("ref_r180", "x180", "x90", "xn90", "y180", "y90", "yn90"),
-    ref_op: str = "ref_r180",
-    persist: bool = True,
-    override: bool = True,
-    force_register: bool = False,
-) -> dict[str, Any]:
-    """Seed primitive DRAG rotation pulses on a session's pulse manager."""
-    pulse_mgr = session_obj.pulse_mgr
-    missing_required_ops: list[str] = []
-    for op_name in required_ops:
-        try:
-            pulse_mgr.get_pulseOp_by_element_op(qb_element, op_name, strict=True)
-        except Exception:
-            missing_required_ops.append(op_name)
-
-    ref_i_samples, ref_q_samples = drag_gaussian_pulse_waveforms(
-        amplitude=float(amplitude),
-        length=int(length),
-        sigma=float(sigma),
-        alpha=float(alpha),
-        anharmonicity=float(anharmonicity_hz),
-        detuning=float(detuning_hz),
-        subtracted=True,
-        sampling_rate=float(sampling_rate),
-    )
-
-    created_ops: list[str] = []
-    if force_register or missing_required_ops:
-        pulse_mgr.create_control_pulse(
-            element=qb_element,
-            op=ref_op,
-            length=int(length),
-            I_samples=ref_i_samples,
-            Q_samples=ref_q_samples,
-            override=override,
-            persist=persist,
-        )
-        created_ops = list(
-            register_rotations_from_ref_iq(
-                pulse_mgr,
-                ref_i_samples,
-                ref_q_samples,
-                element=qb_element,
-                rotations=tuple(rotations),
-                persist=persist,
-                override=override,
-            )
-        )
-        session_obj.burn_pulses(include_volatile=True)
-
-    return {
-        "created": bool(force_register or missing_required_ops),
-        "created_ops": created_ops,
-        "missing_required_ops": missing_required_ops,
-        "ref_op": ref_op,
-        "ref_i_samples": list(ref_i_samples),
-        "ref_q_samples": list(ref_q_samples),
-    }
-
-
 __all__ = [
+    # Notebook-specific
     "NotebookStageContext",
     "NotebookWorkflowConfig",
     "build_notebook_workflow_config",
+    "open_notebook_stage",
+    # Re-exports from qubox.workflow (backward compat)
+    "get_notebook_stage_checkpoint_path",
     "ensure_primitive_rotations",
     "fit_center_inside_window",
     "fit_quality_gate",
-    "get_notebook_stage_checkpoint_path",
     "load_legacy_reference",
     "load_stage_checkpoint",
-    "open_notebook_stage",
     "preview_or_apply_patch_ops",
     "save_stage_checkpoint",
 ]

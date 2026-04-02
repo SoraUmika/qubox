@@ -1,5 +1,8 @@
-"""Legacy optimization namespace preserved for backward compatibility."""
+"""Optimization namespace — REMOVED.
 
-from .optimization import *  # noqa: F401, F403
-from .smooth_opt import *  # noqa: F401, F403
-from .stochastic_opt import *  # noqa: F401, F403
+This package previously contained backward-compatibility wrappers.  All
+optimization functionality now lives in ``qubox_tools.optimization``
+(bayesian, local, stochastic).
+
+See the migration guide: ``docs/qubox_migration_guide.md``
+"""

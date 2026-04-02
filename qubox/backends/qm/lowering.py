@@ -211,6 +211,7 @@ def lower_to_legacy_circuit(
                     "values": list(axis.values),
                     "center": axis.center,
                     "unit": axis.unit,
+                    "metadata": dict(axis.metadata) if hasattr(axis, "metadata") and axis.metadata else {},
                 }
                 for axis in sweep.axes
             ],

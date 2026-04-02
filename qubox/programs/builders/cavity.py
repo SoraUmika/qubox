@@ -4,7 +4,7 @@ from contextlib import nullcontext
 from typing import TYPE_CHECKING
 from qm.qua import *
 from qualang_tools.loops import from_array
-from ..macros.measure import measureMacro
+from ..macros.measure import emit_measurement
 from ..macros.sequence import sequenceMacros
 import numpy as np
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from ...gates.gate import Gate
 
 
-def storage_spectroscopy(qb_el, st_el, disp, sel_r180, if_frequencies, st_therm_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
+def storage_spectroscopy(qb_el, st_el, disp, sel_r180, if_frequencies, st_therm_clks, n_avg, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
         _names = ConfigBuilder.ephemeral_names(bindings)
@@ -39,7 +39,7 @@ def storage_spectroscopy(qb_el, st_el, disp, sel_r180, if_frequencies, st_therm_
                 align()
                 play(sel_r180, qb_el)
                 align()
-                measureMacro.measure(targets=[I,Q])
+                emit_measurement(readout, targets=[I,Q])
                 wait(int(st_therm_clks), st_el)
                 save(I, I_st)
                 save(Q, Q_st)
@@ -51,7 +51,7 @@ def storage_spectroscopy(qb_el, st_el, disp, sel_r180, if_frequencies, st_therm_
             n_st.save("iteration")
     return storage_spec
 
-def num_splitting_spectroscopy(state_prep, qb_el, st_el, sel_r180, if_frequencies, st_therm_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
+def num_splitting_spectroscopy(state_prep, qb_el, st_el, sel_r180, if_frequencies, st_therm_clks, n_avg, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
         _names = ConfigBuilder.ephemeral_names(bindings)
@@ -72,7 +72,8 @@ def num_splitting_spectroscopy(state_prep, qb_el, st_el, sel_r180, if_frequencie
         n_st = declare_stream()
         with for_(n, 0, n < n_avg, n + 1):
             sequenceMacros.num_splitting_spectroscopy(if_frequencies, state_prep, I, Q, I_st, Q_st,
-                                                    st_therm_clks, st_el=st_el, qb_el=qb_el, sel_r180=sel_r180)
+                                                    st_therm_clks, st_el=st_el, qb_el=qb_el, sel_r180=sel_r180,
+readout=readout,)
             save(n, n_st)
         with stream_processing():
             I_st.buffer(len(if_frequencies)).average().save("I")
@@ -89,7 +90,7 @@ def sel_r180_calibration0(
     n_avg: int = 2000,
     fock_ifs=None,             # optional sweep list; if None -> [qb_if]
     x180_pulse: str = "x180",  # unconditional qubit pi to prep |e>
-    bindings: "ExperimentBindings | None" = None,
+    readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     """
     Calibrate sel_r180 flip probabilities with no M0.
@@ -143,7 +144,7 @@ def sel_r180_calibration0(
                 play(sel_r180, qb_el)
                 align()
 
-                measureMacro.measure(targets=[I_g, Q_g], state=st_g)
+                emit_measurement(readout, targets=[I_g, Q_g], state=st_g)
 
                 wait(int(qb_therm_clks))
 
@@ -163,7 +164,7 @@ def sel_r180_calibration0(
                 play(sel_r180, qb_el)
                 align()
 
-                measureMacro.measure(targets=[I_e, Q_e], state=st_e)
+                emit_measurement(readout, targets=[I_e, Q_e], state=st_e)
 
                 wait(int(qb_therm_clks))
 
@@ -202,7 +203,7 @@ def fock_resolved_spectroscopy(
     sel_r180_transfer_calibration: bool = False,
     qb_therm_clks: int | None = None,
     r180: str = "x180",
-    bindings: "ExperimentBindings | None" = None,
+    readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     """
     SIGNAL+NULL (per n and per f):
@@ -286,14 +287,14 @@ def fock_resolved_spectroscopy(
                 update_frequency(qb_el, qb_if)
                 align()
 
-                measureMacro.measure(targets=[I0_cal, Q0_cal], state=state0_cal)
+                emit_measurement(readout, targets=[I0_cal, Q0_cal], state=state0_cal)
 
                 update_frequency(qb_el, qb_if)
                 align()
                 play(sel_r180, qb_el)
                 align()
 
-                measureMacro.measure(targets=[I1_cal, Q1_cal], state=state1_cal)
+                emit_measurement(readout, targets=[I1_cal, Q1_cal], state=state1_cal)
 
                 wait(int(qb_therm_clks))
 
@@ -310,14 +311,14 @@ def fock_resolved_spectroscopy(
                 play(r180, qb_el)
                 align()
 
-                measureMacro.measure(targets=[I0_cal, Q0_cal], state=state0_cal)
+                emit_measurement(readout, targets=[I0_cal, Q0_cal], state=state0_cal)
 
                 update_frequency(qb_el, qb_if)
                 align()
                 play(sel_r180, qb_el)
                 align()
 
-                measureMacro.measure(targets=[I1_cal, Q1_cal], state=state1_cal)
+                emit_measurement(readout, targets=[I1_cal, Q1_cal], state=state1_cal)
 
                 wait(int(qb_therm_clks))
 
@@ -334,7 +335,7 @@ def fock_resolved_spectroscopy(
                 state_prep()
 
                 # ---- M0 (shared) ----
-                measureMacro.measure(targets=[I0, Q0], state=state0)
+                emit_measurement(readout, targets=[I0, Q0], state=state0)
 
                 # ---- SEL arm ----
                 update_frequency(qb_el, f)
@@ -342,7 +343,7 @@ def fock_resolved_spectroscopy(
                 play(sel_r180, qb_el)
                 align()
 
-                measureMacro.measure(targets=[I1_sel, Q1_sel], state=state1_sel)
+                emit_measurement(readout, targets=[I1_sel, Q1_sel], state=state1_sel)
 
                 # ---- NULL arm (timing-matched, zero amp) ----
                 # Keep same IF f to preserve mixer/IF path
@@ -350,7 +351,7 @@ def fock_resolved_spectroscopy(
                 play(sel_r180 * amp(0.0), qb_el)
                 align()
 
-                measureMacro.measure(targets=[I1_null, Q1_null], state=state1_null)
+                emit_measurement(readout, targets=[I1_null, Q1_null], state=state1_null)
 
                 # thermalize
                 wait(int(st_therm_clks))
@@ -405,7 +406,7 @@ def fock_resolved_T1_relaxation(
     delay_clks, st_therm_clks,
     n_avg,
     *,
-    bindings: "ExperimentBindings | None" = None,
+    readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
@@ -445,7 +446,7 @@ def fock_resolved_T1_relaxation(
                     play(sel_r180, qb_el)        # fock-resolved mapping pulse
                     align()
 
-                    measureMacro.measure(targets=[I, Q])
+                    emit_measurement(readout, targets=[I, Q])
                     wait(int(st_therm_clks))     # let system relax/reset
 
                     save(I, I_st)
@@ -461,7 +462,7 @@ def fock_resolved_T1_relaxation(
     return prog
 
 
-def fock_resolved_power_rabi(qb_el, st_el, gains, disp_n_list, fock_ifs, sel_qb_pulse, st_therm_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
+def fock_resolved_power_rabi(qb_el, st_el, gains, disp_n_list, fock_ifs, sel_qb_pulse, st_therm_clks, n_avg, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
         _names = ConfigBuilder.ephemeral_names(bindings)
@@ -492,7 +493,7 @@ def fock_resolved_power_rabi(qb_el, st_el, gains, disp_n_list, fock_ifs, sel_qb_
                     play(sel_qb_pulse*amp(g), qb_el)
                     align()
 
-                    measureMacro.measure(targets=[I, Q])
+                    emit_measurement(readout, targets=[I, Q])
                     wait(int(st_therm_clks))
                     save(I, I_st)
                     save(Q, Q_st)
@@ -503,7 +504,7 @@ def fock_resolved_power_rabi(qb_el, st_el, gains, disp_n_list, fock_ifs, sel_qb_
             n_st.save("iteration")
     return prog
 
-def fock_resolved_qb_ramsey(qb_el, st_el, fock_ifs, detunings, disps, sel_r90, delay_clks, st_therm_clk, n_avg, *, bindings: "ExperimentBindings | None" = None):
+def fock_resolved_qb_ramsey(qb_el, st_el, fock_ifs, detunings, disps, sel_r90, delay_clks, st_therm_clk, n_avg, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
         _names = ConfigBuilder.ephemeral_names(bindings)
@@ -530,7 +531,7 @@ def fock_resolved_qb_ramsey(qb_el, st_el, fock_ifs, detunings, disps, sel_r90, d
                     align()
                     sequenceMacros.qubit_ramsey(delay_clk, qb_el=qb_el, r90_1=sel_r90, r90_2=sel_r90)
                     align()
-                    measureMacro.measure(targets=[I,Q])
+                    emit_measurement(readout, targets=[I,Q])
                     wait(int(st_therm_clk))
                     save(I, I_st)
                     save(Q, Q_st)
@@ -551,7 +552,7 @@ def storage_wigner_tomography(
         st_therm_clks,          # storage cooldown
         n_avg,                  # number of repeats
         *,
-        bindings: "ExperimentBindings | None" = None,
+        readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
@@ -603,7 +604,7 @@ def storage_wigner_tomography(
                 play(x90_pulse, qb_el)
                 align(qb_el, ro_el)
 
-                measureMacro.measure(targets=[I, Q])
+                emit_measurement(readout, targets=[I, Q])
                 wait(int(st_therm_clks), st_el)
 
                 save(I, I_st)
@@ -626,7 +627,7 @@ def phase_evolution_prog(ro_el, qb_el, st_el,
                          delay_clks,
                          snap_list,
                          st_therm_clks, n_avg,
-                         *, bindings: "ExperimentBindings | None" = None):
+                         *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
         _names = ConfigBuilder.ephemeral_names(bindings)
@@ -676,7 +677,7 @@ def phase_evolution_prog(ro_el, qb_el, st_el,
                         update_frequency(qb_el, fock_n_if)
                         play(sel_r180_pulse, qb_el)
                         align(qb_el, ro_el)
-                        I, Q = measureMacro.measure(targets=[I,Q])
+                        I, Q = emit_measurement(readout, targets=[I,Q])
                         wait(int(st_therm_clks), st_el)
 
                         save(I, I_st)
@@ -696,7 +697,7 @@ def storage_chi_ramsey(
     delay_ticks,          # list/ndarray of waiting\u2010time values (in clock ticks)
     st_therm_clks,        # cooldown for storage (in clock ticks)
     n_avg,                # number of averages
-    *, bindings: "ExperimentBindings | None" = None,
+    *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
@@ -732,7 +733,7 @@ def storage_chi_ramsey(
                 play(x90_pulse, qb_el)
                 align(qb_el, ro_el)
 
-                measureMacro.measure(targets=[I, Q])
+                emit_measurement(readout, targets=[I, Q])
                 wait(int(st_therm_clks), st_el)
 
                 save(I, I_st)
@@ -752,7 +753,7 @@ def storage_ramsey(
     delay_ticks,          # list/ndarray of waiting\u2010time values (in clock ticks)
     st_therm_clks,        # cooldown for storage (in clock ticks)
     n_avg,                # number of averages
-    *, bindings: "ExperimentBindings | None" = None,
+    *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
@@ -791,7 +792,7 @@ def storage_ramsey(
                 align(st_el)
                 play(sel_r180, qb_el)
                 align()
-                I, Q = measureMacro.measure(targets=[I,Q])
+                I, Q = emit_measurement(readout, targets=[I,Q])
 
                 # re\u2010thermalize storage
                 wait(int(st_therm_clks), st_el)

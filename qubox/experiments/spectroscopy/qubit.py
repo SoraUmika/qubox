@@ -11,10 +11,10 @@ from ..experiment_base import (
     make_lo_segments, if_freqs_for_segment, merge_segment_outputs,
 )
 from ..result import AnalysisResult, FitResult, ProgramBuildResult
-from ...analysis import post_process as pp
-from ...analysis.fitting import fit_and_wrap, build_fit_legend
-from ...analysis.cQED_models import qubit_spec_model
-from ...analysis.output import Output
+from qubox_tools.algorithms import post_process as pp
+from qubox_tools.fitting.routines import fit_and_wrap, build_fit_legend
+from qubox_tools.fitting.cqed import qubit_spec_model
+from qubox_tools.data.containers import Output
 from ...hardware.program_runner import ExecMode, RunResult
 from ...programs import api as cQED_programs
 from ...programs.macros.measure import measureMacro
@@ -67,6 +67,7 @@ class QubitSpectroscopy(ExperimentBase):
             qb_therm, n_avg,
             qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(
@@ -235,6 +236,7 @@ class QubitSpectroscopyCoarse(ExperimentBase):
                 qb_therm, n_avg,
                 qb_el=attr.qb_el,
                 bindings=self._bindings_or_none,
+                readout=self.readout_handle,
             )
             rr = self.run_program(
                 prog, n_total=n_avg,
@@ -372,6 +374,7 @@ class QubitSpectroscopyEF(ExperimentBase):
             qb_gain, qb_len, ge_prep_pulse, qb_therm, n_avg,
             qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(

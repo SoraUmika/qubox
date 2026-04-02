@@ -114,6 +114,11 @@ class HardwareController:
     def _build_element_table(self) -> Dict[str, Dict]:
         require(self.qm is not None, "QM not initialized", ConfigError)
         cfg = self.qm.get_config()
+        return self._parse_element_table(cfg)
+
+    def _parse_element_table(self, cfg: dict) -> Dict[str, Dict]:
+        """Parse element LO/IF data from a QM config dict."""
+        octaves = cfg.get("octaves") or {}
         elems: Dict[str, Dict] = {}
         for el, info in (cfg.get("elements") or {}).items():
             if el.startswith("__"):
@@ -123,9 +128,21 @@ class HardwareController:
                 lo_freq = info["mixInputs"].get("lo_frequency")
             elif "singleInput" in info:
                 lo_freq = info["singleInput"].get("lo_frequency")
+            # Resolve LO from octave config when using RF_inputs
+            if lo_freq is None and "RF_inputs" in info:
+                port = info["RF_inputs"].get("port")
+                if isinstance(port, (list, tuple)) and len(port) >= 2:
+                    oct_name, rf_port = str(port[0]), port[1]
+                    rf_outs = (octaves.get(oct_name) or {}).get("RF_outputs") or {}
+                    port_cfg = rf_outs.get(rf_port) or rf_outs.get(str(rf_port)) or {}
+                    lo_freq = port_cfg.get("LO_frequency")
             if_freq = info.get("intermediate_frequency", 0.0)
             elems[el] = {"LO": lo_freq, "IF": if_freq}
         return elems
+
+    def populate_elements_from_config(self, cfg: dict) -> None:
+        """Populate element table from a raw QM config dict (no QM needed)."""
+        self.elements = self._parse_element_table(cfg)
 
     def _resolve_active_mixer_elements(self) -> tuple[list[str], list[str]]:
         """Return (valid_active_elements, skipped_internal_or_unknown)."""
@@ -426,10 +443,10 @@ class HardwareController:
         }
 
     def set_element_fq(self, el: str, freq: float) -> None:
-        self._require_qm()
         self._check_el(el)
         if_freq = self.calculate_el_if_fq(el, freq)
-        self.qm.set_intermediate_frequency(el, float(if_freq))
+        if self.qm is not None:
+            self.qm.set_intermediate_frequency(el, float(if_freq))
         self.elements[el]["IF"] = float(if_freq)
         _logger.info("Set '%s' to freq %.3f MHz → IF %.3f MHz", el, freq * 1e-6, if_freq * 1e-6)
 

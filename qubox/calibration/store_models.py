@@ -175,6 +175,34 @@ class FitRecord(BaseModel):
     timestamp: str | None = None
     metadata: dict[str, Any] | None = None
 
+    @classmethod
+    def from_fit_result(cls, fit: Any, experiment: str) -> "FitRecord":
+        """Create from an :class:`~qubox.experiments.result.FitResult`.
+
+        Parameters
+        ----------
+        fit : FitResult
+            The runtime fit result.
+        experiment : str
+            Name of the experiment that produced the fit.
+        """
+        import datetime
+
+        return cls(
+            experiment=experiment,
+            model_name=getattr(fit, "model_name", "unknown"),
+            params=dict(getattr(fit, "params", {})),
+            uncertainties=dict(fit.uncertainties) if getattr(fit, "uncertainties", None) else None,
+            reduced_chi2=None,
+            timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            metadata={
+                **(getattr(fit, "metadata", None) or {}),
+                "success": getattr(fit, "success", None),
+                "reason": getattr(fit, "reason", None),
+                "r_squared": getattr(fit, "r_squared", None),
+            },
+        )
+
 
 # ---------------------------------------------------------------------------
 # Calibration context block

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from qualang_tools.loops import from_array
 from qm.qua import (
     align,
     amp,
@@ -167,7 +168,20 @@ class _MeasurementRuntime:
         return out
 
 
-class CircuitRunnerV2:
+@dataclass
+class _SweepAxisRuntime:
+    """Runtime state for a single sweep axis during QUA program generation."""
+
+    parameter: str
+    values: np.ndarray
+    target: str | None
+    apply_mode: str  # "frequency", "amplitude", "wait", "metadata_only"
+    qua_var: Any = None  # filled during program generation
+
+
+class CircuitCompiler:
+    """Generic circuit-to-QUA compiler with gate lowering and sweep support."""
+
     def __init__(self, session: Any):
         self.session = session
         self.attr = self._context_snapshot()
@@ -175,7 +189,7 @@ class CircuitRunnerV2:
         self.pulse_mgr = getattr(session, "pulse_mgr", getattr(session, "pulseOpMngr", None))
         self.hw = getattr(session, "hw", getattr(session, "quaProgMngr", None))
         if self.pulse_mgr is None:
-            raise RuntimeError("CircuitRunnerV2 requires a pulse manager on the session context.")
+            raise RuntimeError("CircuitCompiler requires a pulse manager on the session context.")
         self._trace: list[InstructionTraceEntry] = []
         self._gate_resolutions: list[GateResolution] = []
         self._base_frequencies: dict[str, float] = {}
@@ -183,11 +197,33 @@ class CircuitRunnerV2:
         self._resolved_state_rules: dict[str, StateRule] = {}
         self._post_processing_plan: list[dict[str, Any]] = []
 
+        from .gate_lowerers.builtins import build_default_registry
+        from .sweep_strategies import build_default_sweep_registry
+
+        self._gate_lowerers: dict[str, Any] = build_default_registry()
+        self._sweep_strategies: dict[str, Any] = build_default_sweep_registry()
+
+    def register_lowerer(self, gate_type: str, lowerer: Any) -> None:
+        """Register a custom gate lowerer for *gate_type*.
+
+        The lowerer must be a callable matching the :class:`GateLowerer`
+        protocol: ``(ctx, gate, *, gate_index, targets, measurements,
+        resolved_params) -> None``.
+        """
+        self._gate_lowerers[gate_type] = lowerer
+
+    def register_sweep_strategy(self, name: str, strategy: Any) -> None:
+        """Register a custom sweep strategy under *name*.
+
+        The strategy must satisfy the :class:`SweepStrategy` protocol.
+        """
+        self._sweep_strategies[name] = strategy
+
     def compile(self, circuit: QuantumCircuit, *, n_shots: int | None = None) -> ProgramBuildResult:
         circuit = circuit.with_stable_gate_names()
         n_total = int(n_shots if n_shots is not None else circuit.metadata.get("n_shots", 1))
         if n_total <= 0:
-            raise ValueError("CircuitRunnerV2 requires n_shots >= 1.")
+            raise ValueError("CircuitCompiler requires n_shots >= 1.")
 
         self._trace = []
         self._gate_resolutions = []
@@ -200,26 +236,50 @@ class CircuitRunnerV2:
         measurement_schema.validate()
         post_shot_wait_clks = int(circuit.metadata.get("post_shot_wait_clks", 0) or 0)
 
+        # ── Parse sweep axes from circuit metadata ──
+        sweep_configs = self._parse_sweep_axes(circuit)
+
         with program() as prog:
             shot = declare(int)
             shot_stream = declare_stream()
             measurement_runtimes = self._declare_measurements(measurement_schema)
 
+            # Declare QUA variables for sweep axes (type from strategy)
+            for sc in sweep_configs:
+                strategy = self._sweep_strategies.get(sc.apply_mode)
+                if strategy is not None and getattr(strategy, "qua_type", "int") == "fixed":
+                    sc.qua_var = declare(fixed)
+                else:
+                    sc.qua_var = declare(int)
+
+            # Reset sweep overrides before program body
+            self._sweep_amplitude_var = None
+            self._sweep_wait_var = None
+
             with for_(shot, 0, shot < n_total, shot + 1):
-                for index, gate in enumerate(circuit.gates):
-                    self._lower_gate(
-                        gate,
-                        gate_index=index,
-                        measurements=measurement_runtimes,
+                if sweep_configs:
+                    self._emit_sweep_body(
+                        sweep_configs=sweep_configs,
+                        circuit=circuit,
+                        measurement_runtimes=measurement_runtimes,
+                        post_shot_wait_clks=post_shot_wait_clks,
+                        axis_index=0,
                     )
-                if post_shot_wait_clks > 0:
-                    wait(post_shot_wait_clks)
-                    self._trace.append(
-                        InstructionTraceEntry(
-                            op="wait",
-                            params={"duration_clks": post_shot_wait_clks},
+                else:
+                    for index, gate in enumerate(circuit.gates):
+                        self._lower_gate(
+                            gate,
+                            gate_index=index,
+                            measurements=measurement_runtimes,
                         )
-                    )
+                    if post_shot_wait_clks > 0:
+                        wait(post_shot_wait_clks)
+                        self._trace.append(
+                            InstructionTraceEntry(
+                                op="wait",
+                                params={"duration_clks": post_shot_wait_clks},
+                            )
+                        )
                 save(shot, shot_stream)
 
             with stream_processing():
@@ -228,16 +288,26 @@ class CircuitRunnerV2:
                         node = runtime.streams[stream.name]
                         if stream.qua_type == "bool":
                             node = node.boolean_to_int()
-                        for dim in self._resolve_shape(stream.shape, n_total=n_total):
-                            node = node.buffer(dim)
-                        output_name = runtime.record.output_name(stream.name)
-                        if stream.aggregate == "average":
-                            node.average().save(output_name)
-                        elif stream.aggregate == "save":
-                            node.save(output_name)
+                        if sweep_configs:
+                            # Buffer by each sweep dimension, then average over shots
+                            for sc in sweep_configs:
+                                node = node.buffer(len(sc.values))
+                            node.average().save(runtime.record.output_name(stream.name))
                         else:
-                            node.save_all(output_name)
+                            for dim in self._resolve_shape(stream.shape, n_total=n_total):
+                                node = node.buffer(dim)
+                            output_name = runtime.record.output_name(stream.name)
+                            if stream.aggregate == "average":
+                                node.average().save(output_name)
+                            elif stream.aggregate == "save":
+                                node.save(output_name)
+                            else:
+                                node.save_all(output_name)
                 shot_stream.save("iteration")
+
+        # Clean up sweep state
+        self._sweep_amplitude_var = None
+        self._sweep_wait_var = None
 
         report = ResolutionReport(
             circuit_name=circuit.name,
@@ -278,12 +348,15 @@ class CircuitRunnerV2:
             program=prog,
             n_total=n_total,
             processors=processors,
-            experiment_name="CircuitRunnerV2",
+            experiment_name="CircuitCompiler",
             params=params,
             resolved_frequencies=dict(self._base_frequencies),
             resolved_parameter_sources=flattened_sources,
-            builder_function="CircuitRunnerV2.compile",
-            sweep_axes=None,
+            builder_function="CircuitCompiler.compile",
+            sweep_axes={
+                sc.parameter: {"values": sc.values.tolist(), "length": len(sc.values), "mode": sc.apply_mode}
+                for sc in sweep_configs
+            } if sweep_configs else None,
             measure_macro_state=self._measure_macro_state(),
             metadata=metadata,
         )
@@ -295,7 +368,99 @@ class CircuitRunnerV2:
         attr = getattr(self.session, "attributes", None)
         if attr is not None:
             return attr
-        raise RuntimeError("CircuitRunnerV2 requires a context_snapshot() or attributes on the session.")
+        raise RuntimeError("CircuitCompiler requires a context_snapshot() or attributes on the session.")
+
+    # ── Sweep axis support ──────────────────────────────────────────────
+
+    def _classify_sweep_parameter(self, parameter: str) -> str:
+        """Map a sweep parameter name to a strategy key via the sweep registry."""
+        from .sweep_strategies import classify_sweep_parameter
+
+        return classify_sweep_parameter(parameter)
+
+    def _infer_sweep_target(self, circuit: QuantumCircuit, parameter: str) -> str | None:
+        """Infer the target element for a sweep parameter from circuit gates."""
+        mode = self._classify_sweep_parameter(parameter)
+        if mode in ("frequency", "amplitude", "phase"):
+            for gate in circuit.gates:
+                if gate.gate_type in ("play", "play_pulse", "qubit_rotation", "X", "Y"):
+                    target = gate.target if isinstance(gate.target, str) else gate.target[0]
+                    return self._resolve_target(target)
+        if mode == "wait":
+            for gate in circuit.gates:
+                if gate.gate_type in ("idle", "wait"):
+                    target = gate.target if isinstance(gate.target, str) else gate.target[0]
+                    return self._resolve_target(target)
+            # Fallback: target the first play gate
+            for gate in circuit.gates:
+                if gate.gate_type in ("play", "play_pulse", "qubit_rotation"):
+                    target = gate.target if isinstance(gate.target, str) else gate.target[0]
+                    return self._resolve_target(target)
+        return None
+
+    def _parse_sweep_axes(self, circuit: QuantumCircuit) -> list[_SweepAxisRuntime]:
+        """Extract sweep axis configurations from circuit metadata."""
+        sweep_axes_raw = list(circuit.metadata.get("sweep_axes", []))
+        configs: list[_SweepAxisRuntime] = []
+        for axis_spec in sweep_axes_raw:
+            parameter = str(axis_spec["parameter"])
+            values = np.asarray(axis_spec["values"])
+            axis_meta = axis_spec.get("metadata") or {}
+            target = axis_meta.get("target")
+            if target is None:
+                target = self._infer_sweep_target(circuit, parameter)
+            apply_mode = self._classify_sweep_parameter(parameter)
+            configs.append(_SweepAxisRuntime(
+                parameter=parameter,
+                values=values,
+                target=target,
+                apply_mode=apply_mode,
+            ))
+        return configs
+
+    def _emit_sweep_body(
+        self,
+        *,
+        sweep_configs: list[_SweepAxisRuntime],
+        circuit: QuantumCircuit,
+        measurement_runtimes: dict[str, _MeasurementRuntime],
+        post_shot_wait_clks: int,
+        axis_index: int,
+    ) -> None:
+        """Recursively emit nested QUA for-loops for sweep axes."""
+        if axis_index >= len(sweep_configs):
+            # Base case: innermost loop — lower all gates
+            for index, gate in enumerate(circuit.gates):
+                self._lower_gate(
+                    gate,
+                    gate_index=index,
+                    measurements=measurement_runtimes,
+                )
+            if post_shot_wait_clks > 0:
+                wait(post_shot_wait_clks)
+                self._trace.append(
+                    InstructionTraceEntry(
+                        op="wait",
+                        params={"duration_clks": post_shot_wait_clks},
+                    )
+                )
+            return
+
+        sc = sweep_configs[axis_index]
+        with for_(*from_array(sc.qua_var, sc.values)):
+            # Apply sweep parameter via strategy
+            strategy = self._sweep_strategies.get(sc.apply_mode)
+            if strategy is not None:
+                strategy.apply(self, sc.qua_var, sc.target, sc.parameter)
+
+            # Recurse to next axis or emit gate body
+            self._emit_sweep_body(
+                sweep_configs=sweep_configs,
+                circuit=circuit,
+                measurement_runtimes=measurement_runtimes,
+                post_shot_wait_clks=post_shot_wait_clks,
+                axis_index=axis_index + 1,
+            )
 
     def _normalize_measurement_schema(self, circuit: QuantumCircuit) -> MeasurementSchema:
         if circuit.measurement_schema.records:
@@ -365,37 +530,16 @@ class CircuitRunnerV2:
         targets = tuple(self._resolve_target(target) for target in gate.targets)
         gate_type = gate.gate_type
 
-        if gate_type in {"measure", "measure_iq"}:
-            self._lower_measure_gate(
+        lowerer = self._gate_lowerers.get(gate_type)
+        if lowerer is not None:
+            lowerer(
+                self,
                 gate,
                 gate_index=gate_index,
                 targets=targets,
                 measurements=measurements,
                 resolved_params=resolved_params,
             )
-        elif gate_type in {"idle", "wait"}:
-            self._lower_idle_gate(gate, targets=targets, resolved_params=resolved_params)
-        elif gate_type == "frame_update":
-            self._lower_frame_update(gate, targets=targets, resolved_params=resolved_params)
-        elif gate_type in {"play", "play_pulse"}:
-            self._lower_play_pulse(
-                gate,
-                target=targets[0],
-                measurements=measurements,
-                resolved_params=resolved_params,
-            )
-        elif gate_type in {"qubit_rotation", "X", "Y"}:
-            self._lower_qubit_rotation(
-                gate,
-                gate_index=gate_index,
-                target=targets[0],
-                measurements=measurements,
-                resolved_params=resolved_params,
-            )
-        elif gate_type == "displacement":
-            self._lower_displacement(gate, target=targets[0], resolved_params=resolved_params)
-        elif gate_type == "sqr":
-            self._lower_sqr(gate, target=targets[0], resolved_params=resolved_params)
         else:
             raise ValueError(f"Unsupported intent gate type: {gate_type!r}")
 
@@ -522,6 +666,21 @@ class CircuitRunnerV2:
         resolved_params: dict[str, ResolvedParameter],
     ) -> None:
         duration = gate.duration_clks
+        sweep_wait = getattr(self, "_sweep_wait_var", None)
+
+        # If no concrete duration and a sweep wait variable is active, use the sweep
+        if duration is None and gate.params.get("duration_clks") is None and sweep_wait is not None:
+            wait(sweep_wait, *targets)
+            resolved_params["duration_clks"] = ResolvedParameter(value="<sweep_axis>", source="sweep_axis")
+            self._trace.append(
+                InstructionTraceEntry(
+                    op="wait",
+                    target=",".join(targets),
+                    params={"duration_clks": "<sweep_axis>", "source": "sweep"},
+                )
+            )
+            return
+
         if duration is None:
             resolved = self._resolve_param(
                 gate,
@@ -634,11 +793,16 @@ class CircuitRunnerV2:
         play_kwargs: dict[str, Any] = {}
 
         amplitude = gate.params.get("amplitude")
+        sweep_amp = getattr(self, "_sweep_amplitude_var", None)
         if amplitude is not None:
             amp_resolved = self._resolve_param(gate, "amplitude", amplitude, required=True)
             self._validate_amplitude(float(amp_resolved.value))
             resolved_params["amplitude"] = amp_resolved
             operation_handle = str(op.value) * amp(float(amp_resolved.value))
+        elif sweep_amp is not None:
+            # No concrete amplitude specified — use sweep variable
+            operation_handle = str(op.value) * amp(sweep_amp)
+            resolved_params["amplitude"] = ResolvedParameter(value="<sweep_axis>", source="sweep_axis")
 
         duration_value = gate.duration_clks if gate.duration_clks is not None else gate.params.get("duration_clks")
         if duration_value is not None:
@@ -1083,7 +1247,7 @@ class CircuitRunnerV2:
         derived_source = runtime.record.derived_state_name or "state"
         if runtime.record.state_rule is not None and source_name == derived_source:
             raise RuntimeError(
-                "compile_v2 does not support real-time branching on post-processed derived state "
+                "CircuitCompiler does not support real-time branching on post-processed derived state "
                 f"{gate.condition.measurement_key}.{source_name}. "
                 "Compilation emits IQ streams plus StateRule metadata only; apply derive_state() in analysis "
                 "or implement a true QUA branch path before enabling real-time branching."
@@ -1157,3 +1321,8 @@ class CircuitRunnerV2:
         except Exception:
             pass
         return try_build_readout_snapshot_from_macro()
+
+
+# ── Backward-compatibility alias ────────────────────────────────────────────
+CircuitRunnerV2 = CircuitCompiler
+"""Deprecated alias — use :class:`CircuitCompiler` instead."""

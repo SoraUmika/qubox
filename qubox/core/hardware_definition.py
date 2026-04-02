@@ -42,6 +42,12 @@ _logger = logging.getLogger(__name__)
 # Default digital input timing (standard OPX switch gate)
 _DEFAULT_DI_DELAY = 57
 _DEFAULT_DI_BUFFER = 18
+_HARDWARE_VERSION = 1
+_DEVICES_SCHEMA_VERSION = 1
+_DEFAULT_ELEMENT_OPERATIONS = {
+    "const": "const_pulse",
+    "zero": "zero_pulse",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +489,7 @@ class HardwareDefinition:
             )
 
         d: dict[str, Any] = {
+            "version": _HARDWARE_VERSION,
             "controllers": self._build_controllers(),
             "octaves": self._build_octaves(),
             "elements": self._build_elements(),
@@ -538,7 +545,7 @@ class HardwareDefinition:
         Returns an empty dict if no devices have been defined via
         :meth:`add_device`.
         """
-        return {
+        devices = {
             dev.name: {
                 "driver": dev.driver,
                 "backend": dev.backend,
@@ -548,6 +555,9 @@ class HardwareDefinition:
             }
             for dev in self._devices.values()
         }
+        if not devices:
+            return {}
+        return {"schema_version": _DEVICES_SCHEMA_VERSION, **devices}
 
     # ------------------------------------------------------------------
     # Persistence helpers
@@ -706,7 +716,7 @@ class HardwareDefinition:
             el_dict: dict[str, Any] = {
                 "RF_inputs": {"port": [self._octave, el.rf_out]},
                 "intermediate_frequency": self._compute_if(el),
-                "operations": {},
+                "operations": dict(_DEFAULT_ELEMENT_OPERATIONS),
             }
 
             if el.kind == "readout" and el.rf_in is not None:
@@ -742,7 +752,7 @@ class HardwareDefinition:
                 "lo_frequency": el.lo_frequency,
                 "gain": el.gain,
                 "digital_inputs": di_spec,
-                "operations": {},
+                "operations": dict(_DEFAULT_ELEMENT_OPERATIONS),
             }
 
         # --- Bindings: inputs (readout ADC) ---

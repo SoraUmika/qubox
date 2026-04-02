@@ -192,7 +192,7 @@ class ActiveResetProtocol:
 
         if not self.enable_real_time_branching:
             warnings.append(
-                "Active reset is analysis-only in compile_v2: MeasureIQ is emitted at program time, "
+                "Active reset is analysis-only in CircuitCompiler: MeasureIQ is emitted at program time, "
                 "then derive_state and next-shot conditional action happen after the run. "
                 "Set enable_real_time_branching=True to request a real-time branch."
             )

@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase
 from ..result import AnalysisResult, ProgramBuildResult
-from ...analysis import post_process as pp
-from ...analysis.cQED_plottings import display_fock_populations
+from qubox_tools.algorithms import post_process as pp
+from qubox_tools.plotting.cqed import display_fock_populations
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
 from ...programs.measurement import try_build_readout_snapshot_from_macro
@@ -55,6 +55,7 @@ class FockResolvedStateTomography(ExperimentBase):
             qb_if=qb_if,
             therm_clks=resolved_therm,
             n_avg=n_avg,
+            readout=self.readout_handle,
         )
         return ProgramBuildResult(
             program=prog,

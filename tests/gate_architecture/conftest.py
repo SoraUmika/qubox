@@ -120,10 +120,7 @@ def _install_sdk_stubs() -> None:
     if "qm" in sys.modules and "qm.qua" in sys.modules:
         return
 
-    pkg_root = Path(__file__).resolve().parents[2] / "qubox_v2_legacy"
-    root_pkg = types.ModuleType("qubox_v2_legacy")
-    root_pkg.__path__ = [str(pkg_root)]
-    sys.modules["qubox_v2_legacy"] = root_pkg
+    pkg_root = Path(__file__).resolve().parents[2]
 
     qm_mod = types.ModuleType("qm")
     qua_mod = types.ModuleType("qm.qua")
@@ -230,51 +227,73 @@ def _install_sdk_stubs() -> None:
     units_mod.unit = lambda *_args, **_kwargs: None
     qualang_tools_mod.units = units_mod
 
-    analysis_tools_mod = types.ModuleType("qubox_v2_legacy.analysis.analysis_tools")
-    for name in [
-        "complex_encoder",
-        "complex_decoder",
-        "interp_logpdf",
-        "bilinear_interp_logpdf",
-        "compile_1d_kde_to_grid",
-        "compile_2d_kde_to_grid",
-    ]:
-        setattr(analysis_tools_mod, name, _stub_callable)
-
     sys.modules["qm"] = qm_mod
     sys.modules["qm.qua"] = qua_mod
     sys.modules["qualang_tools"] = qualang_tools_mod
     sys.modules["qualang_tools.loops"] = loops_mod
     sys.modules["qualang_tools.units"] = units_mod
-    sys.modules["qubox_v2_legacy.analysis.analysis_tools"] = analysis_tools_mod
-    for pkg_name, rel_path in {
-        "qubox_v2_legacy.analysis": "analysis",
-        "qubox_v2_legacy.calibration": "calibration",
-        "qubox_v2_legacy.programs": "programs",
-        "qubox_v2_legacy.experiments": "experiments",
-        "qubox_v2_legacy.pulses": "pulses",
-    }.items():
-        pkg_mod = types.ModuleType(pkg_name)
-        pkg_mod.__path__ = [str(pkg_root / rel_path)]
-        sys.modules[pkg_name] = pkg_mod
+
+    # Stub heavy transitive dependencies that the test environment may lack
+    for stub_name in [
+        "qubox_tools",
+        "qubox_tools.algorithms",
+        "qubox_tools.algorithms.transforms",
+        "qubox_tools.algorithms.core",
+        "qubox_tools.algorithms.metrics",
+        "qubox_tools.algorithms.readout_analysis",
+    ]:
+        if stub_name not in sys.modules:
+            stub = types.ModuleType(stub_name)
+            for attr in [
+                "complex_encoder", "complex_decoder", "interp_logpdf",
+                "bilinear_interp_logpdf", "compile_1d_kde_to_grid",
+                "compile_2d_kde_to_grid", "classify_iq_point",
+                "assign_fidelity_optimal_threshold", "compute_readout_fidelity",
+                "compute_waveform_fft", "gaussianity_score",
+                "derive_measure_outcome_from_raw",
+                "derive_measure_outcome_from_classified",
+                "classify_iq_blob_pair", "pair_classify_and_derive",
+            ]:
+                setattr(stub, attr, _stub_callable)
+            if stub_name == "qubox_tools":
+                stub.__path__ = [str(pkg_root / "qubox_tools")]
+            elif stub_name.startswith("qubox_tools.algorithms"):
+                stub.__path__ = [str(pkg_root / "qubox_tools" / "algorithms")]
+            sys.modules[stub_name] = stub
+
+    # Pre-register qubox as a minimal package to bypass heavy __init__.py
+    if "qubox" not in sys.modules:
+        qubox_pkg = types.ModuleType("qubox")
+        qubox_pkg.__path__ = [str(pkg_root / "qubox")]
+        sys.modules["qubox"] = qubox_pkg
+    for subpkg_path in [
+        "core", "calibration", "programs", "experiments", "gates",
+        "gates/hardware", "pulses", "tools", "programs/macros",
+        "programs/gate_lowerers", "programs/builders",
+    ]:
+        dotted = "qubox." + subpkg_path.replace("/", ".")
+        if dotted not in sys.modules:
+            sub = types.ModuleType(dotted)
+            sub.__path__ = [str(pkg_root / "qubox" / subpkg_path)]
+            sys.modules[dotted] = sub
 
 
 def _reload_gate_modules():
     for name in [
-        "qubox_v2_legacy.programs.circuit_display",
-        "qubox_v2_legacy.programs.circuit_execution",
-        "qubox_v2_legacy.programs.circuit_compiler",
-        "qubox_v2_legacy.programs.circuit_postprocess",
-        "qubox_v2_legacy.programs.circuit_protocols",
-        "qubox_v2_legacy.programs.circuit_runner",
+        "qubox.programs.circuit_display",
+        "qubox.programs.circuit_execution",
+        "qubox.programs.circuit_compiler",
+        "qubox.programs.circuit_postprocess",
+        "qubox.programs.circuit_protocols",
+        "qubox.programs.circuit_runner",
     ]:
         sys.modules.pop(name, None)
-    circuit_runner = importlib.import_module("qubox_v2_legacy.programs.circuit_runner")
-    circuit_display = importlib.import_module("qubox_v2_legacy.programs.circuit_display")
-    circuit_execution = importlib.import_module("qubox_v2_legacy.programs.circuit_execution")
-    circuit_compiler = importlib.import_module("qubox_v2_legacy.programs.circuit_compiler")
-    circuit_postprocess = importlib.import_module("qubox_v2_legacy.programs.circuit_postprocess")
-    circuit_protocols = importlib.import_module("qubox_v2_legacy.programs.circuit_protocols")
+    circuit_runner = importlib.import_module("qubox.programs.circuit_runner")
+    circuit_display = importlib.import_module("qubox.programs.circuit_display")
+    circuit_execution = importlib.import_module("qubox.programs.circuit_execution")
+    circuit_compiler = importlib.import_module("qubox.programs.circuit_compiler")
+    circuit_postprocess = importlib.import_module("qubox.programs.circuit_postprocess")
+    circuit_protocols = importlib.import_module("qubox.programs.circuit_protocols")
     return SimpleNamespace(
         circuit_runner=circuit_runner,
         circuit_display=circuit_display,
@@ -393,10 +412,10 @@ class FakeConfigEngine:
 
 @pytest.fixture
 def fake_session(tmp_path, gate_arch_modules):
-    from qubox_v2_legacy.analysis.cQED_attributes import cQED_attributes
-    from qubox_v2_legacy.calibration.models import PulseCalibration
-    from qubox_v2_legacy.calibration.store import CalibrationStore
-    from qubox_v2_legacy.pulses.manager import PulseOperationManager
+    from qubox.core.device_metadata import DeviceMetadata
+    from qubox.calibration.store_models import PulseCalibration
+    from qubox.calibration.store import CalibrationStore
+    from qubox.pulses.manager import PulseOperationManager
 
     pulse_mgr = PulseOperationManager(elements=["qubit", "readout", "storage"])
     pulse_mgr.create_control_pulse(
@@ -445,14 +464,11 @@ def fake_session(tmp_path, gate_arch_modules):
     )
     calibration.save()
 
-    attr = cQED_attributes(
+    attr = DeviceMetadata(
         qb_el="qubit",
         ro_el="readout",
         st_el="storage",
-        qb_fq=6.05e9,
-        ro_fq=8.10e9,
-        st_fq=7.10e9,
-        anharmonicity=-220e6,
+        _calibration=calibration,
     )
 
     return SimpleNamespace(

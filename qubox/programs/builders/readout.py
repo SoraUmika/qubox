@@ -2,12 +2,16 @@
 from contextlib import nullcontext
 from qm.qua import *
 from qualang_tools.loops import from_array
-from ..macros.measure import measureMacro
+from ..macros.measure import emit_measurement
 from ..macros.sequence import sequenceMacros
 import numpy as np
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ...core.bindings import ReadoutHandle, ExperimentBindings
 
-def iq_blobs(ro_el, qb_el, r180, qb_therm_clks, n_runs, *, bindings: "ExperimentBindings | None" = None):
+
+def iq_blobs(ro_el, qb_el, r180, qb_therm_clks, n_runs, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
         _names = ConfigBuilder.ephemeral_names(bindings)
@@ -28,7 +32,7 @@ def iq_blobs(ro_el, qb_el, r180, qb_therm_clks, n_runs, *, bindings: "Experiment
         Qe_st = declare_stream()
         n_st = declare_stream()
         with for_(n, 0, n < n_runs, n + 1):
-            measureMacro.measure(targets=[I,Q])
+            emit_measurement(readout, targets=[I, Q])
             wait(int(qb_therm_clks), ro_el)
             save(I, Ig_st)
             save(Q, Qg_st)
@@ -37,7 +41,7 @@ def iq_blobs(ro_el, qb_el, r180, qb_therm_clks, n_runs, *, bindings: "Experiment
             play(r180, qb_el)
             align(qb_el, ro_el)
 
-            measureMacro.measure(targets=[I,Q])
+            emit_measurement(readout, targets=[I, Q])
             wait(int(qb_therm_clks), ro_el)
             save(I, Ie_st)
             save(Q, Qe_st)
@@ -52,13 +56,14 @@ def iq_blobs(ro_el, qb_el, r180, qb_therm_clks, n_runs, *, bindings: "Experiment
     return IQ_blobs_program
 
 
-def readout_ge_raw_trace(qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
+def readout_ge_raw_trace(qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
         _names = ConfigBuilder.ephemeral_names(bindings)
         qb_el = qb_el or _names.get("qubit", "__qb")
     elif qb_el is None:
         raise ValueError("qb_el is required when bindings are not provided")
+    ro_el = readout.element
     with program() as readout_ge_raw_trace:
         n        = declare(int)
         k        = declare(int)
@@ -71,8 +76,8 @@ def readout_ge_raw_trace(qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg, *, bin
         # Ground loop
         with for_(n, 0, n < n_avg, n + 1):
             align()
-            reset_if_phase(measureMacro.active_element())
-            measureMacro.measure(adc_stream=adc_st_g)
+            reset_if_phase(ro_el)
+            emit_measurement(readout, adc_stream=adc_st_g)
             wait(int(ro_depl_clks))
             save(k, iter_st)
             assign(k, k + 1)
@@ -82,8 +87,8 @@ def readout_ge_raw_trace(qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg, *, bin
             align()
             play(r180, qb_el)
             align()
-            reset_if_phase(measureMacro.active_element())
-            measureMacro.measure(adc_stream=adc_st_e)
+            reset_if_phase(ro_el)
+            emit_measurement(readout, adc_stream=adc_st_e)
             wait(int(qb_therm_clks))
             save(k, iter_st)
             assign(k, k + 1)
@@ -99,7 +104,7 @@ def readout_ge_raw_trace(qb_el, r180, qb_therm_clks, ro_depl_clks, n_avg, *, bin
     return readout_ge_raw_trace
 
 def readout_ge_integrated_trace(qb_el, weights, num_div, div_clks, r180, ro_depl_clks, n_avg,
-                                 target_save_rate_khz=2000.0, *, bindings: "ExperimentBindings | None" = None):
+                                 target_save_rate_khz=2000.0, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Modified to dynamically calculate safety wait time to maintain target save rate.
 
@@ -112,6 +117,7 @@ def readout_ge_integrated_trace(qb_el, weights, num_div, div_clks, r180, ro_depl
         ro_depl_clks : resonator depletion time
         n_avg : number of averages
         target_save_rate_khz : target save rate in kHz (default=2.0, meaning 2000 saves/sec)
+        readout : ReadoutHandle for this readout channel
     """
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
@@ -130,10 +136,15 @@ def readout_ge_integrated_trace(qb_el, weights, num_div, div_clks, r180, ro_depl
             f"got {len(weights)}: {weights!r}."
         )
 
-    measureMacro.set_outputs(list(weights))
-    measureMacro.set_demodulator(demod.sliced, div_clks)
-    output_ports = ["out1" if (i % 2 == 0) else "out2" for i in range(len(weights))]
-    measureMacro.set_output_ports(output_ports)
+    # For sliced demodulation, we need a custom ReadoutHandle with the 4-weight config.
+    # The standard emit_measurement handles this via the demod_weight_sets on the handle.
+    from dataclasses import replace as _replace
+    from ...core.bindings import ReadoutHandle as _RH
+    sliced_readout = _replace(readout, demod_weight_sets=tuple(weights))
+
+    ro_el = readout.element
+    ro_op = readout.operation
+
     with program() as readout_ge_integrated_trace:
         n   = declare(int)
         ind = declare(int)
@@ -148,36 +159,27 @@ def readout_ge_integrated_trace(qb_el, weights, num_div, div_clks, r180, ro_depl
         QI_st = declare_stream(); QQ_st = declare_stream()
 
         # ===== Dynamic safety wait calculation =====
-        # Each iteration saves: 8 * num_div variables (4 IQ pairs x 2 states x num_div)
         saves_per_iteration = 8 * num_div
-
-        # Time spent in measurements and processing (in ns):
-        # - 2 measurements (g and e states)
-        # - 2 depletion waits
-        # - 2 save loops (negligible compared to waits)
-        # Assume each measurement takes ~1 us (typical readout length)
-        measurement_time_ns = 2 * 1000  # 2 measurements x 1 us
-        depletion_time_ns = 2 * ro_depl_clks * 4  # 2 depletion waits x clks x 4ns/clk
+        measurement_time_ns = 2 * 1000
+        depletion_time_ns = 2 * ro_depl_clks * 4
         fixed_time_ns = measurement_time_ns + depletion_time_ns
-
-        # Target time per iteration based on save rate:
-        # target_save_rate_khz saves/ms -> saves_per_iteration should take:
-        target_time_per_iter_ns = (saves_per_iteration / target_save_rate_khz) * 1e6  # kHz to ns
-
-        # Safety wait needed (subtract fixed time):
+        target_time_per_iter_ns = (saves_per_iteration / target_save_rate_khz) * 1e6
         safety_wait_ns = max(0, target_time_per_iter_ns - fixed_time_ns)
-        safety_wait_clks = int(safety_wait_ns / 4)  # convert to clock cycles
-
-        # Ensure minimum wait of 1000 clks (4 us) for stability
+        safety_wait_clks = int(safety_wait_ns / 4)
         safety_wait_clks = max(1000, safety_wait_clks)
 
-        # ===== End calculation =====
-
-
         with for_(n, 0, n < n_avg, n + 1):
-            # Ground state trace
-            measureMacro.measure(targets=[II, IQ, QI, QQ])
-            wait(int(ro_depl_clks), measureMacro.active_element())
+            # Ground state trace — use sliced demod via demod.sliced
+            # NOTE: sliced demod requires special QUA measure() call that
+            # emit_measurement doesn't support directly. Use raw QUA here.
+            measure(
+                ro_op, ro_el, None,
+                demod.sliced(weights[0], II, div_clks, "out1"),
+                demod.sliced(weights[1], IQ, div_clks, "out2"),
+                demod.sliced(weights[2], QI, div_clks, "out1"),
+                demod.sliced(weights[3], QQ, div_clks, "out2"),
+            )
+            wait(int(ro_depl_clks), ro_el)
 
             with for_(ind, 0, ind < num_div, ind + 1):
                 save(II[ind], II_st)
@@ -185,15 +187,20 @@ def readout_ge_integrated_trace(qb_el, weights, num_div, div_clks, r180, ro_depl
                 save(QI[ind], QI_st)
                 save(QQ[ind], QQ_st)
 
-            # Additional wait between g and e measurements
-            wait(int(max(ro_depl_clks, 200)), measureMacro.active_element())
+            wait(int(max(ro_depl_clks, 200)), ro_el)
 
             # Excited state trace
             play(r180, qb_el)
-            align(qb_el, measureMacro.active_element())
-            measureMacro.measure(targets=[II, IQ, QI, QQ])
+            align(qb_el, ro_el)
+            measure(
+                ro_op, ro_el, None,
+                demod.sliced(weights[0], II, div_clks, "out1"),
+                demod.sliced(weights[1], IQ, div_clks, "out2"),
+                demod.sliced(weights[2], QI, div_clks, "out1"),
+                demod.sliced(weights[3], QQ, div_clks, "out2"),
+            )
 
-            wait(int(ro_depl_clks), measureMacro.active_element())
+            wait(int(ro_depl_clks), ro_el)
 
             with for_(ind, 0, ind < num_div, ind + 1):
                 save(II[ind], II_st)
@@ -201,8 +208,7 @@ def readout_ge_integrated_trace(qb_el, weights, num_div, div_clks, r180, ro_depl
                 save(QI[ind], QI_st)
                 save(QQ[ind], QQ_st)
 
-            # Dynamically calculated safety wait to maintain target save rate
-            wait(safety_wait_clks, measureMacro.active_element())
+            wait(safety_wait_clks, ro_el)
 
             save(n, n_st)
 
@@ -224,6 +230,7 @@ def readout_core_efficiency_calibration(
     *,
     qb_therm_clks: int,
     save_m0_state: bool = True,
+    readout: "ReadoutHandle",
     bindings: "ExperimentBindings | None" = None,
 ):
     """
@@ -242,7 +249,7 @@ def readout_core_efficiency_calibration(
       - I0, Q0
       - acc_gcore, acc_ecore   (int 0/1 per shot)
       - acc_gcore_rate, acc_ecore_rate  (shape [2], averaged over shots)
-      - (optional) m0_state (int 0/1) from measureMacro.measure(with_state=True)
+      - (optional) m0_state (int 0/1) from emit_measurement(readout, with_state=True)
     """
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
@@ -271,12 +278,13 @@ def readout_core_efficiency_calibration(
             # Branch A: intended |g>
             # =========================================================
             if save_m0_state:
-                measureMacro.measure(with_state=True, targets=[I0, Q0], state=m0)  # M0
+                emit_measurement(readout, with_state=True, targets=[I0, Q0], state=m0)  # M0
             else:
-                measureMacro.measure(with_state=False, targets=[I0, Q0])           # M0
+                emit_measurement(readout, with_state=False, targets=[I0, Q0])           # M0
 
             # Evaluate BOTH memberships on this same (I0,Q0)
             sequenceMacros.post_select(
+                readout=readout,
                 accept=acc_g,
                 I=I0, Q=Q0,
                 target_state="g",
@@ -284,6 +292,7 @@ def readout_core_efficiency_calibration(
                 **post_sel_kwargs,
             )
             sequenceMacros.post_select(
+                readout=readout,
                 accept=acc_e,
                 I=I0, Q=Q0,
                 target_state="e",
@@ -305,11 +314,12 @@ def readout_core_efficiency_calibration(
             align()
 
             if save_m0_state:
-                measureMacro.measure(with_state=True, targets=[I0, Q0], state=m0)  # M0
+                emit_measurement(readout, with_state=True, targets=[I0, Q0], state=m0)  # M0
             else:
-                measureMacro.measure(with_state=False, targets=[I0, Q0])           # M0
+                emit_measurement(readout, with_state=False, targets=[I0, Q0])           # M0
 
             sequenceMacros.post_select(
+                readout=readout,
                 accept=acc_g,
                 I=I0, Q=Q0,
                 target_state="g",
@@ -317,6 +327,7 @@ def readout_core_efficiency_calibration(
                 **post_sel_kwargs,
             )
             sequenceMacros.post_select(
+                readout=readout,
                 accept=acc_e,
                 I=I0, Q=Q0,
                 target_state="e",
@@ -358,6 +369,7 @@ def readout_butterfly_measurement(
     n_shots,
     wait_between_shots=10000,
     *,
+    readout: "ReadoutHandle",
     bindings: "ExperimentBindings | None" = None,
 ):
     """
@@ -381,8 +393,7 @@ def readout_butterfly_measurement(
     MAX_PREP_TRIALS = int(M0_MAX_TRIALS)
 
     # Threshold used for the *correction* (the post-select policy can be different)
-    ro_disc_params = getattr(measureMacro, "_ro_disc_params", None) or {}
-    thr = ro_disc_params.get("threshold", 0)
+    thr = readout.threshold or 0.0
 
     with program() as ro_butterfly_meas:
         # --- Per-measurement I/Q ---
@@ -390,7 +401,7 @@ def readout_butterfly_measurement(
         I1, Q1 = declare(fixed), declare(fixed)
         I2, Q2 = declare(fixed), declare(fixed)
 
-        # --- Optional "state" returned by measureMacro.measure(with_state=True, ...) ---
+        # --- Optional "state" returned by emit_measurement(readout, with_state=True, ...) ---
         m0 = declare(bool)
         m1 = declare(bool)
         m2 = declare(bool)
@@ -420,12 +431,13 @@ def readout_butterfly_measurement(
             with while_((~accept) & (tries < MAX_PREP_TRIALS)):
 
                 # ---- GAPLESS triple measurement ----
-                measureMacro.measure(with_state=True, targets=[I0, Q0], state=m0)  # M0
-                measureMacro.measure(with_state=True, targets=[I1, Q1], state=m1)  # M1
-                measureMacro.measure(with_state=True, targets=[I2, Q2], state=m2)  # M2
+                emit_measurement(readout, with_state=True, targets=[I0, Q0], state=m0)  # M0
+                emit_measurement(readout, with_state=True, targets=[I1, Q1], state=m1)  # M1
+                emit_measurement(readout, with_state=True, targets=[I2, Q2], state=m2)  # M2
 
                 # ---- Post-select based on M0 (I0,Q0) ----
                 sequenceMacros.post_select(
+                    readout=readout,
                     accept=accept,
                     I=I0,
                     Q=Q0,
@@ -459,12 +471,13 @@ def readout_butterfly_measurement(
             with while_((~accept) & (tries < MAX_PREP_TRIALS)):
 
                 # ---- GAPLESS triple measurement ----
-                measureMacro.measure(with_state=True, targets=[I0, Q0], state=m0)  # M0
-                measureMacro.measure(with_state=True, targets=[I1, Q1], state=m1)  # M1
-                measureMacro.measure(with_state=True, targets=[I2, Q2], state=m2)  # M2
+                emit_measurement(readout, with_state=True, targets=[I0, Q0], state=m0)  # M0
+                emit_measurement(readout, with_state=True, targets=[I1, Q1], state=m1)  # M1
+                emit_measurement(readout, with_state=True, targets=[I2, Q2], state=m2)  # M2
 
                 # ---- Post-select based on M0 (I0,Q0) ----
                 sequenceMacros.post_select(
+                    readout=readout,
                     accept=accept,
                     I=I0,
                     Q=Q0,
@@ -513,7 +526,7 @@ def readout_butterfly_measurement(
     return ro_butterfly_meas
 
 
-def readout_leakage_benchmarking(ro_el, qb_el, r180, control_bits, qb_therm_clks, num_sequences, n_avg, *, bindings: "ExperimentBindings | None" = None):
+def readout_leakage_benchmarking(ro_el, qb_el, r180, control_bits, qb_therm_clks, num_sequences, n_avg, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
         _names = ConfigBuilder.ephemeral_names(bindings)
@@ -543,7 +556,7 @@ def readout_leakage_benchmarking(ro_el, qb_el, r180, control_bits, qb_therm_clks
         for sequence_idx, bit_row in enumerate(control_bits):
             assign(sequence_num, sequence_idx)
             with for_(n, 0, n < n_avg, n + 1):
-                measureMacro.measure(with_state=True,
+                emit_measurement(readout, with_state=True,
                                                 targets=[I,Q], state=state)
                 align(ro_el, qb_el)
 
@@ -557,7 +570,7 @@ def readout_leakage_benchmarking(ro_el, qb_el, r180, control_bits, qb_therm_clks
                         play(r180*amp(0), qb_el)                   # identity
                     align(qb_el, ro_el)
 
-                    measureMacro.measure(with_state=True, targets=[I,Q], state=state)
+                    emit_measurement(readout, with_state=True, targets=[I,Q], state=state)
                     save(I, I_st)
                     save(Q, Q_st)
                     save(state, state_st)
@@ -574,7 +587,7 @@ def readout_leakage_benchmarking(ro_el, qb_el, r180, control_bits, qb_therm_clks
 
 
 def qubit_reset_benchmark(qb_el: str, random_bits, r180: str,
-                          qb_therm_clks: int, num_shots: int, *, bindings: "ExperimentBindings | None" = None):
+                          qb_therm_clks: int, num_shots: int, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
         _names = ConfigBuilder.ephemeral_names(bindings)
@@ -583,8 +596,7 @@ def qubit_reset_benchmark(qb_el: str, random_bits, r180: str,
         raise ValueError("qb_el is required when bindings are not provided")
     bit_size = len(random_bits)
 
-    ro_disc_params = getattr(measureMacro, "_ro_disc_params", None) or {}
-    thr = ro_disc_params.get("threshold", 0)
+    thr = readout.threshold or 0.0
     with program() as prog:
         # streams
         I1_st  = declare_stream()
@@ -614,7 +626,7 @@ def qubit_reset_benchmark(qb_el: str, random_bits, r180: str,
                     play(r180, qb_el)
 
                 # M1: measure current state (herald)
-                measureMacro.measure(with_state=True, targets=[I1, Q1], state=state1)
+                emit_measurement(readout, with_state=True, targets=[I1, Q1], state=state1)
                 save(I1, I1_st)
                 save(Q1, Q1_st)
                 save(state1, s1_st)
@@ -622,7 +634,7 @@ def qubit_reset_benchmark(qb_el: str, random_bits, r180: str,
                 # Conditional reset toward |g> (ground is the reset target)
                 sequenceMacros.conditional_reset_ground(
                     I1,
-                    thr=measureMacro.thr,
+                    thr=readout.threshold or 0.0,
                     r180=r180,
                     qb_el=qb_el,
                 )
@@ -632,7 +644,7 @@ def qubit_reset_benchmark(qb_el: str, random_bits, r180: str,
                     wait(int(qb_therm_clks), qb_el)
 
                 # M2: verify after reset
-                measureMacro.measure(with_state=True, targets=[I2, Q2], state=state2)
+                emit_measurement(readout, with_state=True, targets=[I2, Q2], state=state2)
                 save(I2, I2_st)
                 save(Q2, Q2_st)
                 save(state2, s2_st)
@@ -655,7 +667,7 @@ def qubit_reset_benchmark(qb_el: str, random_bits, r180: str,
     return prog
 
 
-def active_qubit_reset_benchmark(qb_el: str, post_sel_policy, post_sel_kwargs, r180: str, qb_therm_clks, MAX_PREP_TRIALS, n_shots, *, bindings: "ExperimentBindings | None" = None):
+def active_qubit_reset_benchmark(qb_el: str, post_sel_policy, post_sel_kwargs, r180: str, qb_therm_clks, MAX_PREP_TRIALS, n_shots, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
         _names = ConfigBuilder.ephemeral_names(bindings)
@@ -665,7 +677,7 @@ def active_qubit_reset_benchmark(qb_el: str, post_sel_policy, post_sel_kwargs, r
     MAX_PREP_TRIALS = int(MAX_PREP_TRIALS)
 
     # Threshold used for the *correction* (the post-select policy can be different)
-    thr = measureMacro._ro_disc_params.get("threshold") or 0.0
+    thr = (readout.threshold or 0.0)
     with program() as active_reset_benchmark:
         # --- Per-measurement I/Q ---
         I0, Q0 = declare(fixed), declare(fixed)
@@ -676,7 +688,7 @@ def active_qubit_reset_benchmark(qb_el: str, post_sel_policy, post_sel_kwargs, r
         I1_st, Q1_st = declare_stream(), declare_stream()
         I2_st, Q2_st = declare_stream(), declare_stream()
 
-        # --- Optional "state" returned by measureMacro.measure(with_state=True, ...) ---
+        # --- Optional "state" returned by emit_measurement(readout, with_state=True, ...) ---
         m0 = declare(bool)
         m1 = declare(bool)
         m2 = declare(bool)
@@ -705,17 +717,18 @@ def active_qubit_reset_benchmark(qb_el: str, post_sel_policy, post_sel_kwargs, r
 
             with while_((~accept) & (tries < MAX_PREP_TRIALS)):
                 # ---- State prep measurement ----
-                measureMacro.measure(with_state=True, targets=[I0, Q0], state=m0)  # M0
+                emit_measurement(readout, with_state=True, targets=[I0, Q0], state=m0)  # M0
 
                 # --- Reset protocol ---
-                measureMacro.measure(with_state=True, targets=[I1, Q1], state=m1)  # M1
+                emit_measurement(readout, with_state=True, targets=[I1, Q1], state=m1)  # M1
                 sequenceMacros.conditional_reset_ground(I1, thr, r180, qb_el)
 
                 # --- Final measurement to verify ---
-                measureMacro.measure(with_state=True, targets=[I2, Q2], state=m2)  # M2
+                emit_measurement(readout, with_state=True, targets=[I2, Q2], state=m2)  # M2
 
                 # ---- Post-select based on M0 (I0,Q0) to ensure we prepared |g> ----
                 sequenceMacros.post_select(
+                    readout=readout,
                     accept=accept,
                     I=I0,
                     Q=Q0,
@@ -749,17 +762,18 @@ def active_qubit_reset_benchmark(qb_el: str, post_sel_policy, post_sel_kwargs, r
             with while_((~accept) & (tries < MAX_PREP_TRIALS)):
 
                 # ---- State prep measurement ----
-                measureMacro.measure(with_state=True, targets=[I0, Q0], state=m0)  # M0
+                emit_measurement(readout, with_state=True, targets=[I0, Q0], state=m0)  # M0
 
                 # --- Reset protocol ---
-                measureMacro.measure(with_state=True, targets=[I1, Q1], state=m1)  # M1
+                emit_measurement(readout, with_state=True, targets=[I1, Q1], state=m1)  # M1
                 sequenceMacros.conditional_reset_ground(I1, thr, r180, qb_el)
 
                 # --- Final measurement to verify ---
-                measureMacro.measure(with_state=True, targets=[I2, Q2], state=m2)  # M2
+                emit_measurement(readout, with_state=True, targets=[I2, Q2], state=m2)  # M2
 
                 # ---- Post-select based on M0 (I0,Q0) to ensure we prepared |e> ----
                 sequenceMacros.post_select(
+                    readout=readout,
                     accept=accept,
                     I=I0,
                     Q=Q0,

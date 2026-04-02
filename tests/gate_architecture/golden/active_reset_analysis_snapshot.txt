@@ -10,7 +10,7 @@ blocks:
 analysis:
 - ActiveReset: MeasureIQ active_reset_m0 -> derive_state(active_reset_m0.state) -> external/next-shot conditional action
 warnings:
-- Active reset is analysis-only in compile_v2: MeasureIQ is emitted at program time, then derive_state and next-shot conditional action happen after the run. Set enable_real_time_branching=True to request a real-time branch.
+- Active reset is analysis-only in CircuitCompiler: MeasureIQ is emitted at program time, then derive_state and next-shot conditional action happen after the run. Set enable_real_time_branching=True to request a real-time branch.
 measurement_schema:
 - active_reset_m0: kind=iq op=readout derive=state->active_reset_m0.state:I_threshold threshold={"calibration":{"field":"threshold","key":"readout","namespace":"discrimination"},"default":0.0} sense=greater rotation={"calibration":{"field":"angle","key":"readout","namespace":"discrimination"},"default":0.0} streams=[I->active_reset_m0.I:fixed[shots]/save_all, Q->active_reset_m0.Q:fixed[shots]/save_all]
 

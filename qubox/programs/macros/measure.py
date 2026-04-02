@@ -4,12 +4,10 @@ import logging
 import json
 from ...pulses.manager import PulseOp  # single canonical import
 from contextlib import contextmanager
-from ...analysis.analysis_tools import (
+from qubox_tools.algorithms.transforms import (
     complex_encoder, complex_decoder,
-    interp_logpdf, bilinear_interp_logpdf,
-    compile_1d_kde_to_grid, compile_2d_kde_to_grid
 )
-from ...analysis.post_selection import PostSelectionConfig
+from qubox_tools.algorithms.post_selection import PostSelectionConfig
 from ...core.persistence_policy import sanitize_mapping_for_json
 import numpy as np
 
@@ -143,7 +141,6 @@ class measureMacro:
     _state_counter: int = 0             # for auto-generated IDs
 
     _drive_frequency = None
-    _save_raw_data = False
     
     _ro_disc_params = {
         "threshold": None,
@@ -176,27 +173,6 @@ class measureMacro:
     }
 
     _post_select_config: PostSelectionConfig | None = None
-    
-    @classmethod
-    def compute_Pe_from_S(cls, S):
-        mu_g = cls._ro_disc_params.get("rot_mu_g", 0.0 + 0.0j)
-        mu_e = cls._ro_disc_params.get("rot_mu_e", 1.0 + 0.0j)
-
-        S = np.asarray(S)  # scalar -> 0-d array, array stays array
-
-        d = mu_e - mu_g
-        denom = float(np.abs(d) ** 2)  # |d|^2, real scalar
-
-        if denom == 0.0:
-            out = np.full(S.shape, np.nan, dtype=float)
-            return float(out) if out.shape == () else out
-
-        pe = np.real((S - mu_g) * np.conj(d)) / denom  # projection ratio, float array
-
-        # optional: keep in [0,1]
-        # pe = np.clip(pe, 0.0, 1.0)
-
-        return float(pe) if pe.shape == () else pe
     
     # ---------------------------------------------------------------------- #
     #  Core properties
@@ -305,15 +281,6 @@ class measureMacro:
                 raise ValueError("set_pulse_op: 'weight_len' must be a positive integer.")
             cls._demod_weight_len = weight_len
 
-    @classmethod
-    def set_active_op(cls, op_handle: str):
-        """
-        Explicitly set the op handle used in measure().
-        """
-        if not op_handle:
-            raise ValueError("set_active_op: op_handle must be non-empty.")
-        cls._active_op = op_handle
-
     # ---------------------------------------------------------------------- #
     #  Post-selection config storage
     # ---------------------------------------------------------------------- #
@@ -342,30 +309,12 @@ class measureMacro:
             return None
         return cls._post_select_config.copy() if copy else cls._post_select_config
 
-    @classmethod
-    def clear_post_select_config(cls) -> None:
-        cls._post_select_config = None
-
 
     # ---------------------------------------------------------------------- #
     #  Readout calibration accessors
     # ---------------------------------------------------------------------- #
     @classmethod
-    def get_readout_calibration(cls):
-        merged = {}
-        merged.update(cls._ro_disc_params)
-        merged.update(cls._ro_quality_params)
-        return merged
-
-    @classmethod
     def _update_readout_discrimination(cls, out: dict):
-        import warnings
-        warnings.warn(
-            "Direct call to measureMacro._update_readout_discrimination() is deprecated. "
-            "Use CalibrationOrchestrator.apply_patch() with SetMeasureDiscrimination instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         dp = cls._ro_disc_params
 
         # numeric scalars (robust defaults)
@@ -391,13 +340,6 @@ class measureMacro:
 
     @classmethod
     def _update_readout_quality(cls, out: dict):
-        import warnings
-        warnings.warn(
-            "Direct call to measureMacro._update_readout_quality() is deprecated. "
-            "Use CalibrationOrchestrator.apply_patch() with SetMeasureQuality instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         alpha = out.get("a0", None)
         beta  = out.get("a1", None)
         if alpha is not None:
@@ -511,420 +453,6 @@ class measureMacro:
             if hasattr(quality, "affine_n") and quality.affine_n is not None:
                 qp["affine_n"] = quality.affine_n
 
-
-    @classmethod
-    def compute_posterior_weights(
-        cls,
-        S,
-        model_type: str = "1d",
-        pi_e: float = 0.5,
-        require_finite: bool = True,
-    ):
-        """
-        Compute posterior weights (w_g, w_e) from signal data using simple Gaussian model.
-
-        Uses parameters from _ro_disc_params (rot_mu_g, rot_mu_e, sigma_g, sigma_e).
-
-        Parameters
-        ----------
-        S : array-like
-            Complex signal data (IQ measurements).
-        model_type : str, optional
-            Which model to use: "1d" or "2d" (default: "1d").
-        pi_e : float, optional
-            Prior probability of excited state (default: 0.5).
-        require_finite : bool, optional
-            If True, non-finite values produce NaN weights (default: True).
-
-        Returns
-        -------
-        w_g : ndarray
-            Posterior probability of ground state P(g|S).
-        w_e : ndarray
-            Posterior probability of excited state P(e|S).
-
-        Raises
-        ------
-        ValueError
-            If required parameters are not available in _ro_disc_params.
-        """
-        # Validate pi_e
-        pi_e = float(pi_e)
-        if not (0.0 < pi_e < 1.0):
-            raise ValueError(f"pi_e must be in (0,1), got {pi_e}")
-        pi_g = 1.0 - pi_e
-
-        # Get parameters from _ro_disc_params
-        rot_mu_g = cls._ro_disc_params.get("rot_mu_g")
-        rot_mu_e = cls._ro_disc_params.get("rot_mu_e")
-        sigma_g = cls._ro_disc_params.get("sigma_g")
-        sigma_e = cls._ro_disc_params.get("sigma_e")
-
-        if rot_mu_g is None or rot_mu_e is None:
-            raise ValueError(
-                "rot_mu_g and rot_mu_e must be set in _ro_disc_params. "
-                "Run readout discrimination calibration first."
-            )
-        if sigma_g is None or sigma_e is None:
-            raise ValueError(
-                "sigma_g and sigma_e must be set in _ro_disc_params. "
-                "Run readout discrimination calibration first."
-            )
-
-        Ig = float(np.real(rot_mu_g))
-        Ie = float(np.real(rot_mu_e))
-        Qg = float(np.imag(rot_mu_g))
-        Qe = float(np.imag(rot_mu_e))
-        sigma_g = float(sigma_g)
-        sigma_e = float(sigma_e)
-
-        if not (np.isfinite(sigma_g) and sigma_g > 0):
-            raise ValueError(f"Invalid sigma_g: {sigma_g}")
-        if not (np.isfinite(sigma_e) and sigma_e > 0):
-            raise ValueError(f"Invalid sigma_e: {sigma_e}")
-
-        # Prepare signal data
-        S = np.asarray(S)
-        if S.ndim == 0:
-            S = S.reshape(1)
-        if not np.iscomplexobj(S):
-            S = S.astype(np.complex128, copy=False)
-
-        I = np.real(S)
-        Q = np.imag(S)
-
-        # Validate model_type
-        model_type = str(model_type).lower()
-        if model_type not in ("1d", "2d"):
-            raise ValueError(f"model_type must be '1d' or '2d', got {model_type!r}")
-
-        # Check finite values
-        if require_finite:
-            finite = np.isfinite(I) if model_type == "1d" else (np.isfinite(I) & np.isfinite(Q))
-        else:
-            finite = np.ones(I.shape, dtype=bool)
-
-        # Helper function for stable sigmoid
-        def _stable_sigmoid(x):
-            x = np.clip(x, -60.0, 60.0)
-            return 1.0 / (1.0 + np.exp(-x))
-
-        # Compute LLR = log p(S|e) - log p(S|g) + log(pi_e/pi_g)
-        if model_type == "2d":
-            # 2D Gaussian model (assumes isotropic circular spreads)
-            dg2 = (I - Ig) ** 2 + (Q - Qg) ** 2
-            de2 = (I - Ie) ** 2 + (Q - Qe) ** 2
-            sg2 = sigma_g ** 2
-            se2 = sigma_e ** 2
-
-            llr = (
-                -de2 / (2.0 * se2) + dg2 / (2.0 * sg2)
-                - np.log(se2 / sg2)
-                + np.log(pi_e / pi_g)
-            )
-        else:
-            # 1D Gaussian model on rotated I-axis (consistent with 1D GMM calibration)
-            zg2 = ((I - Ig) / sigma_g) ** 2
-            ze2 = ((I - Ie) / sigma_e) ** 2
-            llr = (
-                -0.5 * ze2 + 0.5 * zg2
-                - np.log(sigma_e / sigma_g)
-                + np.log(pi_e / pi_g)
-            )
-
-        w_e = _stable_sigmoid(llr)
-        w_e = np.where(finite, w_e, np.nan)
-        w_g = 1.0 - w_e
-        return w_g, w_e
-
-    @classmethod
-    def compute_posterior_state_weight(
-        cls,
-        S,
-        target_state: str = "g",
-        model_type: str = "1d",
-        pi_e: float = 0.5,
-        require_finite: bool = True,
-    ):
-        """
-        Convenience wrapper: compute posterior weight for a single target state.
-
-        Parameters
-        ----------
-        S : array-like
-            Complex signal data (IQ measurements).
-        target_state : str, optional
-            Target state: "g" for ground or "e" for excited (default: "g").
-        model_type : str, optional
-            Which model to use: "1d" or "2d" (default: "1d").
-        pi_e : float, optional
-            Prior probability of excited state (default: 0.5).
-        require_finite : bool, optional
-            If True, non-finite values produce NaN weights (default: True).
-
-        Returns
-        -------
-        w : ndarray
-            Posterior probability P(target_state|S).
-
-        Raises
-        ------
-        ValueError
-            If target_state is invalid or required parameters are missing.
-        """
-        target_state = str(target_state).lower()
-        if target_state not in ("g", "e"):
-            raise ValueError(f"target_state must be 'g' or 'e', got {target_state!r}")
-
-        w_g, w_e = cls.compute_posterior_weights(
-            S, model_type=model_type, pi_e=pi_e, require_finite=require_finite
-        )
-        return w_e if target_state == "e" else w_g
-
-    @classmethod
-    def check_iq_blob_rotation_consistency_2d(
-        cls,
-        S_g,
-        S_e,
-        *,
-        posterior_classification_threshold: float = 0.5,
-        llr_clip: float = 60.0,
-        angle_tolerance_rad: float = 0.15,
-        sigma_mismatch_tolerance_ratio: float = 0.5,
-        include_1d_threshold_baseline: bool = True,
-        verbose: bool = True,
-    ) -> dict:
-        """
-        Offline GE->IQ-blob consistency check using a 2D isotropic posterior model.
-
-        This is analysis-only (Python), with equal priors pi_g=pi_e=0.5.
-
-        Parameters
-        ----------
-        S_g, S_e : array-like complex
-            IQ blob samples for prepared |g> and |e> respectively.
-        posterior_classification_threshold : float, optional
-            Hard posterior decision threshold p_thr in [0,1], default 0.5.
-        llr_clip : float, optional
-            LLR clipping range [-llr_clip, +llr_clip] for numerical stability.
-        angle_tolerance_rad : float, optional
-            Tolerance for "angle collapsed to zero" check (modulo pi convention).
-        sigma_mismatch_tolerance_ratio : float, optional
-            Relative tolerance used when comparing stored sigma vs effective 2D sigma.
-        include_1d_threshold_baseline : bool, optional
-            If True, compute optional 1D threshold baseline on raw I.
-        verbose : bool, optional
-            If True, print a clear summary block.
-
-        Returns
-        -------
-        dict
-            Summary dictionary with angle check, 2D posterior metrics, confusion matrix,
-            optional 1D baseline, and diagnostic warnings.
-        """
-        p_thr = float(posterior_classification_threshold)
-        if not np.isfinite(p_thr) or p_thr < 0.0 or p_thr > 1.0:
-            raise ValueError("posterior_classification_threshold must be finite in [0,1]")
-
-        llr_clip = float(llr_clip)
-        if not np.isfinite(llr_clip) or llr_clip <= 0:
-            raise ValueError("llr_clip must be finite and > 0")
-
-        S_g = np.asarray(S_g)
-        S_e = np.asarray(S_e)
-        if S_g.ndim == 0:
-            S_g = S_g.reshape(1)
-        if S_e.ndim == 0:
-            S_e = S_e.reshape(1)
-        if not np.iscomplexobj(S_g):
-            S_g = S_g.astype(np.complex128, copy=False)
-        if not np.iscomplexobj(S_e):
-            S_e = S_e.astype(np.complex128, copy=False)
-
-        finite_g = np.isfinite(np.real(S_g)) & np.isfinite(np.imag(S_g))
-        finite_e = np.isfinite(np.real(S_e)) & np.isfinite(np.imag(S_e))
-        S_g = S_g[finite_g]
-        S_e = S_e[finite_e]
-        if S_g.size == 0 or S_e.size == 0:
-            raise ValueError("S_g and S_e must contain at least one finite complex sample")
-
-        ro = dict(cls._ro_disc_params or {})
-        mu_g = ro.get("rot_mu_g", None)
-        mu_e = ro.get("rot_mu_e", None)
-        sigma_g = ro.get("sigma_g", None)
-        sigma_e = ro.get("sigma_e", None)
-        theta_ge = ro.get("angle", None)
-        thr_ge = ro.get("threshold", None)
-
-        if mu_g is None or mu_e is None:
-            raise ValueError("Missing rot_mu_g/rot_mu_e in _ro_disc_params; run GE discrimination first")
-        if sigma_g is None or sigma_e is None:
-            raise ValueError("Missing sigma_g/sigma_e in _ro_disc_params; run GE discrimination first")
-
-        sigma_g = float(sigma_g)
-        sigma_e = float(sigma_e)
-        if not (np.isfinite(sigma_g) and sigma_g > 0):
-            raise ValueError(f"Invalid sigma_g: {sigma_g}")
-        if not (np.isfinite(sigma_e) and sigma_e > 0):
-            raise ValueError(f"Invalid sigma_e: {sigma_e}")
-
-        Ig = float(np.real(mu_g))
-        Qg = float(np.imag(mu_g))
-        Ie = float(np.real(mu_e))
-        Qe = float(np.imag(mu_e))
-
-        def _stable_sigmoid(x):
-            x = np.clip(x, -llr_clip, llr_clip)
-            return 1.0 / (1.0 + np.exp(-x))
-
-        def _posterior_e_2d(S):
-            I = np.real(S)
-            Q = np.imag(S)
-            dg2 = (I - Ig) ** 2 + (Q - Qg) ** 2
-            de2 = (I - Ie) ** 2 + (Q - Qe) ** 2
-            sg2 = sigma_g ** 2
-            se2 = sigma_e ** 2
-            llr = (-de2 / (2.0 * se2)) + (dg2 / (2.0 * sg2)) - np.log(se2 / sg2)
-            return _stable_sigmoid(llr), llr
-
-        pe_g, llr_g = _posterior_e_2d(S_g)
-        pe_e, llr_e = _posterior_e_2d(S_e)
-
-        pred_e_on_g = pe_g >= p_thr
-        pred_e_on_e = pe_e >= p_thr
-
-        p_gg = float(np.mean(~pred_e_on_g))
-        p_eg = float(np.mean(pred_e_on_g))
-        p_ge = float(np.mean(~pred_e_on_e))
-        p_ee = float(np.mean(pred_e_on_e))
-
-        f_bal = 0.5 * (p_gg + p_ee)
-        f_bal_pct = 100.0 * f_bal
-        confusion = np.array([[p_gg, p_eg], [p_ge, p_ee]], dtype=float)
-
-        # Check A: angle collapse on IQ blobs
-        from ...analysis.analysis_tools import two_state_discriminator
-
-        disc_blob = two_state_discriminator(S_g, S_e, b_plot=False, save_S_rot=False)
-        theta_blob = float(disc_blob["angle"])
-
-        theta_abs = abs(np.arctan2(np.sin(theta_blob), np.cos(theta_blob)))
-        theta_mod_pi = min(theta_abs, abs(np.pi - theta_abs))
-        angle_ok = bool(theta_mod_pi <= float(angle_tolerance_rad))
-
-        # Sigma interpretation warning: compare stored sigma with effective 2D radial sigma
-        dg2_mu = (np.real(S_g) - Ig) ** 2 + (np.imag(S_g) - Qg) ** 2
-        de2_mu = (np.real(S_e) - Ie) ** 2 + (np.imag(S_e) - Qe) ** 2
-        sigma_g_eff_2d = float(np.sqrt(max(np.mean(dg2_mu) / 2.0, 0.0)))
-        sigma_e_eff_2d = float(np.sqrt(max(np.mean(de2_mu) / 2.0, 0.0)))
-
-        tol = float(sigma_mismatch_tolerance_ratio)
-        sigma_warning = None
-        if np.isfinite(tol) and tol >= 0:
-            rg = abs(sigma_g_eff_2d / sigma_g - 1.0)
-            re = abs(sigma_e_eff_2d / sigma_e - 1.0)
-            if rg > tol or re > tol:
-                sigma_warning = (
-                    "Stored sigma_g/sigma_e look inconsistent with isotropic 2D cloud spreads. "
-                    "They may be 1D projected widths; treat 2D posterior as debug-only."
-                )
-
-        # Optional 1D baseline on raw I using stored GE threshold
-        baseline_1d = None
-        if include_1d_threshold_baseline and thr_ge is not None and np.isfinite(float(thr_ge)):
-            thr = float(thr_ge)
-            p_gg_1d = float(np.mean(np.real(S_g) < thr))
-            p_ee_1d = float(np.mean(np.real(S_e) >= thr))
-            baseline_1d = {
-                "threshold": thr,
-                "P(g_hat|g)": p_gg_1d,
-                "P(e_hat|e)": p_ee_1d,
-                "F_bal": 0.5 * (p_gg_1d + p_ee_1d),
-                "F_bal_pct": 100.0 * 0.5 * (p_gg_1d + p_ee_1d),
-            }
-
-        likely_failure_modes = []
-        if not angle_ok:
-            likely_failure_modes = [
-                "rotation sign/convention mismatch",
-                "stale integration-weight mapping at compile time",
-                "rotated weights not burned/applied before iq_blobs run",
-                "wrong weight triplet bound for measurement operation",
-            ]
-
-        summary = {
-            "ge_params": {
-                "rot_mu_g": complex(mu_g),
-                "rot_mu_e": complex(mu_e),
-                "sigma_g": sigma_g,
-                "sigma_e": sigma_e,
-                "theta_ge": None if theta_ge is None else float(theta_ge),
-                "threshold_ge": None if thr_ge is None else float(thr_ge),
-            },
-            "blob_discriminator": {
-                "theta_blob": theta_blob,
-                "theta_blob_mod_pi_abs": float(theta_mod_pi),
-                "angle_tolerance_rad": float(angle_tolerance_rad),
-                "angle_invariant_holds": angle_ok,
-            },
-            "posterior_2d": {
-                "equal_priors": True,
-                "posterior_classification_threshold": p_thr,
-                "llr_clip": llr_clip,
-                "P(g_hat|g)": p_gg,
-                "P(e_hat|g)": p_eg,
-                "P(g_hat|e)": p_ge,
-                "P(e_hat|e)": p_ee,
-                "F_bal": float(f_bal),
-                "F_bal_pct": float(f_bal_pct),
-                "confusion_matrix": confusion,
-                "mean_llr_g": float(np.nanmean(llr_g)),
-                "mean_llr_e": float(np.nanmean(llr_e)),
-            },
-            "sigma_interpretation": {
-                "sigma_g_stored": sigma_g,
-                "sigma_e_stored": sigma_e,
-                "sigma_g_eff_2d": sigma_g_eff_2d,
-                "sigma_e_eff_2d": sigma_e_eff_2d,
-                "warning": sigma_warning,
-            },
-            "baseline_1d": baseline_1d,
-            "likely_failure_modes": likely_failure_modes,
-        }
-
-        if verbose:
-            print("=" * 72)
-            print("GE -> IQ BLOBS CONSISTENCY CHECK (2D POSTERIOR, PYTHON-ONLY)")
-            print("=" * 72)
-            gp = summary["ge_params"]
-            bp = summary["blob_discriminator"]
-            p2 = summary["posterior_2d"]
-            print("GE params:")
-            print(f"  mu_g={gp['rot_mu_g']}, mu_e={gp['rot_mu_e']}")
-            print(f"  sigma_g={gp['sigma_g']:.6g}, sigma_e={gp['sigma_e']:.6g}")
-            print(f"  theta_GE={gp['theta_ge']}, thr_GE={gp['threshold_ge']}")
-            print("Blob angle check:")
-            print(f"  theta_blob={bp['theta_blob']:.6g} rad")
-            print(f"  |theta_blob|_mod_pi={bp['theta_blob_mod_pi_abs']:.6g} rad")
-            print(f"  invariant(|theta_blob|~0)={bp['angle_invariant_holds']}")
-            print("2D posterior metrics (equal priors):")
-            print(f"  F_bal={p2['F_bal']:.6f} ({p2['F_bal_pct']:.3f}%)")
-            print("  confusion [[P(ĝ|g), P(ê|g)], [P(ĝ|e), P(ê|e)]] =")
-            print(np.array2string(p2["confusion_matrix"], precision=6, suppress_small=False))
-            if summary["baseline_1d"] is not None:
-                b1 = summary["baseline_1d"]
-                print("1D threshold baseline on blobs:")
-                print(f"  thr={b1['threshold']:.6g}, F_bal={b1['F_bal']:.6f} ({b1['F_bal_pct']:.3f}%)")
-            if sigma_warning:
-                print("WARNING:")
-                print(f"  {sigma_warning}")
-            if likely_failure_modes:
-                print("Likely failure modes:")
-                for item in likely_failure_modes:
-                    print(f"  - {item}")
-            print("=" * 72)
-
-        return summary
 
     # ---------------------------------------------------------------------- #
     #  Snapshot / restore (PulseOp-based)
@@ -1048,20 +576,6 @@ class measureMacro:
         cls._rebuild_state_index()
         cls._restore_from_snapshot(snap)
 
-    @classmethod
-    def retrieve_state(cls, state_id: str | int):
-        """
-        Convenience alias for restore_settings(state_id=...).
-        """
-        return cls.restore_settings(state_id=state_id)
-
-    @classmethod
-    def export_readout_calibration(cls) -> dict:
-        return {
-            "discrimination": dict(cls._ro_disc_params),
-            "butterfly":      dict(cls._ro_quality_params),
-        }
-
     # ---------------------------------------------------------------------- #
     #  JSON save/load (PulseOp-based; backward compatible)
     # ---------------------------------------------------------------------- #
@@ -1083,7 +597,7 @@ class measureMacro:
         if kde_obj is None:
             return None
             
-        include_dataset = bool(getattr(measureMacro, "_save_raw_data", False))
+        include_dataset = False  # raw-data persistence removed
         out = {
             "covariance": kde_obj.covariance.tolist(),
             "bw_method": kde_obj.covariance_factor(),
@@ -1222,7 +736,7 @@ class measureMacro:
         return {
             "_version": 5,
             "current": current_json,
-            "raw_data_persistence": bool(cls._save_raw_data),
+            "raw_data_persistence": False,
         }
 
     @classmethod
@@ -1241,11 +755,6 @@ class measureMacro:
                 default=complex_encoder,  # <-- handle complex types
             )
         logger.info("measureMacro state (current only, no stack) saved to %s", path)
-
-    @classmethod
-    def set_save_raw_data(cls, enabled: bool) -> None:
-        """Enable/disable raw-data persistence for debug-only workflows."""
-        cls._save_raw_data = bool(enabled)
 
     @classmethod
     def load_json(cls, path: str) -> None:
@@ -1467,14 +976,6 @@ class measureMacro:
         raise TypeError("This class cannot be instantiated and is meant to be used as a macro")
 
     @classmethod
-    def set_gain(cls, gain):
-        cls._gain = gain
-
-    @classmethod
-    def set_demod_weight_len(cls, demod_weight_len):
-        cls._demod_weight_len = demod_weight_len
-
-    @classmethod
     def reset_pulse(cls):
         cls._pulse_op = None
         cls._active_op = None
@@ -1537,17 +1038,6 @@ class measureMacro:
         cls._drive_frequency = None if freq is None else float(freq)
 
     @classmethod
-    def get_drive_frequency(cls):
-        """
-        Return the currently configured drive frequency (or None).
-        """
-        return cls._drive_frequency
-
-    @classmethod
-    def default(cls):
-        cls.reset()
-
-    @classmethod
     @contextmanager
     def using_defaults(
         cls,
@@ -1590,37 +1080,11 @@ class measureMacro:
     #  Outputs / demod config
     # ---------------------------------------------------------------------- #
     @classmethod
-    def set_IQ_mod(cls, I_mod_weights=("cos", "sin"), Q_mod_weights=("minus_sin", "cos")):
-        I = list(I_mod_weights)
-        Q = list(Q_mod_weights)
-        if not (len(I) == len(Q) == 2 and all(isinstance(x, str) for x in I + Q)):
-            raise ValueError("set_IQ_mod: each must be a 2-tuple/list of weight names (str).")
-        cls.set_outputs([I, Q])
-
-    @classmethod
     def set_demodulator(cls, fn, *args, **kwargs):
         cls._demod_fn     = fn
         cls._demod_args   = args
         cls._demod_kwargs = dict(kwargs) if kwargs else {}
         cls._per_fn = cls._per_args = cls._per_kwargs = None
-
-    @classmethod
-    def set_per_output_demodulators(
-        cls,
-        fns: list,
-        args_list: list | None = None,
-        kwargs_list: list | None = None,
-    ):
-        num = len(cls._demod_weight_sets)
-        if len(fns) != num:
-            raise ValueError(f"set_per_output_demodulators: len(fns)={len(fns)} != outputs={num}")
-        args_list   = [()] * num if args_list   is None else args_list
-        kwargs_list = [{}] * num if kwargs_list is None else kwargs_list
-        if len(args_list) != num or len(kwargs_list) != num:
-            raise ValueError("set_per_output_demodulators: args_list/kwargs_list must match number of outputs")
-        cls._per_fn     = list(fns)
-        cls._per_args   = [tuple(a) for a in args_list]
-        cls._per_kwargs = [dict(k) for k in kwargs_list]
 
     @classmethod
     def set_outputs(cls, weight_specs: list, weight_len=None):
@@ -1648,50 +1112,8 @@ class measureMacro:
             cls._demod_weight_len = weight_len
 
     @classmethod
-    def set_output_ports(cls, ports: list[str]):
-        num = len(cls._demod_weight_sets)
-        if len(ports) != num:
-            raise ValueError(f"set_output_ports: len(ports)={len(ports)} != outputs={num}")
-        cls._per_fn     = [cls._demod_fn] * num
-        cls._per_args   = [tuple(cls._demod_args)] * num
-        cls._per_kwargs = []
-        for p in ports:
-            kw = dict(cls._demod_kwargs) if isinstance(cls._demod_kwargs, dict) else {}
-            if p:
-                kw["element_output"] = p
-            cls._per_kwargs.append(kw)
-
-    @classmethod
-    def add_output(cls, weight_spec):
-        if isinstance(weight_spec, str):
-            cls._demod_weight_sets.append(weight_spec)
-        elif (
-            isinstance(weight_spec, (list, tuple))
-            and len(weight_spec) == 2
-            and all(isinstance(weight_spec_i, str) for weight_spec_i in weight_spec)
-        ):
-            cls._demod_weight_sets.append([weight_spec[0], weight_spec[1]])
-        else:
-            raise ValueError("add_output: need str or 2-tuple[str,str]")
-
-    @classmethod
     def get_outputs(cls):
         return [(w if isinstance(w, str) else list(w)) for w in cls._demod_weight_sets]
-
-    @classmethod
-    def get_gain(cls):
-        return cls._gain
-
-    @classmethod
-    def get_IQ_mod(cls):
-        outs = cls.get_outputs()
-        if len(outs) >= 2 and all(isinstance(outs[i], list) and len(outs[i]) == 2 for i in (0, 1)):
-            return outs[0], outs[1]
-        raise RuntimeError("get_IQ_mod: current outputs are not two dual-weight channels.")
-
-    @classmethod
-    def get_demod_weight_len(cls):
-        return cls._demod_weight_len
 
     # ---------------------------------------------------------------------- #
     #  Demod resolution
@@ -1709,10 +1131,8 @@ class measureMacro:
         return fn, args, dict(kw)
 
     @classmethod
-    def use_weight_set(cls, set_name: str, weight_len: int | None = None):
-        """
-        Switch to a named weight set defined in DEFAULT_WEIGHT_SETS.
-        """
+    def use_weight_set(cls, set_name: str, *, weight_len: int | None = None):
+        """Switch to a named weight set defined in DEFAULT_WEIGHT_SETS."""
         try:
             weight_specs = DEFAULT_WEIGHT_SETS[set_name]
         except KeyError:
@@ -1729,75 +1149,6 @@ class measureMacro:
     # ---------------------------------------------------------------------- #
     #  Introspection
     # ---------------------------------------------------------------------- #
-    @classmethod
-    def show_settings(cls, *, return_dict: bool = False):
-        settings = cls._snapshot()
-        settings["demod_fn"] = _pretty_fn(settings["demod_fn"])
-        settings["demod_args"] = cls._demod_args
-        settings["demod_kwargs"] = (
-            dict(cls._demod_kwargs) if isinstance(cls._demod_kwargs, dict) else cls._demod_kwargs
-        )
-        settings["stack_depth"] = len(cls._state_stack)
-        settings["ro_disc_params"] = dict(cls._ro_disc_params)
-        settings["ro_quality_params"] = dict(cls._ro_quality_params)
-
-        if return_dict:
-            # For programmatic access, give the raw objects (arrays included)
-            return settings
-
-        # --- For pretty-printing, replace arrays inside the nested dicts with short placeholders
-        ro_disc = settings["ro_disc_params"]
-        ro_qual = settings["ro_quality_params"]
-
-        def _strip_arrays(d: dict) -> dict:
-            out = dict(d)
-            for k, v in list(out.items()):
-                if isinstance(v, np.ndarray):
-                    out[k] = f"<ndarray shape={v.shape}>"
-                elif isinstance(v, dict):
-                    # Handle nested dict (e.g., affine_n)
-                    if all(isinstance(vv, dict) for vv in v.values()):
-                        # Check if it looks like affine_n structure
-                        first_val = next(iter(v.values()), {})
-                        if "A" in first_val and "b" in first_val:
-                            out[k] = f"<dict with {len(v)} entries containing A and b>"
-                        else:
-                            out[k] = _strip_arrays(v)
-                elif isinstance(v, list) and len(v) > 0 and isinstance(v[0], np.ndarray):
-                    # Handle list of numpy arrays
-                    shapes = [arr.shape for arr in v]
-                    out[k] = f"<list of {len(v)} ndarrays, shapes={shapes}>"
-            return out
-
-        settings["ro_disc_params"] = _strip_arrays(ro_disc)
-        settings["ro_quality_params"] = _strip_arrays(ro_qual)
-
-        # 1) High-level view of everything
-        pprint(settings)
-
-        # 2) Nicely aligned matrices / arrays printed underneath
-        cm = cls._ro_quality_params.get("confusion_matrix")
-        tm = cls._ro_quality_params.get("transition_matrix")
-        affine_n = cls._ro_quality_params.get("affine_n")
-
-        if isinstance(cm, np.ndarray):
-            print("\nro_quality_params.confusion_matrix =")
-            print(_format_ndarray_for_display(cm))
-
-        if isinstance(tm, np.ndarray):
-            print("ro_quality_params.transition_matrix =")
-            print(_format_ndarray_for_display(tm))
-
-        if isinstance(affine_n, dict) and len(affine_n) > 0:
-            print("\nro_quality_params.affine_n =")
-            for n in sorted(affine_n.keys(), key=lambda x: int(x) if x.isdigit() else x):
-                params = affine_n[n]
-                print(f"  n={n}:")
-                print(f"    A =")
-                print(_format_ndarray_for_display(np.asarray(params["A"]), indent="      "))
-                print(f"    b =")
-                print(_format_ndarray_for_display(np.asarray(params["b"]), indent="      "))
-
     # ---------------------------------------------------------------------- #
     #  Callable registry for JSON
     # ---------------------------------------------------------------------- #
@@ -1901,152 +1252,21 @@ class measureMacro:
 
 
 # ---------------------------------------------------------------------------
-# Binding-based measurement API (replaces singleton for new code)
-# ---------------------------------------------------------------------------
-def measure_with_binding(
-    ro,
-    *,
-    element_name: str,
-    with_state: bool = False,
-    gain=None,
-    timestamp_stream=None,
-    adc_stream=None,
-    state=None,
-    targets: list = None,
-    axis="z",
-    x90="x90",
-    yn90="yn90",
-    qb_el: str | None = None,
-):
-    """Emit a QUA ``measure()`` statement using a ReadoutBinding.
-
-    This is the binding-based replacement for ``measureMacro.measure()``.
-    All DSP state (discrimination, weights, thresholds) lives on the
-    ``ReadoutBinding`` instance rather than on class-level singletons.
-
-    Parameters
-    ----------
-    ro : ReadoutBinding
-        The readout binding containing drive/acquire config and DSP state.
-    element_name : str
-        Ephemeral QM element name (from ConfigBuilder).
-    with_state : bool
-        If True, apply discrimination threshold and return a state variable.
-    gain : float | None
-        Override gain for this measurement.
-    timestamp_stream, adc_stream
-        QUA stream handles passed through to ``measure()``.
-    state : QUA variable | None
-        Pre-declared state variable; if None and ``with_state`` is True,
-        one will be declared.
-    targets : list | None
-        Pre-declared QUA variable targets for demod outputs.
-    axis : str
-        Tomography basis rotation ("z", "x", or "y").
-    x90, yn90 : str
-        Operation names for basis rotation pulses.
-    qb_el : str | None
-        Qubit element name for basis rotation (if needed).
-
-    Returns
-    -------
-    tuple
-        ``(I, Q)`` or ``(I, Q, state)`` depending on ``with_state``.
-    """
-    from ...core.bindings import ReadoutBinding
-
-    if not isinstance(ro, ReadoutBinding):
-        raise TypeError(
-            f"measure_with_binding: expected ReadoutBinding, got {type(ro).__name__}"
-        )
-
-    weight_sets = ro.demod_weight_sets
-    num_out = len(weight_sets)
-    if num_out < 1 and not adc_stream:
-        raise RuntimeError("measure_with_binding: no demod weight sets configured")
-
-    # Resolve targets
-    if targets is not None:
-        if len(targets) != num_out:
-            raise ValueError(
-                f"measure_with_binding: len(targets)={len(targets)} != outputs={num_out}"
-            )
-        target_vars = list(targets)
-    else:
-        target_vars = [declare(fixed) for _ in range(num_out)]
-
-    # State variable
-    make_state = with_state or (state is not None)
-    if make_state and state is None:
-        state = declare(bool)
-
-    # Op handle with optional gain
-    op_handle = ro.active_op
-    if op_handle is None and ro.pulse_op is not None:
-        op_handle = getattr(ro.pulse_op, "op", None) or getattr(ro.pulse_op, "pulse", None)
-    if op_handle is None:
-        raise RuntimeError(
-            "measure_with_binding: no active_op configured on ReadoutBinding"
-        )
-
-    eff_gain = gain if gain is not None else ro.gain
-    pulse_handle = op_handle if eff_gain is None else op_handle * amp(eff_gain)
-
-    # Build demod outputs using dual_demod.full (same as measureMacro default)
-    outputs = []
-    for k in range(num_out):
-        ws = weight_sets[k]
-        if isinstance(ws, str):
-            outputs.append(dual_demod.full(ws, target_vars[k]))
-        else:
-            iw1, iw2 = ws
-            outputs.append(dual_demod.full(iw1, iw2, target_vars[k]))
-
-    # Basis rotation for qubit tomography
-    if axis == "x" and qb_el is not None:
-        play(yn90, qb_el)
-        align(qb_el, element_name)
-    elif axis == "y" and qb_el is not None:
-        play(x90, qb_el)
-        align(qb_el, element_name)
-
-    measure(
-        pulse_handle,
-        element_name,
-        None,
-        *outputs,
-        timestamp_stream=timestamp_stream,
-        adc_stream=adc_stream,
-    )
-    align()
-
-    if make_state:
-        threshold = ro.discrimination.get("threshold")
-        if threshold is None:
-            threshold = 0.0
-            logger.warning(
-                "measure_with_binding: threshold is None on ReadoutBinding; using 0.0"
-            )
-        if num_out > 0:
-            assign(state, target_vars[0] > threshold)
-        else:
-            assign(state, False)
-        return (*target_vars, state)
-
-    return tuple(target_vars)
-
-
-# ---------------------------------------------------------------------------
 # emit_measurement() — canonical ReadoutHandle-based measurement (v2.1 API)
 # ---------------------------------------------------------------------------
 def emit_measurement(
     readout: "ReadoutHandle",
     *,
     targets: list | None = None,
+    with_state: bool = False,
     state: "Any | None" = None,
     gain: float | None = None,
     timestamp_stream: "Any | None" = None,
     adc_stream: "Any | None" = None,
+    axis: str = "z",
+    x90: str = "x90",
+    yn90: str = "yn90",
+    qb_el: str | None = None,
 ) -> tuple:
     """Emit a QUA ``measure()`` statement using a ``ReadoutHandle``.
 
@@ -2102,6 +1322,14 @@ def emit_measurement(
     # Build pulse handle with optional gain
     pulse = op if gain is None else op * amp(gain)
 
+    # Basis rotation for qubit tomography
+    if axis == "x" and qb_el is not None:
+        play(yn90, qb_el)
+        align(qb_el, element)
+    elif axis == "y" and qb_el is not None:
+        play(x90, qb_el)
+        align(qb_el, element)
+
     measure(
         pulse,
         element,
@@ -2113,7 +1341,11 @@ def emit_measurement(
     align()
 
     # State discrimination
-    if state is not None and cal.threshold is not None:
+    make_state = with_state or (state is not None)
+    if make_state and state is None:
+        state = declare(bool)
+    threshold = cal.threshold if cal is not None else None
+    if make_state and threshold is not None:
         I_var = targets[0]
         if cal.rotation_angle is not None:
             # Apply IQ rotation before thresholding

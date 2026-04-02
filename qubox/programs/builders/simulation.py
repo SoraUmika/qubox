@@ -1,11 +1,15 @@
 
 from qm.qua import *
 from qualang_tools.loops import from_array
-from ..macros.measure import measureMacro
+from ..macros.measure import emit_measurement
 from ..macros.sequence import sequenceMacros
 from ...gates.gate import Gate
 from typing import List, Protocol, Any
 import numpy as np
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ...core.bindings import ReadoutHandle
 
 class MeasurementGate(Protocol):
     axis: str
@@ -14,7 +18,7 @@ class MeasurementGate(Protocol):
         ...
 
 
-def sequential_simulation(gates: list[Gate], measurement_gates: List[MeasurementGate], st_therm_clks, num_shots):
+def sequential_simulation(gates: list[Gate], measurement_gates: List[MeasurementGate], st_therm_clks, num_shots, *, readout: "ReadoutHandle"):
     measurement_counts = sum(1 for mg in measurement_gates if mg.axis != "none")
     with program() as prog:
         I   = declare(fixed)
@@ -37,8 +41,8 @@ def sequential_simulation(gates: list[Gate], measurement_gates: List[Measurement
                     save(I, I_st)
                     save(Q, Q_st)
                 else:
-                    measureMacro.measure(targets=[I, Q])
-                sequenceMacros.conditional_reset_ground(I, thr=measureMacro._ro_disc_params.get("threshold") or 0.0, r180="x180", qb_el="qubit")
+                    emit_measurement(readout, targets=[I, Q])
+                sequenceMacros.conditional_reset_ground(I, thr=(readout.threshold or 0.0), r180="x180", qb_el="qubit")
             wait(int(st_therm_clks))
             save(rep, n_st)
         with stream_processing():

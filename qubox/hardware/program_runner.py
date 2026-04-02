@@ -223,7 +223,7 @@ class ProgramRunner:
         self._remember_program(qua_prog, cfg=cfg_snapshot, meta={"last_mode": "hardware", "use_queue": bool(use_queue)})
 
         # Lazy import to avoid circular dependency
-        from ..analysis.output import Output
+        from qubox_tools.data.containers import Output
         out = Output()
         sim_samples = None
         pending = None
@@ -632,7 +632,7 @@ class ProgramRunner:
             return 0
 
     def _collect_output_from_job(self, job, *, print_report: bool):
-        from ..analysis.output import Output
+        from qubox_tools.data.containers import Output
         out = Output()
         if print_report:
             with contextlib.suppress(Exception):

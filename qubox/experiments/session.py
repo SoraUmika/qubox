@@ -33,8 +33,8 @@ from ..pulses.manager import PulseOperationManager
 from ..pulses.pulse_registry import PulseRegistry
 from ..devices.device_manager import DeviceManager
 from ..calibration.store import CalibrationStore
-from ..analysis.cQED_attributes import cQED_attributes
-from ..analysis.output import Output
+from ..core.device_metadata import DeviceMetadata
+from qubox_tools.data.containers import Output
 from ..core.persistence_policy import split_output_for_persistence
 from ..calibration.orchestrator import CalibrationOrchestrator
 
@@ -92,8 +92,12 @@ class SessionManager:
         registry_base: str | Path | None = None,
         strict_context: bool = True,
         hardware: Any = None,
+        simulation_mode: bool = True,
         **kwargs: Any,
     ) -> None:
+        # --- Simulation mode flag (stored before anything else) ---
+        self._simulation_mode: bool = bool(simulation_mode)
+
         # --- Context resolution ---
         self._experiment_context = None
         self._sample_config_dir: Path | None = None
@@ -169,6 +173,8 @@ class SessionManager:
             controller=self.hardware,
             config_engine=self.config_engine,
         )
+        if self._simulation_mode:
+            self.runner.set_exec_mode("simulate")
         self.queue = QueueManager(runner=self.runner)
 
         # --- 4. Pulse management (both legacy POM and new PulseRegistry) ---
@@ -193,7 +199,13 @@ class SessionManager:
         if device_path is None:
             device_path = self.experiment_path / "devices.json"
         self.devices = DeviceManager(device_path)
-        if load_devices is True:
+        if self._simulation_mode:
+            _logger.info(
+                "Simulation mode: skipping device instantiation "
+                "(%d device spec(s) loaded but not connected).",
+                len(getattr(self.devices, "specs", {}) or {}),
+            )
+        elif load_devices is True:
             self.devices.instantiate_all()
         elif isinstance(load_devices, (list, tuple, set)):
             if load_devices:
@@ -211,31 +223,16 @@ class SessionManager:
         _logger.info("SessionManager ready.")
 
     # ------------------------------------------------------------------
-    # Compatibility properties — experiment classes access these via ctx
+    # Public read-only properties
     # ------------------------------------------------------------------
-    @property
-    def hw(self) -> HardwareController:
-        """Alias for experiment_base.py compatibility."""
-        return self.hardware
-
-    @property
-    def pulseOpMngr(self) -> PulseOperationManager:
-        """Alias for legacy code that accesses ``ctx.pulseOpMngr``."""
-        return self.pulse_mgr
-
-    @property
-    def mgr(self) -> PulseOperationManager:
-        """Legacy alias used by gate hardware helpers."""
-        return self.pulse_mgr
-
-    @property
-    def quaProgMngr(self):
-        """Alias used by legacy experiment code."""
-        return self.hardware
-
     @property
     def cluster_name(self) -> str | None:
         return self._cluster_name
+
+    @property
+    def simulation_mode(self) -> bool:
+        """True if this session was opened in simulation mode (no RF outputs)."""
+        return self._simulation_mode
 
     @property
     def context(self):
@@ -559,21 +556,25 @@ class SessionManager:
         """Alias so ExperimentBase can access ``ctx.device_manager``."""
         return self.devices
 
-    def _load_legacy_context_snapshot(self) -> cQED_attributes:
-        """Load a legacy ``cqed_params.json`` snapshot when available.
+    def _load_legacy_element_names(self) -> dict[str, str | None]:
+        """Extract element names from a legacy ``cqed_params.json`` if available.
 
-        This is a compatibility seed only. Runtime parameter resolution uses
-        ``calibration.json`` plus explicit per-call overrides.
+        Returns a dict with keys ``qb_el``, ``ro_el``, ``st_el``.
         """
         resolved = getattr(self, "_legacy_context_path", None)
         if resolved is not None and Path(resolved).exists():
             try:
-                obj = cQED_attributes.from_json(resolved)
-                obj._log_bindings()
-                return obj
+                import json as _json
+                with open(resolved, encoding="utf-8") as f:
+                    data = _json.load(f)
+                return {
+                    "qb_el": data.get("qb_el"),
+                    "ro_el": data.get("ro_el"),
+                    "st_el": data.get("st_el"),
+                }
             except Exception as exc:
-                _logger.warning("Failed to load legacy cqed_params snapshot from %s: %s", resolved, exc)
-        return cQED_attributes()
+                _logger.warning("Failed to read legacy element names from %s: %s", resolved, exc)
+        return {"qb_el": None, "ro_el": None, "st_el": None}
 
     def _binding_roles(self) -> dict[str, str]:
         qubox = (self.config_engine.hardware_extras or {}).get("__qubox") or {}
@@ -584,140 +585,38 @@ class SessionManager:
             if isinstance(key, str) and isinstance(value, str) and value
         }
 
-    def _resolve_session_elements(self, ctx: cQED_attributes | None = None) -> dict[str, str | None]:
-        ctx = ctx or self._load_legacy_context_snapshot()
+    def _resolve_session_elements(self) -> dict[str, str | None]:
+        legacy = self._load_legacy_element_names()
         roles = self._binding_roles()
         active_ro = self.get_runtime_setting("active_readout_element", None)
         return {
-            "qb_el": roles.get("qubit") or getattr(ctx, "qb_el", None) or "qubit",
-            "ro_el": active_ro or roles.get("readout_drive") or roles.get("readout") or getattr(ctx, "ro_el", None) or "resonator",
-            "st_el": roles.get("storage") or getattr(ctx, "st_el", None),
+            "qb_el": roles.get("qubit") or legacy.get("qb_el") or "qubit",
+            "ro_el": active_ro or roles.get("readout_drive") or roles.get("readout") or legacy.get("ro_el") or "resonator",
+            "st_el": roles.get("storage") or legacy.get("st_el"),
         }
 
-    def _resolve_cqed_param(
-        self,
-        alias: str,
-        field: str,
-        *,
-        legacy: cQED_attributes | None = None,
-        legacy_attr: str | None = None,
-    ) -> Any:
-        params = self.calibration.get_cqed_params(alias)
-        if params is not None:
-            value = getattr(params, field, None)
-            if value is not None:
-                return value
-        if legacy is not None and legacy_attr:
-            return getattr(legacy, legacy_attr, None)
-        return None
+    def context_snapshot(self) -> DeviceMetadata:
+        """Return a ``DeviceMetadata`` with element names and live CalibrationStore access.
 
-    def _resolve_frequency_from_calibration(
-        self,
-        element: str | None,
-        *,
-        primary_field: str,
-        legacy_value: float | None = None,
-        allow_if_lo: bool = False,
-    ) -> float | None:
-        if element:
-            try:
-                freq_entry = self.calibration.get_frequencies(element)
-            except Exception:
-                freq_entry = None
-            if freq_entry is not None:
-                value = getattr(freq_entry, primary_field, None)
-                if isinstance(value, (int, float)):
-                    return float(value)
-                if allow_if_lo:
-                    if_val = getattr(freq_entry, "if_freq", None)
-                    lo_val = getattr(freq_entry, "lo_freq", None)
-                    if isinstance(if_val, (int, float)) and isinstance(lo_val, (int, float)):
-                        return float(lo_val) + float(if_val)
-        if isinstance(legacy_value, (int, float)):
-            return float(legacy_value)
-        return None
+        All physics parameters (frequencies, chi, coherence) are resolved
+        on access from ``self.calibration`` — never cached.
+        """
+        elements = self._resolve_session_elements()
+        runtime_kw: dict[str, Any] = {}
+        for field_name in ("b_coherent_amp", "b_coherent_len", "b_alpha", "dt_s", "max_fock_level"):
+            val = self.get_runtime_setting(field_name, None)
+            if val is not None:
+                runtime_kw[field_name] = val
 
-    def context_snapshot(self) -> cQED_attributes:
-        """Return a calibration-backed compatibility snapshot for legacy code."""
-        ctx = self._load_legacy_context_snapshot()
-        elements = self._resolve_session_elements(ctx)
-        ctx.qb_el = elements["qb_el"]
-        ctx.ro_el = elements["ro_el"]
-        ctx.st_el = elements["st_el"]
-
-        ctx.qb_fq = self._resolve_frequency_from_calibration(
-            ctx.qb_el,
-            primary_field="qubit_freq",
-            legacy_value=getattr(ctx, "qb_fq", None),
+        meta = DeviceMetadata(
+            qb_el=elements["qb_el"],
+            ro_el=elements["ro_el"],
+            st_el=elements["st_el"],
+            _calibration=self.calibration,
+            **runtime_kw,
         )
-        ctx.ro_fq = self._resolve_frequency_from_calibration(
-            ctx.ro_el,
-            primary_field="resonator_freq",
-            legacy_value=getattr(ctx, "ro_fq", None),
-            allow_if_lo=True,
-        )
-        ctx.st_fq = self._resolve_frequency_from_calibration(
-            ctx.st_el,
-            primary_field="storage_freq",
-            legacy_value=getattr(ctx, "st_fq", None),
-        )
-        if ctx.st_fq is None:
-            ctx.st_fq = self._resolve_frequency_from_calibration(
-                ctx.st_el,
-                primary_field="qubit_freq",
-                legacy_value=getattr(ctx, "st_fq", None),
-            )
-
-        ctx.anharmonicity = self._resolve_cqed_param(
-            "transmon", "anharmonicity", legacy=ctx, legacy_attr="anharmonicity",
-        )
-        ctx.ro_kappa = self._resolve_cqed_param(
-            "resonator", "kappa", legacy=ctx, legacy_attr="ro_kappa",
-        )
-        ctx.st_chi = self._resolve_cqed_param(
-            "storage", "chi", legacy=ctx, legacy_attr="st_chi",
-        )
-        ctx.st_chi2 = self._resolve_cqed_param(
-            "storage", "chi2", legacy=ctx, legacy_attr="st_chi2",
-        )
-        ctx.st_chi3 = self._resolve_cqed_param(
-            "storage", "chi3", legacy=ctx, legacy_attr="st_chi3",
-        )
-        ctx.fock_fqs = self._resolve_cqed_param(
-            "storage", "fock_freqs", legacy=ctx, legacy_attr="fock_fqs",
-        )
-        ctx.qb_T1_relax = self._resolve_cqed_param(
-            "transmon", "T1_us", legacy=ctx, legacy_attr="qb_T1_relax",
-        )
-        ctx.qb_T2_ramsey = self._resolve_cqed_param(
-            "transmon", "T2_star_us", legacy=ctx, legacy_attr="qb_T2_ramsey",
-        )
-        ctx.qb_T2_echo = self._resolve_cqed_param(
-            "transmon", "T2_echo_us", legacy=ctx, legacy_attr="qb_T2_echo",
-        )
-
-        setattr(
-            ctx,
-            "qb_therm_clks",
-            self._resolve_cqed_param("transmon", "qb_therm_clks", legacy=ctx, legacy_attr="qb_therm_clks"),
-        )
-        setattr(
-            ctx,
-            "ro_therm_clks",
-            self._resolve_cqed_param("resonator", "ro_therm_clks", legacy=ctx, legacy_attr="ro_therm_clks"),
-        )
-        setattr(
-            ctx,
-            "st_therm_clks",
-            self._resolve_cqed_param("storage", "st_therm_clks", legacy=ctx, legacy_attr="st_therm_clks"),
-        )
-
-        for field in ("b_coherent_amp", "b_coherent_len", "b_alpha", "dt_s", "max_fock_level"):
-            runtime_value = self.get_runtime_setting(field, getattr(ctx, field, None))
-            if runtime_value is not None:
-                setattr(ctx, field, runtime_value)
-
-        return ctx
+        meta._log_bindings()
+        return meta
 
     def _runtime_settings_path(self) -> Path:
         return self.experiment_path / "config" / "session_runtime.json"
@@ -839,12 +738,37 @@ class SessionManager:
     # Open QM connection
     # ------------------------------------------------------------------
     def open(self) -> "SessionManager":
-        """Open the QM connection and initialise hardware elements."""
+        """Open the QM connection and initialise hardware elements.
+
+        In *simulation mode* (``simulation_mode=True`` at construction time)
+        ``hardware.open_qm()`` is skipped entirely — no ``QuantumMachine``
+        instance is created and RF outputs are never enabled.  The
+        ``QuantumMachinesManager`` (QMM) is still connected, so
+        ``runner.simulate()`` and ``experiment.simulate()`` work normally.
+        Any call to ``runner.run_program()`` will raise ``JobError`` because
+        the runner is locked to ``ExecMode.SIMULATE``.
+        """
         if self._opened:
             _logger.warning("SessionManager.open() called again; closing previous session first.")
             self.close()
-        self._log_device_connectivity()
+        if not self._simulation_mode:
+            self._log_device_connectivity()
         self.config_engine.merge_pulses(self.pulse_mgr)
+
+        if self._simulation_mode:
+            # Skip open_qm(): hardware.qm stays None, RF outputs never enabled.
+            # But still populate element table so experiments can resolve frequencies.
+            sim_cfg = self.config_engine.build_qm_config()
+            self.hardware.populate_elements_from_config(sim_cfg)
+            self._load_measure_config()
+            self._opened = True
+            _logger.info(
+                "SessionManager opened in SIMULATION mode — "
+                "hardware.open_qm() skipped; all RF outputs off; "
+                "runner locked to ExecMode.SIMULATE."
+            )
+            return self
+
         self.hardware.open_qm()
         self._load_measure_config()
         self.validate_runtime_elements(auto_map=True, verbose=True)
@@ -1127,7 +1051,13 @@ class SessionManager:
 
     def _load_measure_config(self) -> None:
         """Load measureMacro state from measureConfig.json if it exists,
-        then sync discrimination/quality params from CalibrationStore."""
+        then sync discrimination/quality params from CalibrationStore.
+
+        When the loaded (or default) state has no PulseOp binding, the
+        method auto-binds a default readout PulseOp from the hardware
+        config so that experiments like ReadoutTrace can run without an
+        explicit ``override_readout_operation`` call.
+        """
         from ..programs.macros.measure import measureMacro
 
         path = self._resolve_path("measureConfig.json", required=False)
@@ -1139,6 +1069,27 @@ class SessionManager:
                 "No measureConfig.json found — measureMacro will use defaults. "
                 "Run readout calibration to populate it."
             )
+
+        # Auto-bind a default readout PulseOp from the hardware config
+        # when the current state has no pulse binding (fresh cooldown or
+        # measureConfig.json with null pulse_op).
+        if measureMacro._pulse_op is None:
+            ro_el = getattr(self.context_snapshot(), "ro_el", None)
+            if ro_el is not None:
+                pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(
+                    ro_el, "readout", strict=False,
+                )
+                if pulse_info is not None:
+                    measureMacro.set_pulse_op(pulse_info, active_op="readout")
+                    _logger.info(
+                        "Auto-bound measureMacro readout pulse from hardware config "
+                        "(element=%s)", ro_el,
+                    )
+                else:
+                    _logger.warning(
+                        "Could not auto-bind measureMacro: no 'readout' operation "
+                        "found for element %r in pulse manager.", ro_el,
+                    )
 
         # Sync discrimination/quality params from CalibrationStore → measureMacro.
         # CalibrationStore is the canonical source of truth; this ensures the

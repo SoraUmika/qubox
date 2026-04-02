@@ -464,17 +464,18 @@ class TestT1RuleHeuristicRemoval:
         vals = {u.payload.get("path"): u.payload.get("value") for u in patch.updates}
         assert vals["cqed_params.transmon.T1"] == pytest.approx(50e-6)
 
-    def test_bare_t1_large_value_warns(self):
+    def test_bare_t1_large_value_ignored(self):
+        """Bare 'T1' key no longer accepted — must use T1_s or T1_ns."""
         rule = _get_patch_rules().T1Rule(alias="transmon")
-        with pytest.warns(DeprecationWarning, match="heuristic.*removed"):
-            patch = rule(_FakeCR(kind="t1", params={"T1": 50_000.0}))
-        assert patch is not None
+        patch = rule(_FakeCR(kind="t1", params={"T1": 50_000.0}))
+        # No recognized key → no patch produced
+        assert patch is None
 
-    def test_bare_t1_small_value_stored_as_is(self):
+    def test_bare_t1_small_value_ignored(self):
+        """Bare 'T1' key no longer accepted — must use T1_s or T1_ns."""
         rule = _get_patch_rules().T1Rule(alias="transmon")
         patch = rule(_FakeCR(kind="t1", params={"T1": 50e-6}))
-        vals = {u.payload.get("path"): u.payload.get("value") for u in patch.updates}
-        assert vals["cqed_params.transmon.T1"] == pytest.approx(50e-6)
+        assert patch is None
 
 
 # ============================================================================
@@ -489,12 +490,11 @@ class TestT2ExplicitUnits:
         vals = {u.payload.get("path"): u.payload.get("value") for u in patch.updates}
         assert vals["cqed_params.transmon.T2_ramsey"] == pytest.approx(50e-6)
 
-    def test_t2_ramsey_bare_key_warns(self):
+    def test_t2_ramsey_bare_key_ignored(self):
+        """Bare 'T2_star' key no longer accepted — must use T2_star_s or T2_star_ns."""
         rule = _get_patch_rules().T2RamseyRule(alias="transmon")
-        with pytest.warns(DeprecationWarning, match="bare.*deprecated"):
-            patch = rule(_FakeCR(kind="t2_ramsey", params={"T2_star": 50_000.0}))
-        vals = {u.payload.get("path"): u.payload.get("value") for u in patch.updates}
-        assert vals["cqed_params.transmon.T2_ramsey"] == pytest.approx(50e-6)
+        patch = rule(_FakeCR(kind="t2_ramsey", params={"T2_star": 50_000.0}))
+        assert patch is None
 
     def test_t2_echo_explicit_seconds(self):
         rule = _get_patch_rules().T2EchoRule(alias="transmon")
@@ -502,12 +502,11 @@ class TestT2ExplicitUnits:
         vals = {u.payload.get("path"): u.payload.get("value") for u in patch.updates}
         assert vals["cqed_params.transmon.T2_echo"] == pytest.approx(80e-6)
 
-    def test_t2_echo_bare_key_warns(self):
+    def test_t2_echo_bare_key_ignored(self):
+        """Bare 'T2_echo' key no longer accepted — must use T2_echo_s or T2_echo_ns."""
         rule = _get_patch_rules().T2EchoRule(alias="transmon")
-        with pytest.warns(DeprecationWarning, match="bare.*deprecated"):
-            patch = rule(_FakeCR(kind="t2_echo", params={"T2_echo": 80_000.0}))
-        vals = {u.payload.get("path"): u.payload.get("value") for u in patch.updates}
-        assert vals["cqed_params.transmon.T2_echo"] == pytest.approx(80e-6)
+        patch = rule(_FakeCR(kind="t2_echo", params={"T2_echo": 80_000.0}))
+        assert patch is None
 
     def test_t2_ramsey_ns_key(self):
         rule = _get_patch_rules().T2RamseyRule(alias="transmon")

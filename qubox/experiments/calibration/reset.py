@@ -5,7 +5,7 @@ from typing import Any
 
 from ..experiment_base import ExperimentBase
 from ..result import ProgramBuildResult
-from ...analysis import post_process as pp
+from qubox_tools.algorithms import post_process as pp
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
 from ...programs.measurement import try_build_readout_snapshot_from_macro
@@ -34,10 +34,14 @@ class QubitResetBenchmark(ExperimentBase):
             cast=int,
         )
 
+        import numpy as np
+        rng = np.random.default_rng(random_seed)
+        random_bits = [bool(x) for x in rng.integers(0, 2, size=bit_size)]
+
         prog = cQED_programs.qubit_reset_benchmark(
-            attr.qb_el, bit_size, r180,
+            attr.qb_el, random_bits, r180,
             qb_therm, num_shots,
-            random_seed=random_seed,
+            readout=self.readout_handle,
         )
         return ProgramBuildResult(
             program=prog,
@@ -95,6 +99,7 @@ class ActiveQubitResetBenchmark(ExperimentBase):
         post_sel_policy: str,
         post_sel_kwargs: dict | None = None,
         show_analysis: bool = True,
+        r180: str = "x180",
         MAX_PREP_TRIALS: int = 100,
         n_shots: int = 10_000,
         qb_therm_clks: int | None = None,
@@ -108,9 +113,10 @@ class ActiveQubitResetBenchmark(ExperimentBase):
         )
 
         prog = cQED_programs.active_qubit_reset_benchmark(
-            attr.qb_el, attr.ro_el,
+            attr.qb_el,
             post_sel_policy, post_sel_kwargs or {},
-            MAX_PREP_TRIALS, qb_therm, n_shots,
+            r180, MAX_PREP_TRIALS, qb_therm, n_shots,
+            readout=self.readout_handle,
         )
         return ProgramBuildResult(
             program=prog,
@@ -182,6 +188,7 @@ class ReadoutLeakageBenchmarking(ExperimentBase):
             attr.qb_el, attr.ro_el, control_bits,
             r180, num_sequences,
             qb_therm, n_avg,
+            readout=self.readout_handle,
         )
         return ProgramBuildResult(
             program=prog,

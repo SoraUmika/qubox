@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..analysis.cQED_attributes import cQED_attributes
+    from .device_metadata import DeviceMetadata
     from .config import ElementConfig, HardwareConfig
 
 _logger = logging.getLogger(__name__)
@@ -471,12 +471,18 @@ class ReadoutHandle:
         QM element name (ephemeral at runtime).
     operation : str
         Pulse operation (e.g. ``"readout"``).
+    gain : float | None
+        Default readout gain (overridable per measurement call).
+    demod_weight_sets : tuple[tuple[str, ...] | str, ...]
+        Demodulation weight set pairs (e.g. ``(("cos","sin"), ("minus_sin","cos"))``).
     """
 
     binding: ReadoutBinding
     cal: ReadoutCal
     element: str
     operation: str = "readout"
+    gain: float | None = None
+    demod_weight_sets: tuple[tuple[str, ...] | str, ...] = (("cos", "sin"), ("minus_sin", "cos"))
 
     @property
     def drive_frequency(self) -> float:
@@ -487,6 +493,63 @@ class ReadoutHandle:
     def physical_id(self) -> str:
         """Canonical physical channel ID for the acquire input."""
         return self.binding.physical_id
+
+    @property
+    def threshold(self) -> float | None:
+        """Discrimination threshold shortcut."""
+        return self.cal.threshold
+
+    @classmethod
+    def from_measure_macro(cls) -> "ReadoutHandle":
+        """Build a ReadoutHandle from the current measureMacro singleton state.
+
+        This is the bridge that allows gradual migration: call this once
+        at the start of program building to capture the singleton state
+        into an immutable handle, then pass the handle to all builders.
+        """
+        from ..programs.macros.measure import measureMacro
+
+        # Build a minimal ReadoutBinding from singleton state
+        rb = ReadoutBinding(
+            drive_out=OutputBinding(
+                channel=ChannelRef("unknown", "RF_out", 0),
+            ),
+            acquire_in=InputBinding(
+                channel=ChannelRef("unknown", "RF_in", 0),
+            ),
+            pulse_op=measureMacro._pulse_op,
+            active_op=measureMacro._active_op,
+            demod_weight_sets=list(measureMacro._demod_weight_sets),
+            discrimination=dict(measureMacro._ro_disc_params),
+            quality=dict(measureMacro._ro_quality_params),
+            drive_frequency=measureMacro._drive_frequency,
+            gain=measureMacro._gain,
+        )
+
+        cal = ReadoutCal(
+            drive_frequency=measureMacro._drive_frequency or 0.0,
+            threshold=measureMacro._ro_disc_params.get("threshold"),
+            rotation_angle=measureMacro._ro_disc_params.get("angle"),
+            confusion_matrix=_tuple_matrix(
+                measureMacro._ro_quality_params.get("confusion_matrix")
+            ),
+            fidelity=measureMacro._ro_disc_params.get("fidelity"),
+        )
+
+        # Build weight sets tuple
+        weight_sets = tuple(
+            tuple(w) if isinstance(w, (list, tuple)) else (w,)
+            for w in measureMacro._demod_weight_sets
+        )
+
+        return cls(
+            binding=rb,
+            cal=cal,
+            element=measureMacro.active_element(),
+            operation=measureMacro.active_op(),
+            gain=measureMacro._gain,
+            demod_weight_sets=weight_sets,
+        )
 
 
 @dataclass(frozen=True)
@@ -546,7 +609,7 @@ class FrequencyPlan:
     Computed once at ``run()`` entry.  Applied atomically before program
     execution.  Recorded in ``RunResult`` metadata for reproducibility.
 
-    No snapshot/restore needed — each experiment builds its own
+    No snapshot/restore needed -- each experiment builds its own
     ``FrequencyPlan`` from scratch.
 
     Attributes
@@ -736,7 +799,7 @@ def _build_input_binding_from_spec(spec: dict[str, Any]) -> InputBinding | None:
 
 def _bindings_from_qubox_extras(
     hw: "HardwareConfig",
-    attr: "cQED_attributes",
+    attr: "DeviceMetadata",
 ) -> ExperimentBindings | None:
     """Build bindings from canonical __qubox.bindings data if present."""
     from .errors import ConfigError
@@ -912,7 +975,7 @@ def _build_input_binding(
 
 def bindings_from_hardware_config(
     hw: "HardwareConfig",
-    attr: "cQED_attributes",
+    attr: "DeviceMetadata",
 ) -> ExperimentBindings:
     """Backward-compatible: derive ExperimentBindings from existing config.
 
@@ -924,8 +987,8 @@ def bindings_from_hardware_config(
     ----------
     hw : HardwareConfig
         Parsed hardware.json.
-    attr : cQED_attributes
-        Experiment attributes (element names, frequencies).
+    attr : DeviceMetadata
+        Device element mapping.
 
     Returns
     -------
@@ -1010,9 +1073,9 @@ def bindings_from_hardware_config(
 
 def build_alias_map(
     hw: "HardwareConfig",
-    attr: "cQED_attributes",
+    attr: "DeviceMetadata",
 ) -> AliasMap:
-    """Build an AliasMap from hardware.json + cqed_params.
+    """Build an AliasMap from hardware.json + device metadata.
 
     Returns a mapping from human-friendly names (e.g. ``"qubit"``,
     ``"resonator"``) to their physical ``ChannelRef``.

@@ -1,8 +1,12 @@
 
 from qm.qua import *
 from qualang_tools.loops import from_array
-from ..macros.measure import measureMacro
+from ..macros.measure import emit_measurement
 import numpy as np
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ...core.bindings import ReadoutHandle
 
 def continuous_wave(target_el, pulse, gain, truncate_clks, delay_clks=4):
     with program() as prog:
@@ -15,7 +19,7 @@ def continuous_wave(target_el, pulse, gain, truncate_clks, delay_clks=4):
             #    wait(delay_clks, target_el)
     return prog
 
-def SPA_flux_optimization(sel_IFs, depl_clks, n_avg):
+def SPA_flux_optimization(sel_IFs, depl_clks, n_avg, *, readout: "ReadoutHandle"):
     sel_IFs = np.array(sel_IFs, dtype=int)
     with program() as resonator_spec:
         n = declare(int)
@@ -27,9 +31,9 @@ def SPA_flux_optimization(sel_IFs, depl_clks, n_avg):
         n_st = declare_stream()
         with for_(n, 0, n < n_avg, n + 1):
             with for_each_(f, sel_IFs):
-                update_frequency(measureMacro.active_element(), f)
-                measureMacro.measure(targets=[I,Q])
-                wait(int(depl_clks), measureMacro.active_element())
+                update_frequency(readout.element, f)
+                emit_measurement(readout, targets=[I,Q])
+                wait(int(depl_clks), readout.element)
                 save(I, I_st)
                 save(Q, Q_st)
             save(n, n_st)

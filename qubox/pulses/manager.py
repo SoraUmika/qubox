@@ -3,8 +3,8 @@ import json, warnings
 from typing import Any, Dict, List, Union
 import numpy as np
 import matplotlib.pyplot as plt
-from ..analysis.pulseOp import PulseOp
-from ..analysis.algorithms import compute_waveform_fft
+from ..core.pulse_op import PulseOp
+from qubox_tools.algorithms.core import compute_waveform_fft
 from ..core.types import MAX_AMPLITUDE, BASE_AMPLITUDE
 import logging
 

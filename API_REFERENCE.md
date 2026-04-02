@@ -33,10 +33,11 @@
 15. [Analysis Pipelines](#15-analysis-pipelines)
 16. [QM Backend Runtime](#16-qm-backend-runtime)
 17. [Notebook Import Surface (qubox.notebook)](#17-notebook-import-surface-quboxnotebook)
-18. [qubox_tools — Analysis Toolkit](#18-qubox_tools--analysis-toolkit)
-19. [Legacy Internals (qubox_v2_legacy)](#19-legacy-internals-qubox_v2_legacy)
-20. [Examples and Minimal Usage Patterns](#20-examples-and-minimal-usage-patterns)
-21. [Known Gaps and Inconsistencies](#21-known-gaps-and-inconsistencies)
+18. [Workflow Primitives (qubox.workflow)](#18-workflow-primitives-quboxworkflow)
+19. [qubox_tools — Analysis Toolkit](#19-qubox_tools--analysis-toolkit)
+20. [Legacy Internals (qubox_v2_legacy)](#20-legacy-internals-qubox_v2_legacy)
+21. [Examples and Minimal Usage Patterns](#21-examples-and-minimal-usage-patterns)
+22. [Known Gaps and Inconsistencies](#22-known-gaps-and-inconsistencies)
 
 **Appendices:**
 
@@ -85,54 +86,320 @@ The repository contains three relevant Python packages:
 
 ## 2. Package Architecture
 
-### 2.1 Package Structure
+### 2.1 Full Repository Structure
 
 ```
-qubox/
-├── __init__.py          # Top-level public API exports
-├── session/
-│   ├── __init__.py
-│   └── session.py       # Session class — the main entry point
-├── sequence/
-│   ├── __init__.py
-│   ├── models.py        # Operation, Condition, Sequence
-│   ├── sweeps.py        # SweepAxis, SweepPlan, SweepFactory
-│   └── acquisition.py   # AcquisitionSpec, AcquisitionFactory
-├── operations/
-│   ├── __init__.py
-│   └── library.py       # OperationLibrary — semantic gate/pulse operations
-├── circuit/
-│   ├── __init__.py
-│   └── models.py        # QuantumCircuit, QuantumGate
-├── data/
-│   ├── __init__.py
-│   └── models.py        # ExecutionRequest, ExperimentResult
-├── calibration/
-│   ├── __init__.py
-│   └── models.py        # CalibrationSnapshot, CalibrationProposal
-├── analysis/
-│   ├── __init__.py
-│   └── pipelines.py     # run_named_pipeline()
-├── experiments/
-│   ├── __init__.py
+qubox/                          ─── Main package (public API + implementation)
+├── __init__.py                      Top-level exports (Session, Sequence, etc.)
+│
+├── session/                         Session lifecycle
+│   ├── context.py                     Session runtime context
+│   ├── session.py                     Session class — the main entry point
+│   └── state.py                       Session state tracking
+│
+├── experiments/                     High-level experiment classes
+│   ├── experiment_base.py             ExperimentBase lifecycle (build → run → analyze)
+│   ├── result.py                      ProgramBuildResult, AnalysisResult, FitResult
+│   ├── session.py                     Session management for experiments
+│   ├── configs.py                     Experiment configuration models
+│   ├── config_builder.py              Configuration builder utilities
+│   ├── multi_program.py               Multi-program orchestration
+│   │
+│   ├── spectroscopy/                  Spectroscopy experiments
+│   │   ├── resonator.py                 ResonatorSpectroscopy, ResonatorPowerSpectroscopy
+│   │   └── qubit.py                     QubitSpectroscopy, QubitSpectroscopyEF
+│   ├── time_domain/                   Time-domain experiments
+│   │   ├── rabi.py                      PowerRabi, TemporalRabi
+│   │   ├── relaxation.py               T1Relaxation
+│   │   ├── coherence.py                T2Ramsey, T2Echo
+│   │   └── chevron.py                  TimeRabiChevron, PowerRabiChevron, RamseyChevron
+│   ├── calibration/                   Calibration experiments
+│   │   ├── gates.py                     AllXY, DRAGCalibration
+│   │   ├── readout.py                   IQBlob, ReadoutGEDiscrimination, ReadoutButterflyMeasurement
+│   │   ├── readout_config.py            Readout configuration models
+│   │   └── reset.py                     QubitResetBenchmark, ActiveQubitResetBenchmark
+│   ├── cavity/                        Cavity / storage experiments
+│   │   ├── storage.py                   StorageSpectroscopy, StorageCoherence, ...
+│   │   └── fock.py                      Fock-manifold-resolved measurements
+│   ├── tomography/                    Tomography experiments
+│   │   ├── qubit_tomo.py               QubitStateTomography
+│   │   ├── fock_tomo.py                FockResolvedStateTomography
+│   │   └── wigner_tomo.py              StorageWignerTomography
+│   ├── spa/                           SPA readout experiments
+│   │   └── flux_optimization.py         SPAFluxOptimization
 │   ├── templates/
-│   │   └── library.py   # ExperimentLibrary (qubit, resonator, readout, calibration, storage, tomography, reset)
+│   │   └── library.py                  ExperimentLibrary (20 template experiments)
 │   ├── workflows/
-│   │   └── library.py   # WorkflowLibrary (readout)
-│   └── custom/
-│       └── __init__.py
-├── backends/
-│   ├── __init__.py
+│   │   └── library.py                  WorkflowLibrary (readout workflows)
+│   └── custom/                        Custom experiment stubs
+│
+├── programs/                        QUA program compilation
+│   ├── api.py                         Stable builder export surface
+│   ├── measurement.py                 Measurement emission and state rules
+│   ├── spectroscopy.py                Spectroscopy program runners
+│   ├── time_domain.py                 Time-domain protocol runners (Rabi, echo, ...)
+│   ├── readout.py                     Readout pulse play and data collection
+│   ├── tomography.py                  Tomography protocol runners
+│   ├── calibration.py                 Calibration protocol runners
+│   ├── cavity.py                      Storage cavity manipulation programs
+│   ├── gate_tuning.py                 Gate parameter tuning runners
+│   ├── circuit_compiler.py            Quantum circuit → QUA compilation
+│   ├── circuit_runner.py              Circuit runner with legacy compatibility
+│   ├── circuit_display.py             Circuit visualization
+│   ├── circuit_execution.py           Circuit execution runners
+│   ├── circuit_postprocess.py         Post-execution circuit analysis
+│   ├── circuit_protocols.py           Circuit protocol definitions
+│   │
+│   ├── builders/                      QUA program builders (per-domain)
+│   │   ├── spectroscopy.py              Resonator/qubit spectroscopy builders
+│   │   ├── time_domain.py               temporal_rabi(), power_rabi(), chevron, echo
+│   │   ├── readout.py                   iq_blobs(), readout_trace()
+│   │   ├── calibration.py               sequential_qb_rotations()
+│   │   ├── cavity.py                    storage_spectroscopy()
+│   │   ├── tomography.py               qubit_state_tomography()
+│   │   ├── simulation.py               Simulation-specific QUA builders
+│   │   └── utility.py                  Shared builder utilities
+│   │
+│   └── macros/                        Reusable QUA code snippets
+│       ├── measure.py                   measureMacro class + emit_measurement()
+│       └── sequence.py                  sequenceMacros — Ramsey, echo, conditional reset
+│
+├── calibration/                     Calibration orchestration
+│   ├── orchestrator.py                CalibrationOrchestrator — runs calibration, applies patches
+│   ├── patch_rules.py                 Patch rule definitions and application logic
+│   ├── store.py                       CalibrationStore — persists calibration data (JSON)
+│   ├── store_models.py                CalibrationSnapshot, CalibratedElementSnapshot
+│   ├── history.py                     CalibrationHistory — audit trail and versioning
+│   ├── transitions.py                 Transition — frequency transition definitions (ge, ef)
+│   ├── algorithms.py                  Calibration algorithms
+│   ├── mixer_calibration.py           Mixer correction workflows
+│   ├── contracts.py                   FitResult contract enforcement
+│   ├── pulse_train_tomo.py            Pulse train tomography for gate calibration
+│   └── models.py                      Calibration data models
+│
+├── core/                            Infrastructure: bindings, schemas, logging, state
+│   ├── bindings.py                    ChannelRef, ReadoutHandle, ExperimentBindings
+│   ├── hardware_definition.py         HardwareDefinition — notebook-facing hardware setup
+│   ├── experiment_context.py          Experiment runtime context
+│   ├── hardware_context.py            Hardware state and connectivity
+│   ├── session_state.py               Session lifecycle state
+│   ├── measurement_config.py          Measurement protocol configuration
+│   ├── config.py                      Configuration management
+│   ├── schemas.py                     JSON schema versioning and migration
+│   ├── device_metadata.py             External device metadata
+│   ├── persistence.py                 File I/O and data persistence
+│   ├── persistence_policy.py          Persistence contract enforcement
+│   ├── artifacts.py                   Artifact management
+│   ├── artifact_manager.py            Artifact lifecycle and versioning
+│   ├── protocols.py                   Protocol definitions
+│   ├── errors.py                      QuboxError, ConfigError, ConnectionError, ...
+│   ├── preflight.py                   Pre-execution validation
+│   ├── logging.py                     Logging utilities
+│   └── types.py                       Core type annotations
+│
+├── hardware/                        OPX+ / Octave control
+│   ├── controller.py                  HardwareController — hardware command execution
+│   ├── program_runner.py              ProgramRunner — QUA execution (real + simulated)
+│   ├── queue_manager.py               Job queuing and orchestration
+│   └── config_engine.py               QM config generation from hardware definition
+│
+├── pulses/                          Pulse management and waveform generation
+│   ├── manager.py                     PulseOp — pulse operation and orchestration
+│   ├── factory.py                     Pulse creation factories
+│   ├── pulse_registry.py              Pulse registration and lookup
+│   ├── models.py                      Pulse data models (Gaussian, DRAG, ...)
+│   ├── spec_models.py                 Pulse specification models
+│   ├── waveforms.py                   Waveform generation (sin, cos, envelope, ...)
+│   └── integration_weights.py         Per-pulse integration weight definitions
+│
+├── gates/                           Gate physics and caching
+│   ├── gate.py                        Gate base class and protocols
+│   ├── hardware_base.py               Base hardware gate class
+│   ├── model_base.py                  Base mathematical model class
+│   ├── fidelity.py                    Fidelity prediction and fitting
+│   ├── free_evolution.py              Free-evolution gate models
+│   ├── liouville.py                   Liouville superoperator channels
+│   ├── noise.py                       Noise models for gate operations
+│   ├── cache.py                       Gate fidelity caching
+│   ├── contexts.py                    Gate context (hardware state, calibration point)
+│   ├── sequence.py                    Gate sequences and chains
+│   ├── hash_utils.py                  Gate parameterization hashing
+│   │
+│   ├── hardware/                      Hardware gate implementations
+│   │   ├── displacement.py              Displacement gate
+│   │   ├── qubit_rotation.py            Qubit XY-plane rotations
+│   │   ├── snap.py                      SNAP gate
+│   │   └── sqr.py                       SQR gate (context-aware)
+│   │
+│   └── models/                        Mathematical gate models
+│       ├── displacement.py              Displacement models
+│       ├── qubit_rotation.py            Rotation models
+│       ├── snap.py                      SNAP models
+│       └── sqr.py                       SQR models
+│
+├── simulation/                      cQED simulation
+│   ├── cQED.py                        cQED Hamiltonian and system definitions
+│   ├── drive_builder.py               Drive Hamiltonian construction
+│   ├── hamiltonian_builder.py         Full Hamiltonian assembly
+│   └── solver.py                      ODE solver for cQED dynamics
+│
+├── compile/                         Circuit compilation and optimization
+│   ├── api.py                         Public compilation API
+│   ├── ansatz.py                      Ansatz specification
+│   ├── evaluators.py                  Compilation objective evaluators
+│   ├── objectives.py                  Compilation objective functions
+│   ├── optimizers.py                  Circuit optimization algorithms
+│   ├── param_space.py                 Parameter space definitions
+│   ├── structure_search.py            Automated circuit structure search
+│   ├── templates.py                   Compilation templates
+│   ├── gpu_accelerators.py            GPU-accelerated compilation (CUDA)
+│   └── gpu_utils.py                   GPU utilities and device detection
+│
+├── sequence/                        Sweep plans, acquisitions, sequence control
+│   ├── models.py                      Operation, Condition, Sequence
+│   ├── sweeps.py                      SweepAxis, SweepPlan, SweepFactory
+│   └── acquisition.py                 AcquisitionSpec, AcquisitionFactory
+│
+├── circuit/                         Higher-level circuit model
+│   └── models.py                      QuantumCircuit, QuantumGate
+│
+├── data/                            Execution requests and results
+│   └── models.py                      ExecutionRequest, ExperimentResult
+│
+├── backends/                        Backend adapters
 │   └── qm/
-│       ├── __init__.py
-│       ├── runtime.py   # QMRuntime — executes templates & custom sequences
-│       └── lowering.py  # Lowers Sequence / QuantumCircuit → legacy IR
-├── compat/
-│   ├── __init__.py
-│   └── notebook.py      # Lazy re-exports of qubox_v2_legacy classes
-└── examples/
-    ├── __init__.py
-    └── quickstart.py    # Minimal demo script
+│       ├── lowering.py                  Lowers circuit → legacy IR
+│       └── runtime.py                   LegacyExperimentAdapter
+│
+├── devices/                         External device integration
+│   ├── device_manager.py              DeviceManager — multi-device orchestration
+│   ├── registry.py                    Device registration and lookup
+│   ├── context_resolver.py            Device parameter resolution
+│   └── sample_registry.py             Sample-specific device configuration
+│
+├── verification/                    Validation and regression
+│   ├── schema_checks.py              JSON schema validation
+│   ├── persistence_verifier.py        Persistence contract verification
+│   └── waveform_regression.py         Waveform generation regression tests
+│
+├── workflow/                        Multi-stage orchestration
+│   ├── stages.py                      Stage checkpoints, workflow config
+│   ├── calibration_helpers.py         Calibration workflow helpers
+│   ├── fit_gates.py                   fit_quality_gate(), fit_center_inside_window()
+│   └── pulse_seeding.py               Initial pulse parameter seeding
+│
+├── notebook/                        Notebook-facing import surface
+│   ├── __init__.py                    30+ experiment re-exports, session helpers
+│   ├── advanced.py                    Infrastructure imports
+│   ├── runtime.py                     Notebook runtime integration
+│   └── workflow.py                    Workflow orchestration for notebooks
+│
+├── autotune/                        Automated tuning
+│   └── run_post_cavity_autotune_v1_1.py  Post-cavity autotune workflow
+│
+├── gui/                             Visualization
+│   └── program_gui.py                Program/circuit visualization
+│
+└── examples/                        Reference implementations
+    ├── quickstart.py                  Basic session startup demo
+    ├── session_startup_demo.py        Session initialization demo
+    └── circuit_architecture_demo.py   Circuit model demonstration
+```
+
+```
+qubox_tools/                    ─── Analysis & Fitting Toolkit
+├── algorithms/
+│   ├── core.py                      Core algorithm utilities
+│   ├── metrics.py                   Fidelity and quality metrics
+│   ├── pipelines.py                 Named analysis pipelines (raw, iq_magnitude, ...)
+│   ├── post_process.py              Signal post-processing
+│   ├── post_selection.py            Post-selection filtering
+│   ├── readout_analysis.py          Readout data analysis (Pe, posteriors, IQ consistency)
+│   └── transforms.py               Signal transformations
+├── fitting/
+│   ├── cqed.py                      cQED model fits (T1, T2, Rabi, qubit_spec, ...)
+│   ├── calibration.py               Calibration-specific fits
+│   ├── models.py                    Fit model definitions (Lorentzian, Gaussian, ...)
+│   ├── pulse_train.py               Pulse sequence fitting
+│   └── routines.py                  fit_and_wrap(), generalized_fit()
+├── optimization/
+│   ├── bayesian.py                  Bayesian optimization
+│   ├── local.py                     Local optimization (Nelder-Mead, ...)
+│   └── stochastic.py               Stochastic optimization
+├── plotting/
+│   ├── common.py                    Common plotting utilities (plot_hm, ...)
+│   └── cqed.py                      cQED visualizations (Bloch, Wigner, Fock)
+└── data/
+    └── containers.py                Output, OutputArray — data containers
+```
+
+```
+qubox_lab_mcp/                  ─── Lab MCP Server
+├── server.py                        MCP server implementation
+├── config.py                        Server configuration
+├── services.py                      Core services
+├── errors.py                        Error classes
+├── prompts.py                       MCP prompt definitions
+├── adapters/                        Protocol adapters
+│   ├── decomposition_adapter.py       Circuit decomposition
+│   ├── filesystem_adapter.py          Filesystem browsing
+│   ├── json_adapter.py                JSON data
+│   ├── notebook_adapter.py            Jupyter notebook
+│   ├── python_index_adapter.py        Python code indexing
+│   └── run_adapter.py                 Experiment run
+├── models/
+│   └── results.py                   Result models
+├── policies/
+│   ├── path_policy.py               Filesystem path safety
+│   └── safety_policy.py             General safety policies
+├── resources/                       Resource loaders
+└── tools/                           MCP tool definitions
+```
+
+```
+tools/                          ─── Developer Utilities
+├── test_all_simulations.py          Master simulation test suite (24 experiments)
+├── validate_qua.py                  Compile + simulate QUA against hosted server
+├── validate_standard_experiments_simulation.py  Standard experiment trust gates
+├── log_prompt.py                    Log agent prompts to past_prompt/
+├── analyze_imports.py               Import graph analysis
+├── build_context_notebook.py        Notebook context builder
+├── validate_circuit_runner_serialization.py  Circuit serialization validator
+├── validate_gate_tuning_visualization.py  Gate tuning visualization
+├── validate_notebooks.py            Notebook health checks
+└── strip_raw_artifacts.py           Artifact cleaning utility
+```
+
+```
+notebooks/                      ─── Sequential Experiment Workflows (00–27)
+├── 00_hardware_defintion.ipynb      Hardware definition and session setup
+├── 01_mixer_calibrations.ipynb      Mixer correction calibration
+├── 02_time_of_flight.ipynb          Digital signal delay measurement
+├── 03_resonator_spectroscopy.ipynb  Readout resonator characterization
+├── 04_resonator_power_chevron.ipynb Power-dependent resonator shift
+├── 05_qubit_spectroscopy_pulse_calibration.ipynb  Qubit freq + pulse calibration
+├── 06_coherence_experiments.ipynb   T1 and T2 measurements
+├── 07_cw_diagnostics.ipynb          Continuous-wave diagnostics
+├── 08_pulse_waveform_definition.ipynb  Pulse envelope and waveform design
+├── 09_qutrit_spectroscopy_calibration.ipynb  e-f transition frequency
+├── 10_sideband_transitions.ipynb    Cavity-qubit sideband transitions
+├── 11_coherence_2d_pump_sweeps.ipynb  2D pump-probe coherence
+├── 12_chevron_experiments.ipynb     2D Rabi/Ramsey chevron plots
+├── 13_dispersive_shift_measurement.ipynb  Qubit-cavity coupling parameter
+├── 14_gate_calibration_benchmarking.ipynb  AllXY gate error benchmarking
+├── 15_qubit_state_tomography.ipynb  Qubit state reconstruction
+├── 16_readout_calibration.ipynb     Readout discriminator tuning
+├── 17_readout_bayesian_optimization.ipynb  Bayesian readout optimization
+├── 18_active_reset_benchmarking.ipynb  Active qubit reset validation
+├── 19_spa_optimization.ipynb        SPA readout optimization
+├── 20_readout_leakage_benchmarking.ipynb  Readout leakage measurement
+├── 21_storage_cavity_characterization.ipynb  Storage cavity characterization
+├── 22_fock_resolved_experiments.ipynb  Fock-number-resolved spectroscopy
+├── 23_quantum_state_preparation.ipynb  Deterministic Fock state prep
+├── 24_free_evolution_tomography.ipynb  Coherence over free evolution
+├── 25_context_aware_sqr_calibration.ipynb  Context-dependent SQR calibration
+├── 26_sequential_simulation.ipynb   Sequential simulator-only experiments
+└── 27_cluster_state_evolution.ipynb Cluster state entanglement evolution
 ```
 
 ### 2.2 Subpackage Summary
@@ -140,34 +407,60 @@ qubox/
 | Subpackage | Purpose |
 |------------|---------|
 | `qubox.session` | `Session` — runtime entry point; owns sweep/acquire factories, operation and experiment libraries |
-| `qubox.sequence` | Intermediate representation: `Operation`, `Condition`, `Sequence`, sweep and acquisition models |
-| `qubox.operations` | `OperationLibrary` — calibration-aware semantic operations (gates, waits, measurements, resets) |
-| `qubox.circuit` | `QuantumCircuit` and `QuantumGate` — gate-sequence view over the shared Sequence IR |
-| `qubox.data` | `ExecutionRequest` and `ExperimentResult` — run specification and result container |
-| `qubox.calibration` | `CalibrationSnapshot` and `CalibrationProposal` — calibration inspection and patch proposing |
-| `qubox.analysis` | `run_named_pipeline()` — lightweight named analysis pipelines for custom experiments |
-| `qubox.experiments` | `ExperimentLibrary` (20 standard experiments) and `WorkflowLibrary` — template-based runners |
-| `qubox.backends.qm` | `QMRuntime` — QM-specific execution: lowers sequences to QUA programs via legacy adapter |
-| `qubox.notebook` | Primary notebook import surface: experiment classes, calibration, session helpers, stage workflow |
-| `qubox.examples` | Runnable example scripts demonstrating the API |
+| `qubox.experiments` | `ExperimentBase` and 24+ experiment subclasses organized by physics domain (spectroscopy, time-domain, calibration, cavity, tomography, SPA) |
+| `qubox.programs` | QUA program compilation: domain-specific builders, measurement/sequence macros, circuit compiler/runner |
+| `qubox.programs.builders` | Per-domain QUA builder functions: `spectroscopy`, `time_domain`, `readout`, `calibration`, `cavity`, `tomography` |
+| `qubox.programs.macros` | Reusable QUA snippets: `measureMacro` (readout singleton + `emit_measurement()`), `sequenceMacros` (Ramsey, echo, reset) |
+| `qubox.calibration` | `CalibrationOrchestrator`, `CalibrationStore`, patch rules, history, transitions — full calibration lifecycle |
+| `qubox.core` | Infrastructure: `ReadoutHandle`, `ExperimentBindings`, hardware definition, schemas, persistence, error hierarchy |
+| `qubox.hardware` | `HardwareController`, `ProgramRunner`, `QueueManager`, `ConfigEngine` — OPX+/Octave control layer |
+| `qubox.pulses` | `PulseOp`, waveform generation (Gaussian, DRAG, Kaiser, ...), integration weights, pulse registry |
+| `qubox.gates` | Gate physics: displacement, SNAP, SQR, qubit rotations — hardware implementations + mathematical models + fidelity/noise |
+| `qubox.simulation` | cQED Hamiltonian construction and ODE solver for numerical simulation |
+| `qubox.compile` | Circuit compilation: ansatz specs, parameter-space optimizers, GPU-accelerated structure search |
+| `qubox.sequence` | Intermediate representation: `Operation`, `Condition`, `Sequence`, `SweepAxis`, `SweepPlan`, `AcquisitionSpec` |
+| `qubox.circuit` | `QuantumCircuit` and `QuantumGate` — gate-sequence view over the Sequence IR |
+| `qubox.data` | `ExecutionRequest` and `ExperimentResult` — run specification and result containers |
+| `qubox.backends.qm` | `QMRuntime` — lowers sequences/circuits to QUA programs via legacy adapter |
+| `qubox.devices` | `DeviceManager` — external device orchestration (SignalCore, OctoDac), sample registry |
+| `qubox.verification` | Schema checks, persistence verification, waveform regression tests |
+| `qubox.workflow` | Portable workflow primitives: stage checkpoints, fit gates, patch preview, pulse seeding |
+| `qubox.notebook` | Primary notebook import surface: 30+ experiment re-exports, session helpers, waveform tools |
+| `qubox.autotune` | Automated post-cavity tuning workflow |
+| `qubox.gui` | Program/circuit visualization |
+| `qubox_tools` | **Separate package** — fitting (cQED models), plotting (Bloch/Wigner), signal processing, optimization |
+| `qubox_lab_mcp` | **Separate package** — Lab MCP server: adapters, resources, tools for external tool integration |
 
 ### 2.3 Layering
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  User Notebook / Script                             │
-│    import qubox                                     │
-├─────────────────────────────────────────────────────┤
-│  qubox   (public API: Session, Sequence, etc.)      │
-├─────────────────────────────────────────────────────┤
-│  qubox.backends.qm   (QMRuntime, lowering)          │
-├─────────────────────────────────────────────────────┤
-│  qubox_v2_legacy   (internal: SessionManager,       │
-│    CalibrationStore, PulseFactory, ProgramRunner,   │
-│    experiment classes, QUA compilation)              │
-├─────────────────────────────────────────────────────┤
-│  Quantum Machines QUA / OPX+ / Octave               │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  User Notebook / Script                                      │
+│    from qubox import Session / from qubox.notebook import ... │
+├──────────────────────────────────────────────────────────────┤
+│  qubox.session         (Session — public API entry point)     │
+│  qubox.experiments     (ExperimentLibrary + 24 templates)     │
+│  qubox.sequence        (Operation, Sequence, SweepAxis)       │
+│  qubox.circuit         (QuantumCircuit, QuantumGate)          │
+├──────────────────────────────────────────────────────────────┤
+│  qubox.programs        (QUA builders, macros, circuit runner) │
+│  qubox.calibration     (CalibrationOrchestrator, Store)       │
+│  qubox.pulses          (PulseOp, waveform generation)         │
+│  qubox.hardware        (HardwareController, ProgramRunner)    │
+├──────────────────────────────────────────────────────────────┤
+│  qubox.gates           (gate physics, fidelity, models)       │
+│  qubox.simulation      (cQED Hamiltonian, ODE solver)         │
+│  qubox.compile         (circuit optimization, GPU accel)      │
+├──────────────────────────────────────────────────────────────┤
+│  qubox.backends.qm     (QMRuntime — lowers to QUA)           │
+│  qubox.core            (bindings, schemas, persistence)       │
+├──────────────────────────────────────────────────────────────┤
+│  Quantum Machines QUA / OPX+ / Octave                        │
+└──────────────────────────────────────────────────────────────┘
+           │                                    │
+    qubox_tools                          qubox_lab_mcp
+    (fitting, plotting,                  (MCP server for
+     optimization)                        external tools)
 ```
 
 Users should only import from `qubox` and `qubox_tools`.
@@ -273,8 +566,9 @@ session = Session.open(
     registry_base="E:/qubox",
     qop_ip="10.157.36.68",
     cluster_name="Cluster_2",
-    connect=True,               # open QM connection immediately
 )
+# Default: simulation_mode=True (safe, no RF outputs)
+# For real hardware: simulation_mode=False
 ```
 
 **`Session.open()` Signature:**
@@ -287,6 +581,7 @@ def open(
     sample_id: str,
     cooldown_id: str,
     registry_base: str | Path | None = None,
+    simulation_mode: bool = True,
     connect: bool = True,
     **kwargs,
 ) -> Session
@@ -297,6 +592,7 @@ def open(
 | `sample_id` | `str` | Identifier for the sample (maps to a directory under `samples/`) |
 | `cooldown_id` | `str` | Identifier for the cooldown cycle |
 | `registry_base` | `str \| Path \| None` | Root directory of the registry (defaults to cwd) |
+| `simulation_mode` | `bool` | If `True` (default), no `QuantumMachine` is created and RF outputs stay off.  Pass `False` for real hardware execution. |
 | `connect` | `bool` | If `True`, opens the QM connection immediately. If `False`, the session is created but not connected. |
 | `**kwargs` | | Forwarded to the legacy `SessionManager` (e.g. `qop_ip`, `cluster_name`, `load_devices`, `auto_save_calibration`) |
 
@@ -314,6 +610,14 @@ def open(
 | `session.workflow` | `WorkflowLibrary` | Multi-step workflows (e.g. full readout calibration) |
 | `session.backend` | `QMRuntime` | Backend runtime (lazily initialized) |
 | `session.legacy_session` | `SessionManager` | Access to the underlying legacy runtime *(advanced use)* |
+| `session.hardware` | `HardwareController` | Element LO/IF/gain, QM instance |
+| `session.config_engine` | `ConfigEngine` | Load / save / build QM config dicts |
+| `session.calibration` | `CalibrationStore` | Frequency, coherence, discrimination data |
+| `session.pulse_mgr` | `PulseOperationManager` | Pulse operation registry |
+| `session.runner` | `ProgramRunner` | Execute / simulate QUA programs |
+| `session.devices` | `DeviceManager` | External device lifecycle |
+| `session.orchestrator` | `CalibrationOrchestrator` | Experiment → calibration pipeline |
+| `session.simulation_mode` | `bool` | True if session was opened in simulation mode |
 
 **Methods:**
 
@@ -355,20 +659,19 @@ by querying the session context:
 
 ### 5.6 Legacy Session Access
 
-For advanced use cases that require direct access to the `qubox_v2_legacy`
-runtime (calibration store, pulse manager, hardware controller, etc.):
+For advanced use cases that require direct access to the underlying
+`SessionManager` runtime:
 
 ```python
 legacy = session.legacy_session
 
 # Examples:
-calibration_store = legacy.calibration
-pulse_mgr = legacy.pulse_mgr
 ctx = legacy.context_snapshot()
 ```
 
-Any attribute access on `session` that is not defined on `Session` itself
-is transparently forwarded to `session.legacy_session` via `__getattr__`.
+Common sub-systems are exposed as direct properties on `Session` itself
+(`session.hardware`, `session.calibration`, `session.pulse_mgr`, etc.).
+Use `session.legacy_session` only for attributes not surfaced directly.
 
 ---
 
@@ -1653,12 +1956,15 @@ orch.apply_patch(patch, dry_run=False)
 
 ### 15.1 Named Pipelines
 
-The `qubox.analysis.run_named_pipeline()` function provides lightweight
-analysis for custom experiments.
+The `qubox_tools.algorithms.pipelines.run_named_pipeline()` function provides
+lightweight analysis for custom experiments.
 
 ```python
-from qubox.analysis import run_named_pipeline
+from qubox_tools.algorithms.pipelines import run_named_pipeline
 ```
+
+> **Note:** The `qubox.analysis` shim package has been removed.  Import
+> analysis utilities directly from `qubox_tools`.
 
 **Signature:**
 
@@ -1728,7 +2034,7 @@ For custom experiments (`kind="custom"`), `QMRuntime`:
 
 1. **Lowers** the `Sequence` or `QuantumCircuit` into the legacy
    `CircuitRunner` IR (gates, measurement records, metadata).
-2. **Compiles** the lowered circuit into a QUA program via `CircuitRunner.compile_v2()`.
+2. **Compiles** the lowered circuit into a QUA program via `CircuitRunner.compile_program()` (formerly `compile_v2`).
 3. **Executes** the QUA program via `ProgramRunner`.
 4. **Analyzes** the output via `run_named_pipeline()`.
 
@@ -1754,19 +2060,28 @@ in the body, a measurement is automatically appended.
 ### 17.1 Purpose
 
 `qubox.notebook` is the primary import surface for notebook-based
-experiment workflows. It re-exports experiment classes, calibration
-utilities, hardware authoring helpers, and session/stage lifecycle
-functions so that notebooks need only a single import statement.
+experiment workflows.  It is split into two tiers:
+
+- **`qubox.notebook`** (essentials): experiments, session management, workflow helpers, waveform generators, and basic calibration tools.
+- **`qubox.notebook.advanced`**: infrastructure symbols — `CalibrationStore`, data models (`CQEDParams`, `FitRecord`, …), `ArtifactManager`, schemas, device registry, verification.
+
+Core workflow primitives (stage checkpoints, fit gates, patch preview, pulse seeding) are also available from `qubox.workflow` for scripts and CI without a notebook kernel.
 
 `qubox.notebook` exposes:
 - **Experiment classes** (30+) for spectroscopy, time-domain, readout, gate calibration, storage/cavity, and tomography.
-- **Calibration stack:** `CalibrationOrchestrator`, `CalibrationStore`, `Patch`, `UpdateOp`, data models.
+- **Calibration essentials:** `CalibrationOrchestrator`, `Patch`, `UpdateOp`, `MixerCalibrationConfig`, `SAMeasurementHelper`.
 - **Hardware authoring:** `HardwareDefinition` for generating sample-level config files.
 - **Session lifecycle:** `open_shared_session()`, `require_shared_session()`, `close_shared_session()`, `restore_shared_session()` for multi-notebook shared sessions.
 - **Stage workflow:** `open_notebook_stage()`, `save_stage_checkpoint()`, `load_stage_checkpoint()`, `preview_or_apply_patch_ops()`, `fit_quality_gate()`, `fit_center_inside_window()`, `ensure_primitive_rotations()`.
-- **Device/artifact management:** `SampleRegistry`, `ArtifactManager`, `preflight_check`, `validate_config_dir`.
 - **Waveform tools:** `drag_gaussian_pulse_waveforms`, `kaiser_pulse_waveforms`, `register_rotations_from_ref_iq`, `ensure_displacement_ops`.
 - **Program utilities:** `measureMacro`, `continuous_wave`, `QuboxSimulationConfig`.
+
+`qubox.notebook.advanced` exposes:
+- **Calibration data models:** `CalibrationStore`, `CQEDParams`, `FitRecord`, `PulseTrainResult`, `DiscriminationParams`, `ReadoutQuality`, `CoherenceParams`, `ElementFrequencies`, `PulseCalibration`, `CalibrationData`, `CalibrationContext`, `Transition`, calibration snapshot functions, etc.
+- **Device/artifact management:** `SampleRegistry`, `SampleInfo`, `ArtifactManager`, `save_config_snapshot`, `save_run_summary`, `cleanup_artifacts`.
+- **Preflight/schemas:** `preflight_check`, `validate_config_dir`, `ValidationResult`.
+- **Core internals:** `ContextMismatchError`, `ExperimentContext`, `SessionState`.
+- **Verification:** `run_all_checks`.
 
 ### 17.2 Usage
 
@@ -1788,9 +2103,8 @@ from qubox.notebook import (
     StorageWignerTomography,
     # ... and many more
 
-    # Calibration
+    # Calibration essentials
     CalibrationOrchestrator,
-    CalibrationStore,
     Patch,
 
     # Hardware authoring
@@ -1812,12 +2126,6 @@ from qubox.notebook import (
     ensure_primitive_rotations,
 
     # Session / Core
-    SampleRegistry,
-    SessionState,
-    ExperimentContext,
-    ArtifactManager,
-
-    # Results
     RunResult,
     AnalysisResult,
     ProgramBuildResult,
@@ -1827,12 +2135,29 @@ from qubox.notebook import (
     ensure_displacement_ops,
     kaiser_pulse_waveforms,
     drag_gaussian_pulse_waveforms,
-    save_config_snapshot,
-    save_run_summary,
 
     # Hardware / Programs
     measureMacro,
     QuboxSimulationConfig,
+)
+
+# For infrastructure symbols, use the advanced submodule:
+from qubox.notebook.advanced import (
+    CalibrationStore,
+    SampleRegistry,
+    ArtifactManager,
+    SessionState,
+    ExperimentContext,
+    save_config_snapshot,
+    save_run_summary,
+)
+
+# Or for portable (non-notebook) workflow use:
+from qubox.workflow import (
+    save_stage_checkpoint,
+    load_stage_checkpoint,
+    fit_quality_gate,
+    preview_or_apply_patch_ops,
 )
 ```
 
@@ -1876,11 +2201,106 @@ The full list of re-exported names includes:
 > For programmatic workflows, prefer the `qubox` API (`Session`, `session.exp.*`,
 > `session.ops.*`, etc.).
 
+### 17.4 Simulation Mode
+
+All session-opening helpers (`open_shared_session`, `require_shared_session`,
+`Session.open`) accept a `simulation_mode: bool` keyword argument that
+**defaults to `True`** — sessions open safely in simulation mode by default.
+
+When `simulation_mode=True` (the default):
+
+- `hardware.open_qm()` is **skipped** — no `QuantumMachine` instance is created
+  and RF outputs are **never enabled**.
+- The `QuantumMachinesManager` (QMM) connection is still established, so
+  `experiment.simulate()` and `runner.simulate()` work normally via
+  `qmm.simulate()`.
+- `runner.exec_mode` is locked to `ExecMode.SIMULATE` at construction time.
+- Any call to `runner.run_program()` raises `JobError` with a clear message.
+- `session.simulation_mode` returns `True`.
+
+Pass `simulation_mode=False` explicitly to enable real hardware execution.
+
+```python
+from qubox.notebook import open_shared_session, QuboxSimulationConfig, PowerRabi
+
+# Default: simulation mode (safe, no RF outputs)
+session = open_shared_session(
+    registry_base="./samples",
+    sample_id="post_cavity_sample_A",
+    cooldown_id="cd_2026_03",
+    qop_ip="10.157.36.68",
+    cluster_name="Cluster_2",
+)
+
+# For real hardware execution:
+# session = open_shared_session(..., simulation_mode=False)
+
+exp = PowerRabi(session)
+exp.simulate(
+    QuboxSimulationConfig(duration_ns=10_000, plot=True),
+    element="qubit",
+    pulse="x180",
+    amp_start=0.0,
+    amp_stop=0.5,
+    amp_step=0.01,
+    n_avg=1,
+)
+```
+
+`NotebookSessionBootstrap` also stores the `simulation_mode` flag, so
+`restore_shared_session()` reopens in the same mode automatically.
+
 ---
 
-## 18. qubox_tools — Analysis Toolkit
+## 18. Workflow Primitives (qubox.workflow)
 
-### 18.1 Import
+### 18.1 Purpose
+
+`qubox.workflow` provides portable stage management, checkpoint persistence,
+fit quality gates, calibration patch helpers, and pulse seeding — without
+requiring a notebook kernel.  These are the same primitives used by
+`qubox.notebook.workflow`, but importable from scripts and CI.
+
+### 18.2 Modules
+
+| Module | Exports |
+|--------|---------|
+| `qubox.workflow.stages` | `WorkflowConfig`, `StageCheckpoint`, `build_workflow_config()`, `get_stage_checkpoint_path()`, `save_stage_checkpoint()`, `load_stage_checkpoint()`, `load_legacy_reference()` |
+| `qubox.workflow.calibration_helpers` | `preview_or_apply_patch_ops()` |
+| `qubox.workflow.fit_gates` | `fit_quality_gate()`, `fit_center_inside_window()` |
+| `qubox.workflow.pulse_seeding` | `ensure_primitive_rotations()` |
+
+### 18.3 Usage
+
+```python
+from qubox.workflow import (
+    save_stage_checkpoint,
+    load_stage_checkpoint,
+    fit_quality_gate,
+    fit_center_inside_window,
+    preview_or_apply_patch_ops,
+    ensure_primitive_rotations,
+)
+
+# Save a stage checkpoint (works from any Python context)
+save_stage_checkpoint(
+    registry_base="./samples",
+    sample_id="post_cavity_sample_A",
+    cooldown_id="cd_2026_03_31",
+    stage_name="resonator_spectroscopy",
+    status="complete",
+    summary="Found resonator at 7.245 GHz",
+)
+
+# Check fit quality
+passed, reason = fit_quality_gate(analysis, r_squared_min=0.8)
+```
+
+---
+
+## 19. qubox_tools — Analysis Toolkit
+
+### 19.1 Import
 
 ```python
 import qubox_tools as qt
@@ -1932,7 +2352,7 @@ print(f"Fitted center: {popt[0]:.4f}")
 
 ---
 
-## 19. Legacy Internals (qubox_v2_legacy)
+## 20. Legacy Internals (qubox_v2_legacy)
 
 The `qubox_v2_legacy` package (renamed from the original `qubox_v2`) remains
 the execution engine behind `qubox`. It contains:
@@ -1948,7 +2368,8 @@ the execution engine behind `qubox`. It contains:
 | `ConfigEngine` | `qubox_v2_legacy.hardware.config_engine` | QM config dict assembly |
 | `HardwareController` | `qubox_v2_legacy.hardware` | OPX+ / Octave live state |
 | `ProgramRunner` | `qubox_v2_legacy.hardware.program_runner` | QUA program submission |
-| `CircuitRunner` | `qubox_v2_legacy.programs.circuit_runner` | IR-based QUA compilation |
+| `CircuitRunner` | `qubox.programs.circuit_runner` | IR-based QUA compilation |
+| `CircuitCompiler` | `qubox.programs.circuit_compiler` | Gate → QUA compiler (renamed from `CircuitRunnerV2`) |
 | `SampleRegistry` | `qubox_v2_legacy.devices` | Filesystem sample/cooldown management |
 | `ExperimentContext` | `qubox_v2_legacy.core.experiment_context` | Immutable experiment identity |
 | `ArtifactManager` | `qubox_v2_legacy.core.artifact_manager` | Build-hash-keyed artifact storage |
@@ -1958,7 +2379,7 @@ the execution engine behind `qubox`. It contains:
 > Use `qubox` for the public API, and `qubox.notebook` for experiment
 > classes and calibration helpers.
 
-### 19.1 Key Internal Concepts
+### 20.1 Key Internal Concepts
 
 These are internal concepts that may appear in result objects or documentation:
 
@@ -1979,7 +2400,7 @@ These are internal concepts that may appear in result objects or documentation:
 - **AnalysisResult**: Container with fitted parameters, metadata, and
   proposed patch operations.
 
-### 19.2 Calibration JSON Structure (v5.0.0)
+### 20.2 Calibration JSON Structure (v5.0.0)
 
 The `calibration.json` file managed by `CalibrationStore` contains:
 
@@ -2002,7 +2423,7 @@ The `calibration.json` file managed by `CalibrationStore` contains:
 }
 ```
 
-### 19.3 Sample / Cooldown Filesystem Layout
+### 20.3 Sample / Cooldown Filesystem Layout
 
 ```
 samples/
@@ -2022,9 +2443,9 @@ samples/
 
 ---
 
-## 20. Examples and Minimal Usage Patterns
+## 21. Examples and Minimal Usage Patterns
 
-### 20.1 Quick Start — Template Experiment
+### 21.1 Quick Start — Template Experiment
 
 ```python
 from qubox import Session
@@ -2059,7 +2480,7 @@ if proposal:
 session.close()
 ```
 
-### 20.2 Custom Sequence Experiment
+### 21.2 Custom Sequence Experiment
 
 ```python
 from qubox import Session
@@ -2093,7 +2514,7 @@ result = session.exp.custom(
 )
 ```
 
-### 20.3 Custom Circuit Experiment
+### 21.3 Custom Circuit Experiment
 
 ```python
 circ = session.circuit("cat_state_prep")
@@ -2110,7 +2531,7 @@ result = session.exp.custom(
 )
 ```
 
-### 20.4 Notebook Pattern with Legacy Compatibility
+### 21.4 Notebook Pattern with Legacy Compatibility
 
 This is the pattern used in the tutorial notebook. It mixes the new `qubox`
 session API with legacy experiment classes imported through `qubox.notebook`:
@@ -2158,7 +2579,7 @@ result = session.exp.resonator.spectroscopy(
 )
 ```
 
-### 20.5 Analysis with qubox_tools
+### 21.5 Analysis with qubox_tools
 
 ```python
 import numpy as np
@@ -2181,14 +2602,14 @@ print(f"Resonance: {popt[0] / 1e9:.6f} GHz")
 
 ---
 
-## 21. Known Gaps and Inconsistencies
+## 22. Known Gaps and Inconsistencies
 
-### 21.1 README.md Alignment
+### 22.1 README.md Alignment
 
 > **Status:** Resolved. The `README.md` now correctly documents `qubox` as
 > the canonical user-facing package with `from qubox import Session` examples.
 
-### 21.2 Limited Template Adapter Coverage
+### 22.2 Limited Template Adapter Coverage
 
 Only five experiment templates are currently registered in `QMRuntime`:
 - `qubit.spectroscopy`
@@ -2202,7 +2623,7 @@ are accessible only through:
 - Legacy compatibility imports (`qubox.notebook`), or
 - Custom sequence/circuit composition (`session.exp.custom()`).
 
-### 21.3 qubox_v2_legacy Naming
+### 22.3 qubox_v2_legacy Naming
 
 The legacy package was renamed from `qubox_v2` to `qubox_v2_legacy` as part
 of the migration. All internal references (compat layer, tests, tools) now
@@ -2211,14 +2632,14 @@ correctly use `qubox_v2_legacy` as the import target.
 > **Status:** Resolved. The compat layer (`qubox.notebook`) and all
 > internal code reference `qubox_v2_legacy` consistently.
 
-### 21.4 Sweep Axis Center Resolution
+### 22.4 Sweep Axis Center Resolution
 
 When a `SweepAxis` has a `center` token (e.g. `"q0.ge"`), the center offset
 is resolved and added to the sweep values at execution time inside
 `QMRuntime`, not at construction time. This means `axis.values` contains
 *relative* values until the request is run.
 
-### 21.5 Custom Experiment Sweep Integration
+### 22.5 Custom Experiment Sweep Integration
 
 Sweep axes provided to `session.exp.custom()` are stored in circuit metadata
 as `"sweep_axes"` but are not yet used to drive actual QUA loop sweeps.
@@ -2227,7 +2648,7 @@ averaging count from `SweepPlan.averaging`, but the sweep variable is not
 looped over in the generated QUA program. Multi-point sweeps in custom
 experiments require further backend work.
 
-### 21.6 Analysis Pipeline Simplicity
+### 22.6 Analysis Pipeline Simplicity
 
 The built-in named analysis pipelines (`"raw"`, `"iq_magnitude"`,
 `"ramsey_like"`, `"classified"`) are quite basic — they extract I/Q data
@@ -2339,8 +2760,13 @@ session.close()
 | `experiment = PowerRabi(session)` / `experiment.run(...)` | `session.exp.qubit.power_rabi(...)` returns `ExperimentResult` |
 | `orch.run_analysis_patch_cycle(...)` | `result = session.exp.qubit.*(...); proposal = result.proposal(); proposal.apply(session)` |
 | Manual `PulseOperationManager` interaction | `session.ops.*` for semantic operations |
-| `session.pulse_mgr`, `session.hw` | `session.legacy_session.pulse_mgr`, `session.legacy_session.hw` |
-| `session.context_snapshot()` | `session.legacy_session.context_snapshot()` or `session.context_snapshot()` (forwarded) |
+| `session.legacy_session.pulse_mgr` | `session.pulse_mgr` (direct property) |
+| `session.legacy_session.hw` | `session.hardware` (direct property) |
+| `session.legacy_session.calibration` | `session.calibration` (direct property) |
+| `session.context_snapshot()` | `session.legacy_session.context_snapshot()` |
+| `from qubox.analysis import ...` | `from qubox_tools.algorithms.pipelines import ...` |
+| `from qubox.optimization import ...` | `from qubox_tools.optimization import ...` |
+| `QuaProgramManager(...)` | Use `HardwareController`, `ConfigEngine`, `ProgramRunner`, `QueueManager` |
 
 ### What Stays the Same
 

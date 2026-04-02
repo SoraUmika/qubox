@@ -8,10 +8,10 @@ import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase, create_clks_array
 from ..result import AnalysisResult, FitResult, ProgramBuildResult
-from ...analysis import post_process as pp
-from ...analysis.fitting import fit_and_wrap, build_fit_legend
-from ...analysis.cQED_models import power_rabi_model, temporal_rabi_model
-from ...analysis.analysis_tools import project_complex_to_line_real
+from qubox_tools.algorithms import post_process as pp
+from qubox_tools.fitting.routines import fit_and_wrap, build_fit_legend
+from qubox_tools.fitting.cqed import power_rabi_model, temporal_rabi_model
+from qubox_tools.algorithms.transforms import project_complex_to_line_real
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
 from ...programs.circuit_runner import CircuitRunner, make_power_rabi_circuit
@@ -60,6 +60,7 @@ class TemporalRabi(ExperimentBase):
             pulse, pulse_clks, pulse_gain, qb_therm_clks, n_avg,
             qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(
@@ -277,6 +278,7 @@ class PowerRabi(ExperimentBase):
                     op, truncate_clks, n_avg,
                     qb_el=attr.qb_el,
                     bindings=self._bindings_or_none,
+                    readout=self.readout_handle,
                 )
         else:
             prog = cQED_programs.power_rabi(
@@ -284,6 +286,7 @@ class PowerRabi(ExperimentBase):
                 op, truncate_clks, n_avg,
                 qb_el=attr.qb_el,
                 bindings=self._bindings_or_none,
+                readout=self.readout_handle,
             )
 
         return ProgramBuildResult(
@@ -511,6 +514,7 @@ class SequentialQubitRotations(ExperimentBase):
         prog = cQED_programs.sequential_qb_rotations(
             attr.qb_el, rotations, apply_avg, qb_therm_clks, n_shots,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(

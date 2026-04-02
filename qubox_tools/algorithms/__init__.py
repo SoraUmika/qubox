@@ -2,7 +2,7 @@
 
 from importlib import import_module
 
-_SUBMODULES = {"core", "metrics", "post_process", "post_selection", "transforms"}
+_SUBMODULES = {"core", "metrics", "post_process", "post_selection", "readout_analysis", "transforms"}
 
 
 def __getattr__(name):
@@ -13,4 +13,4 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["core", "metrics", "post_process", "post_selection", "transforms"]
+__all__ = ["core", "metrics", "post_process", "post_selection", "readout_analysis", "transforms"]

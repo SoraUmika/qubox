@@ -10,10 +10,10 @@ from ..experiment_base import (
     ExperimentBase, create_if_frequencies, create_clks_array,
 )
 from ..result import AnalysisResult, FitResult, ProgramBuildResult
-from ...analysis import post_process as pp
-from ...analysis.analysis_tools import two_state_discriminator
-from ...analysis.fitting import fit_and_wrap, generalized_fit, build_fit_legend
-from ...analysis.cQED_models import resonator_spec_model
+from qubox_tools.algorithms import post_process as pp
+from qubox_tools.algorithms.transforms import two_state_discriminator
+from qubox_tools.fitting.routines import fit_and_wrap, generalized_fit, build_fit_legend
+from qubox_tools.fitting.cqed import resonator_spec_model
 from ...hardware.program_runner import ExecMode, RunResult
 from ...programs import api as cQED_programs
 from ...programs.macros.measure import measureMacro
@@ -77,6 +77,7 @@ class ResonatorSpectroscopy(ExperimentBase):
             if_freqs, ro_therm, n_avg,
             ro_el=attr.ro_el,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(
@@ -249,6 +250,7 @@ class ResonatorPowerSpectroscopy(ExperimentBase):
         prog = cQED_programs.resonator_power_spectroscopy(
             if_freqs, gains, ro_therm, n_avg,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(
@@ -380,6 +382,7 @@ class ResonatorSpectroscopyX180(ExperimentBase):
             ro_therm, n_avg,
             qb_el=attr.qb_el,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(
@@ -531,6 +534,7 @@ class ReadoutTrace(ExperimentBase):
         prog = cQED_programs.readout_trace(
             ro_therm_clks, n_avg,
             bindings=self._bindings_or_none,
+            readout=self.readout_handle,
         )
 
         return ProgramBuildResult(
@@ -637,6 +641,7 @@ class ReadoutFrequencyOptimization(ExperimentBase):
             prog = cQED_programs.iq_blobs(
                 attr.ro_el, attr.qb_el, r180, qb_therm, n_runs,
                 bindings=self._bindings_or_none,
+                readout=self.readout_handle,
             )
             result = self.run_program(
                 prog, n_total=n_runs,
@@ -655,7 +660,7 @@ class ReadoutFrequencyOptimization(ExperimentBase):
             except Exception:
                 fidelities.append(0.0)
 
-        from ...analysis.output import Output
+        from qubox_tools.data.containers import Output
         output = Output({
             "frequencies": lo_freq + if_freqs,
             "fidelities": np.array(fidelities),

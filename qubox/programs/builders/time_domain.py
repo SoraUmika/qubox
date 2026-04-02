@@ -1,13 +1,17 @@
 
 from qm.qua import *
 from qualang_tools.loops import from_array
-from ..macros.measure import measureMacro
+from ..macros.measure import emit_measurement
 from ..measurement import MeasureSpec, emit_measurement_spec
 from ..macros.sequence import sequenceMacros
 import numpy as np
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ...core.bindings import ReadoutHandle
 
-def temporal_rabi(pulse, pulse_clks, pulse_gain, qb_therm_clks, n_avg, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+
+def temporal_rabi(pulse, pulse_clks, pulse_gain, qb_therm_clks, n_avg, *, qb_el: str | None = None, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Perform Rabi oscillations in the time domain by varying the pulse duration (in clock cycles).
 
@@ -41,8 +45,8 @@ def temporal_rabi(pulse, pulse_clks, pulse_gain, qb_therm_clks, n_avg, *, qb_el:
         with for_(n, 0, n < n_avg, n + 1):
             with for_(*from_array(pulse_clk, pulse_clks)):
                 play(pulse*amp(pulse_gain), qb_el, duration=pulse_clk)
-                align(qb_el, measureMacro.active_element())
-                emit_measurement_spec(measure_spec, targets=[I, Q])
+                align(qb_el, readout.element)
+                emit_measurement_spec(measure_spec, readout=readout, targets=[I, Q])
                 wait(int(qb_therm_clks))
                 save(I, I_st)
                 save(Q, Q_st)
@@ -53,7 +57,7 @@ def temporal_rabi(pulse, pulse_clks, pulse_gain, qb_therm_clks, n_avg, *, qb_el:
             n_st.save("iteration")
     return rabi_prog
 
-def power_rabi(qb_clock_len:int, gains, qb_therm_clks, pulse, truncate_clks, n_avg:int=1000, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+def power_rabi(qb_clock_len:int, gains, qb_therm_clks, pulse, truncate_clks, n_avg:int=1000, *, qb_el: str | None = None, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Perform Rabi oscillations in the amplitude domain by sweeping pulse amplitude (gain).
 
@@ -88,8 +92,8 @@ def power_rabi(qb_clock_len:int, gains, qb_therm_clks, pulse, truncate_clks, n_a
         with for_(n, 0, n < n_avg, n + 1):
             with for_(*from_array(g, gains)):
                 play(pulse*amp(g), qb_el, duration=qb_clock_len, truncate=truncate_clks)
-                align(qb_el, measureMacro.active_element())
-                emit_measurement_spec(measure_spec, targets=[I, Q])
+                align(qb_el, readout.element)
+                emit_measurement_spec(measure_spec, readout=readout, targets=[I, Q])
                 wait(int(qb_therm_clks))
                 save(I, I_st)
                 save(Q, Q_st)
@@ -100,7 +104,7 @@ def power_rabi(qb_clock_len:int, gains, qb_therm_clks, pulse, truncate_clks, n_a
             n_st.save("iteration")
     return power_rabi_prog
 
-def time_rabi_chevron(pulse, pulse_gain, qb_if, dfs, duration_clks, qb_therm_clks, n_avg:int=1, *, ro_el: str | None = None, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+def time_rabi_chevron(pulse, pulse_gain, qb_if, dfs, duration_clks, qb_therm_clks, n_avg:int=1, *, ro_el: str | None = None, qb_el: str | None = None, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Generate a Rabi chevron (time vs. frequency) by sweeping both pulse duration and detuning.
 
@@ -143,9 +147,9 @@ def time_rabi_chevron(pulse, pulse_gain, qb_if, dfs, duration_clks, qb_therm_clk
                 with for_(*from_array(f, dfs)):
                     update_frequency(qb_el, f + qb_if)
                     play(pulse * amp(pulse_gain), qb_el, duration=t)
-                    align(qb_el, measureMacro.active_element())
-                    measureMacro.measure(targets=[I,Q])
-                    wait(int(qb_therm_clks), measureMacro.active_element())
+                    align(qb_el, readout.element)
+                    emit_measurement(readout, targets=[I,Q])
+                    wait(int(qb_therm_clks), readout.element)
                     save(I, I_st)
                     save(Q, Q_st)
             save(n, n_st)
@@ -156,7 +160,7 @@ def time_rabi_chevron(pulse, pulse_gain, qb_if, dfs, duration_clks, qb_therm_clk
             n_st.save("iteration")
     return time_rabi_chevron_program
 
-def power_rabi_chevron(pulse, pulse_duration, qb_if, dfs, amplitudes, qb_therm_clks, n_avg:int=1, *, ro_el: str | None = None, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+def power_rabi_chevron(pulse, pulse_duration, qb_if, dfs, amplitudes, qb_therm_clks, n_avg:int=1, *, ro_el: str | None = None, qb_el: str | None = None, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Generate a Rabi chevron (power vs. frequency) by sweeping both pulse amplitude and detuning.
 
@@ -198,9 +202,9 @@ def power_rabi_chevron(pulse, pulse_duration, qb_if, dfs, amplitudes, qb_therm_c
                 with for_(*from_array(df, dfs)):
                     update_frequency(qb_el, df + qb_if)
                     play(pulse * amp(a), qb_el, duration=pulse_duration)
-                    align(qb_el, measureMacro.active_element())
-                    measureMacro.measure(targets=[I,Q])
-                    wait(int(qb_therm_clks), measureMacro.active_element())
+                    align(qb_el, readout.element)
+                    emit_measurement(readout, targets=[I,Q])
+                    wait(int(qb_therm_clks), readout.element)
                     save(I, I_st)
                     save(Q, Q_st)
             save(n, n_st)
@@ -210,7 +214,7 @@ def power_rabi_chevron(pulse, pulse_duration, qb_if, dfs, amplitudes, qb_therm_c
             n_st.save("iteration")
     return rabi_chevron_prog
 
-def ramsey_chevron(r90, qb_if, dfs, delay_clks, qb_therm_clks, n_avg:int=1, *, ro_el: str | None = None, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+def ramsey_chevron(r90, qb_if, dfs, delay_clks, qb_therm_clks, n_avg:int=1, *, ro_el: str | None = None, qb_el: str | None = None, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Perform Ramsey chevron: sweep both delay time and detuning to map out Ramsey fringes.
 
@@ -257,9 +261,9 @@ def ramsey_chevron(r90, qb_if, dfs, delay_clks, qb_therm_clks, n_avg:int=1, *, r
                     with else_():
                         play(r90, qb_el)
                         play(r90, qb_el)
-                    align(qb_el, measureMacro.active_element())
-                    I, Q = measureMacro.measure(targets=[I,Q])
-                    wait(int(qb_therm_clks), measureMacro.active_element())
+                    align(qb_el, readout.element)
+                    I, Q = emit_measurement(readout, targets=[I,Q])
+                    wait(int(qb_therm_clks), readout.element)
                     save(I, I_st)
                     save(Q, Q_st)
             save(n, n_st)
@@ -269,7 +273,7 @@ def ramsey_chevron(r90, qb_if, dfs, delay_clks, qb_therm_clks, n_avg:int=1, *, r
             n_st.save("iteration")
     return ramsey_chevron_prog
 
-def T1_relaxation(r180, wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+def T1_relaxation(r180, wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | None = None, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Measure T1 (energy relaxation) by applying a pi_val-pulse and then waiting variable times.
 
@@ -300,9 +304,9 @@ def T1_relaxation(r180, wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | 
         with for_(n, 0, n < n_avg, n + 1):
             with for_(*from_array(cycles_to_wait, wait_cycles_list)):
                 play(r180, qb_el)
-                align(qb_el, measureMacro.active_element())
+                align(qb_el, readout.element)
                 wait(cycles_to_wait)
-                measureMacro.measure(targets=[I,Q])
+                emit_measurement(readout, targets=[I,Q])
                 wait(int(qb_therm_clks))
                 save(I, I_st)
                 save(Q, Q_st)
@@ -313,7 +317,7 @@ def T1_relaxation(r180, wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | 
             n_st.save("iteration")
     return T1_prog
 
-def T2_ramsey(r90, wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+def T2_ramsey(r90, wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | None = None, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Measure T2* (Ramsey dephasing) by applying two pi_val/2 pulses separated by variable wait times.
 
@@ -344,8 +348,8 @@ def T2_ramsey(r90, wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | None 
         with for_(n, 0, n < n_avg, n + 1):
             with for_(*from_array(delay_clk, wait_cycles_list)):
                 sequenceMacros.qubit_ramsey(delay_clk, qb_el=qb_el, r90_1=r90, r90_2=r90)
-                align(qb_el, measureMacro.active_element())
-                measureMacro.measure(targets=[I,Q])
+                align(qb_el, readout.element)
+                emit_measurement(readout, targets=[I,Q])
                 wait(int(qb_therm_clks))
                 save(I, I_st)
                 save(Q, Q_st)
@@ -357,7 +361,7 @@ def T2_ramsey(r90, wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | None 
     return T2_ramsey_prog
 
 def T2_echo(r180, r90,
-            half_wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+            half_wait_cycles_list, qb_therm_clks, n_avg, *, qb_el: str | None = None, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Measure T2 (Hahn echo) by applying pi_val/2 -- wait -- pi_val -- wait -- pi_val/2 sequence,
     with the wait time swept in half-intervals.
@@ -390,8 +394,8 @@ def T2_echo(r180, r90,
         with for_(n, 0, n < n_avg, n + 1):
             with for_(*from_array(delay_clk, half_wait_cycles_list)):
                 sequenceMacros.qubit_echo(delay_clk, delay_clk, qb_el, r90, r180)
-                align(qb_el, measureMacro.active_element())
-                measureMacro.measure(targets=[I,Q])
+                align(qb_el, readout.element)
+                emit_measurement(readout, targets=[I,Q])
                 wait(int(qb_therm_clks))
                 save(I, I_st)
                 save(Q, Q_st)
@@ -411,7 +415,7 @@ def ac_stark_shift(
     n_avg: int,
     *,
     qb_el: str | None = None,
-    bindings: "ExperimentBindings | None" = None,
+    readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
@@ -439,9 +443,9 @@ def ac_stark_shift(
                     play(r180 * amp(1),  qb_el)
                     play(r180 * amp(-1), qb_el)
 
-                align(qb_el, measureMacro.active_element())
-                measureMacro.measure(targets=[I, Q], with_state=True, state=state)
-                wait(int(qb_therm_clks), measureMacro.active_element())
+                align(qb_el, readout.element)
+                emit_measurement(readout, targets=[I, Q], with_state=True, state=state)
+                wait(int(qb_therm_clks), readout.element)
 
                 save(I, I_st)
                 save(Q, Q_st)
@@ -456,7 +460,7 @@ def ac_stark_shift(
 
 
 def residual_photon_ramsey(test_ro_op, t_R_clks, t_relax_clk, t_buffer_clk, prep_e, test_ro_amp,
-                            r90, r180, qb_therm_clks, n_avg, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+                            r90, r180, qb_therm_clks, n_avg, *, qb_el: str | None = None, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Measure residual photons via a Ramsey experiment after a variable relaxation time. Based on
     PHYS. REV. APPLIED 5, 011001 (2016)
@@ -483,13 +487,13 @@ def residual_photon_ramsey(test_ro_op, t_R_clks, t_relax_clk, t_buffer_clk, prep
                 if prep_e:
                     play(r180 , qb_el)
                 align()
-                play(test_ro_op * amp(test_ro_amp), measureMacro.active_element())
+                play(test_ro_op * amp(test_ro_amp), readout.element)
                 align()
                 wait(t_relax_clk)
                 sequenceMacros.qubit_ramsey(t_R_clk, qb_el, r90, r90)
                 align()
                 wait(t_buffer_clk)
-                measureMacro.measure(targets=[I,Q])
+                emit_measurement(readout, targets=[I,Q])
                 wait(int(qb_therm_clks))
                 save(I, I_st)
                 save(Q, Q_st)

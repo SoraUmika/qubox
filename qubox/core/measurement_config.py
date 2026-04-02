@@ -17,14 +17,10 @@ Usage::
     # Build from the legacy measureMacro snapshot
     cfg = MeasurementConfig.from_measure_macro_snapshot(measureMacro._snapshot())
 
-    # Apply to measureMacro when you actually need to run
-    cfg.apply_to_measure_macro()
-
 .. versionadded:: 2.1.0
 """
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
@@ -174,55 +170,6 @@ class MeasurementConfig:
             element=None,
             source="measure_macro",
         )
-
-    def apply_to_measure_macro(self) -> None:
-        """Push this config into the global ``measureMacro`` singleton.
-
-        This is the *only* sanctioned way to configure the macro from a
-        ``MeasurementConfig``.  It replaces ad-hoc mutations scattered
-        across experiment code.
-
-        .. deprecated:: 2.1.0
-           Long-term, experiment builders should accept ``MeasurementConfig``
-           directly instead of reading from the singleton.
-        """
-        warnings.warn(
-            "apply_to_measure_macro() pushes state into the global singleton. "
-            "Prefer passing MeasurementConfig to experiment builders directly.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        from ..programs.macros.measure import measureMacro
-
-        disc_payload: dict[str, Any] = {}
-        for f in (
-            "threshold", "angle", "fidelity", "fidelity_definition",
-            "sigma_g", "sigma_e",
-        ):
-            val = getattr(self, f)
-            if val is not None:
-                disc_payload[f] = val
-        for f in ("rot_mu_g", "rot_mu_e", "unrot_mu_g", "unrot_mu_e"):
-            val = getattr(self, f)
-            if val is not None:
-                disc_payload[f] = val
-        disc_payload["norm_params"] = dict(self.norm_params) if self.norm_params else {}
-
-        measureMacro._update_readout_discrimination(disc_payload)
-
-        qual_payload: dict[str, Any] = {}
-        for f in ("alpha", "beta", "F", "Q", "V", "t01", "t10", "eta_g", "eta_e"):
-            val = getattr(self, f)
-            if val is not None:
-                qual_payload[f] = val
-        for f in ("confusion_matrix", "transition_matrix"):
-            val = getattr(self, f)
-            if val is not None:
-                qual_payload[f] = val
-        if self.affine_n is not None:
-            qual_payload["affine_n"] = dict(self.affine_n)
-
-        measureMacro._update_readout_quality(qual_payload)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-friendly dict."""

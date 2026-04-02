@@ -2,11 +2,15 @@
 from contextlib import nullcontext
 from qm.qua import *
 from qualang_tools.loops import from_array
-from ..macros.measure import measureMacro
+from ..macros.measure import emit_measurement
 from ..macros.sequence import sequenceMacros
 import numpy as np
 
-def sequential_qb_rotations(qb_el, rotations:list[str], apply_avg, qb_therm_clks, n_shots, *, bindings: "ExperimentBindings | None" = None):
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ...core.bindings import ReadoutHandle
+
+def sequential_qb_rotations(qb_el, rotations:list[str], apply_avg, qb_therm_clks, n_shots, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
         _names = ConfigBuilder.ephemeral_names(bindings)
@@ -27,7 +31,7 @@ def sequential_qb_rotations(qb_el, rotations:list[str], apply_avg, qb_therm_clks
             for rotation in rotations:
                 play(rotation, qb_el)
             align()
-            measureMacro.measure(targets=[I,Q], state=state)
+            emit_measurement(readout, targets=[I,Q], state=state)
             wait(int(2*qb_therm_clks))
             save(I, I_st)
             save(Q, Q_st)
@@ -45,7 +49,7 @@ def sequential_qb_rotations(qb_el, rotations:list[str], apply_avg, qb_therm_clks
             n_st.save("iteration")
     return seq_rot_prog
 
-def all_xy(qb_el, allxy_rotation_sequences, qb_therm_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
+def all_xy(qb_el, allxy_rotation_sequences, qb_therm_clks, n_avg, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
         _names = ConfigBuilder.ephemeral_names(bindings)
@@ -67,7 +71,7 @@ def all_xy(qb_el, allxy_rotation_sequences, qb_therm_clks, n_avg, *, bindings: "
                 play(rot1, qb_el)
                 play(rot2, qb_el)
                 align()
-                measureMacro.measure(targets=[I,Q], with_state=True, state=state)
+                emit_measurement(readout, targets=[I,Q], with_state=True, state=state)
                 wait(int(qb_therm_clks))
                 save(I, I_st)
                 save(Q, Q_st)
@@ -93,7 +97,7 @@ def randomized_benchmarking(
     interleave_op: str | None = None,
     interleave_clks: int | None = None,
     interleave_sentinel: int | None = None,   # <-- CHANGED: None => auto (max_id+1)
-    bindings: "ExperimentBindings | None" = None,
+    readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
@@ -144,7 +148,7 @@ def randomized_benchmarking(
                 seq_duration = int(primitive_clks) * n_prim + int(interleave_clks) * n_inter
 
                 align()
-                wait(int(seq_duration) + int(guard_clks), measureMacro.active_element())
+                wait(int(seq_duration) + int(guard_clks), readout.element)
 
                 seq_arr = np.asarray(seq_ids, dtype=int)
                 if seq_arr.ndim != 1:
@@ -160,7 +164,7 @@ def randomized_benchmarking(
                             with case_(int(interleave_sentinel)):
                                 play(str(interleave_op), qb_el)
 
-                measureMacro.measure(targets=[I, Q], with_state=True, state=state)
+                emit_measurement(readout, targets=[I, Q], with_state=True, state=state)
                 wait(int(2 * qb_therm_clks))
 
                 save(I, I_st)
@@ -185,7 +189,7 @@ def drag_calibration_YALE(
     qb_therm_clks: int,
     n_avg: int = 200,
     *,
-    bindings: "ExperimentBindings | None" = None,
+    readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     if bindings is not None:
         from ...core.bindings import ConfigBuilder
@@ -210,7 +214,7 @@ def drag_calibration_YALE(
                 play(y90 * amp(a, 0, 0, 1), qb_el)
                 align()
 
-                measureMacro.measure(targets=[I, Q])
+                emit_measurement(readout, targets=[I, Q])
 
                 wait(int(qb_therm_clks))
                 save(I, I1_st)
@@ -221,7 +225,7 @@ def drag_calibration_YALE(
                 play(x90 * amp(1, 0, 0, a), qb_el)
 
                 align()
-                measureMacro.measure(targets=[I, Q])
+                emit_measurement(readout, targets=[I, Q])
                 wait(int(qb_therm_clks))
                 save(I, I2_st)
                 save(Q, Q2_st)
@@ -245,7 +249,7 @@ def drag_calibration_GOOGLE(
     qb_therm_clks: int,
     n_avg: int = 200,
     *,
-    bindings: "ExperimentBindings | None" = None,
+    readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     """
     Google-style DRAG calibration:
@@ -262,7 +266,7 @@ def drag_calibration_GOOGLE(
     elif qb_el is None:
         raise ValueError("qb_el is required when bindings are not provided")
 
-    ro_el = measureMacro.active_element()
+    ro_el = readout.element
 
     with program() as drag:
         # QUA vars
@@ -297,7 +301,7 @@ def drag_calibration_GOOGLE(
 
                     # measure after the burst
                     align(qb_el, ro_el)
-                    measureMacro.measure(with_state=True, state=state, targets=[I, Q])
+                    emit_measurement(readout, with_state=True, state=state, targets=[I, Q])
 
                     # passive reset
                     wait(int(qb_therm_clks), ro_el)

@@ -26,6 +26,7 @@ from .config import (
 )
 from .experiment_context import ExperimentContext
 from .hardware_definition import HardwareDefinition
+from .device_metadata import DeviceMetadata
 from .bindings import (
     ChannelRef,
     OutputBinding,
@@ -92,6 +93,7 @@ __all__ = [
     # context & hardware
     "ExperimentContext",
     "HardwareDefinition",
+    "DeviceMetadata",
     # bindings
     "ChannelRef",
     "OutputBinding",

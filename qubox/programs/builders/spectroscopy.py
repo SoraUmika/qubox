@@ -1,11 +1,15 @@
 
 from qm.qua import *
 from qualang_tools.loops import from_array
-from ..macros.measure import measureMacro
+from ..macros.measure import emit_measurement
 from ..macros.sequence import sequenceMacros
 import numpy as np
 
-def readout_trace(ro_therm_clks, n_avg, *, bindings: "ExperimentBindings | None" = None):
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ...core.bindings import ReadoutHandle
+
+def readout_trace(ro_therm_clks, n_avg, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Acquire and average raw ADC traces for a given readout resonator element.
     Parameters:
@@ -21,8 +25,8 @@ def readout_trace(ro_therm_clks, n_avg, *, bindings: "ExperimentBindings | None"
         n_st = declare_stream()
 
         with for_(n, 0, n < n_avg, n + 1):
-            reset_if_phase(measureMacro.active_element())
-            measureMacro.measure(adc_stream=adc_st)
+            reset_if_phase(readout.element)
+            emit_measurement(readout, adc_stream=adc_st)
             wait(int(ro_therm_clks))
             save(n, n_st)
             wait(25_000)
@@ -41,7 +45,7 @@ def resonator_spectroscopy(
     n_avg: int = 1,
     *,
     ro_el: str | None = None,
-    bindings: "ExperimentBindings | None" = None,
+    readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     """
     Sweep readout IF frequencies to perform 1D resonator spectroscopy.
@@ -77,7 +81,7 @@ def resonator_spectroscopy(
         with for_(n, 0, n < n_avg, n + 1):
             with for_(*from_array(f, if_frequencies)):
                 update_frequency(ro_el, f)
-                measureMacro.measure(targets=[I,Q])
+                emit_measurement(readout, targets=[I,Q])
                 wait(int(depletion_clks), ro_el)
                 save(I, I_st)
                 save(Q, Q_st)
@@ -94,7 +98,7 @@ def resonator_power_spectroscopy(
     depletion_clks=None,
     n_avg: int = 1,
     *,
-    bindings: "ExperimentBindings | None" = None,
+    readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None,
 ):
     """
     Perform a 2D sweep of readout IF and readout gain to map out resonator response versus power.
@@ -121,10 +125,10 @@ def resonator_power_spectroscopy(
         n_st = declare_stream()
         with for_(n, 0, n < n_avg, n + 1):
             with for_(*from_array(if_req, if_frequencies)):
-                update_frequency(measureMacro.active_element(), if_req)
+                update_frequency(readout.element, if_req)
                 with for_each_(g, gains):
-                    measureMacro.measure(targets=[I,Q], gain=g)
-                    wait(int(depletion_clks), measureMacro.active_element())
+                    emit_measurement(readout, targets=[I,Q], gain=g)
+                    wait(int(depletion_clks), readout.element)
                     save(I, I_st)
                     save(Q, Q_st)
             save(n, n_st)
@@ -134,7 +138,7 @@ def resonator_power_spectroscopy(
             Q_st.buffer(len(gains)).buffer(len(if_frequencies)).average().save("Q")
     return resonator_spec_2D
 
-def qubit_spectroscopy(sat_pulse, if_frequencies, qb_gain, qb_len, qb_therm_clks: int, n_avg: int = 1, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+def qubit_spectroscopy(sat_pulse, if_frequencies, qb_gain, qb_len, qb_therm_clks: int, n_avg: int = 1, *, qb_el: str | None = None, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Perform spectroscopy on the qubit by sweeping drive IF and measuring readout response.
 
@@ -170,9 +174,9 @@ def qubit_spectroscopy(sat_pulse, if_frequencies, qb_gain, qb_len, qb_therm_clks
                     play(sat_pulse * amp(qb_gain), qb_el, duration=qb_len)
                 else:
                     play(sat_pulse * amp(qb_gain), qb_el)
-                align(qb_el, measureMacro.active_element())
-                measureMacro.measure(targets=[I,Q])
-                wait(int(qb_therm_clks), measureMacro.active_element())
+                align(qb_el, readout.element)
+                emit_measurement(readout, targets=[I,Q])
+                wait(int(qb_therm_clks), readout.element)
                 save(I, I_st)
                 save(Q, Q_st)
             save(n, n_st)
@@ -182,7 +186,7 @@ def qubit_spectroscopy(sat_pulse, if_frequencies, qb_gain, qb_len, qb_therm_clks
             n_st.save("iteration")
         return qubit_spec
 
-def qubit_spectroscopy_ef(sat_pulse, if_frequencies, qb_ge_if, qb_gain, qb_len, r180, qb_therm_clks, n_avg:int=1, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+def qubit_spectroscopy_ef(sat_pulse, if_frequencies, qb_ge_if, qb_gain, qb_len, r180, qb_therm_clks, n_avg:int=1, *, qb_el: str | None = None, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Perform |e>-|f> spectroscopy by first preparing |e> via a pi_val-pulse (r180), then sweeping drive IF.
 
@@ -221,8 +225,8 @@ def qubit_spectroscopy_ef(sat_pulse, if_frequencies, qb_ge_if, qb_gain, qb_len, 
 
                 update_frequency(qb_el, if_freq)
                 play(sat_pulse * amp(qb_gain), qb_el, duration=qb_len)
-                align(measureMacro.active_element(), qb_el)
-                measureMacro.measure(targets=[I,Q])
+                align(readout.element, qb_el)
+                emit_measurement(readout, targets=[I,Q])
                 wait(int(qb_therm_clks))
                 save(I, I_st)
                 save(Q, Q_st)
@@ -233,7 +237,7 @@ def qubit_spectroscopy_ef(sat_pulse, if_frequencies, qb_ge_if, qb_gain, qb_len, 
             n_st.save("iteration")
         return qubit_spec
 
-def resonator_spectroscopy_x180(if_frequencies, r180, qb_therm_clks, n_avg, *, qb_el: str | None = None, bindings: "ExperimentBindings | None" = None):
+def resonator_spectroscopy_x180(if_frequencies, r180, qb_therm_clks, n_avg, *, qb_el: str | None = None, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
     """
     Pulsed resonator spectroscopy sweeping the readout IF.
     For each IF, measure twice:
@@ -265,18 +269,18 @@ def resonator_spectroscopy_x180(if_frequencies, r180, qb_therm_clks, n_avg, *, q
         with for_(n, 0, n < n_avg, n + 1):
             with for_(*from_array(ro_if, if_frequencies)):
                 # -------- Ground state measurement --------
-                update_frequency(measureMacro.active_element(), ro_if)
+                update_frequency(readout.element, ro_if)
                 align()
-                measureMacro.measure(targets=[I, Q])
-                wait(int(qb_therm_clks), measureMacro.active_element())
+                emit_measurement(readout, targets=[I, Q])
+                wait(int(qb_therm_clks), readout.element)
                 save(I, I_st); save(Q, Q_st)
 
                 # -------- Excited state measurement --------
-                update_frequency(measureMacro.active_element(), ro_if)
+                update_frequency(readout.element, ro_if)
                 play(r180, qb_el)
                 align()
-                measureMacro.measure(targets=[I, Q])
-                wait(int(qb_therm_clks), measureMacro.active_element())
+                emit_measurement(readout, targets=[I, Q])
+                wait(int(qb_therm_clks), readout.element)
                 save(I, I_st); save(Q, Q_st)
             save(n, n_st)
         with stream_processing():

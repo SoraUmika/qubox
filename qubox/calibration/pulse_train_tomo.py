@@ -13,7 +13,7 @@ from qm.qua import play, align, declare, for_
 from IPython.display import clear_output
 
 # Canonical analysis functions — re-export for backward compat
-from ..analysis.pulse_train_models import (  # noqa: F401
+from qubox_tools.fitting.pulse_train import (  # noqa: F401
     apply_relaxation,
     apply_rz,
     apply_theta_phi_correction,

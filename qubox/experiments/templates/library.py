@@ -110,6 +110,45 @@ class QubitExperimentLibrary:
         )
         return self.session.backend.run(request)
 
+    def spectroscopy_ef(self, *, qubit: str, readout: str, freq, drive_amp: float = 0.02,
+                        ge_prep_pulse: str = "ge_x180", **kwargs):
+        """EF-transition qubit spectroscopy (requires |g⟩→|e⟩ prep pulse)."""
+        n_avg = int(kwargs.get("n_avg", 1000))
+        request = ExecutionRequest(
+            kind="template",
+            template="qubit.spectroscopy_ef",
+            targets={"qubit": qubit, "readout": readout},
+            params={"freq": freq, "drive_amp": drive_amp, "ge_prep_pulse": ge_prep_pulse, **kwargs},
+            sweep=self.session.ensure_sweep_plan(freq, averaging=n_avg),
+            shots=n_avg,
+        )
+        return self.session.backend.run(request)
+
+    def sequential_rotations(self, *, qubit: str, readout: str, rotations: list[str] | None = None, **kwargs):
+        """Play a sequence of named rotation pulses and measure."""
+        n_shots = int(kwargs.get("n_shots", kwargs.get("n_avg", 1000)))
+        request = ExecutionRequest(
+            kind="template",
+            template="qubit.sequential_rotations",
+            targets={"qubit": qubit, "readout": readout},
+            params={"rotations": rotations, **kwargs},
+            shots=n_shots,
+        )
+        return self.session.backend.run(request)
+
+    def ramsey_chevron(self, *, qubit: str, readout: str, freq_span: float, df: float,
+                       max_delay: int, dt: int = 4, **kwargs):
+        """2D Ramsey chevron (detuning × delay)."""
+        n_avg = int(kwargs.get("n_avg", 1000))
+        request = ExecutionRequest(
+            kind="template",
+            template="qubit.ramsey_chevron",
+            targets={"qubit": qubit, "readout": readout},
+            params={"freq_span": freq_span, "df": df, "max_delay": max_delay, "dt": dt, **kwargs},
+            shots=n_avg,
+        )
+        return self.session.backend.run(request)
+
 
 # ---------------------------------------------------------------------------
 # Resonator experiments
@@ -137,6 +176,19 @@ class ResonatorExperimentLibrary:
             template="resonator.power_spectroscopy",
             targets={"readout": readout},
             params={"freq": freq, "gain_min": gain_min, "gain_max": gain_max, **kwargs},
+            sweep=self.session.ensure_sweep_plan(freq, averaging=n_avg),
+            shots=n_avg,
+        )
+        return self.session.backend.run(request)
+
+    def spectroscopy_x180(self, *, qubit: str, readout: str, freq, r180: str = "x180", **kwargs):
+        """Resonator spectroscopy with qubit driven to |e⟩ via x180 pulse."""
+        n_avg = int(kwargs.get("n_avg", 1000))
+        request = ExecutionRequest(
+            kind="template",
+            template="resonator.spectroscopy_x180",
+            targets={"qubit": qubit, "readout": readout},
+            params={"freq": freq, "r180": r180, **kwargs},
             sweep=self.session.ensure_sweep_plan(freq, averaging=n_avg),
             shots=n_avg,
         )
@@ -181,6 +233,30 @@ class ReadoutExperimentLibrary:
             targets={"qubit": qubit, "readout": readout},
             params={**kwargs},
             shots=n_samples,
+        )
+        return self.session.backend.run(request)
+
+    def ge_raw_trace(self, *, qubit: str, readout: str, ro_freq: float = 0.0, **kwargs):
+        """Raw ADC trace for |g⟩ and |e⟩ states."""
+        n_avg = int(kwargs.get("n_avg", 1000))
+        request = ExecutionRequest(
+            kind="template",
+            template="readout.ge_raw_trace",
+            targets={"qubit": qubit, "readout": readout},
+            params={"ro_freq": ro_freq, **kwargs},
+            shots=n_avg,
+        )
+        return self.session.backend.run(request)
+
+    def leakage_benchmark(self, *, qubit: str, readout: str, control_bits: list[int] | None = None, **kwargs):
+        """Readout leakage benchmarking with interleaved control sequences."""
+        n_avg = int(kwargs.get("n_avg", 1000))
+        request = ExecutionRequest(
+            kind="template",
+            template="readout.leakage_benchmark",
+            targets={"qubit": qubit, "readout": readout},
+            params={"control_bits": control_bits or [0, 1], **kwargs},
+            shots=n_avg,
         )
         return self.session.backend.run(request)
 
@@ -262,6 +338,56 @@ class StorageExperimentLibrary:
         )
         return self.session.backend.run(request)
 
+    def ramsey(self, *, qubit: str, readout: str, storage: str, delay, disp_pulse: str = "const_alpha", **kwargs):
+        """Storage Ramsey (T2) measurement."""
+        n_avg = int(kwargs.get("n_avg", 200))
+        request = ExecutionRequest(
+            kind="template",
+            template="storage.ramsey",
+            targets={"qubit": qubit, "readout": readout, "storage": storage},
+            params={"delay": delay, "disp_pulse": disp_pulse, **kwargs},
+            sweep=self.session.ensure_sweep_plan(delay, averaging=n_avg),
+            shots=n_avg,
+        )
+        return self.session.backend.run(request)
+
+    def fock_spectroscopy(self, *, qubit: str, readout: str, storage: str, probe_fqs, **kwargs):
+        """Fock-state-resolved spectroscopy."""
+        n_avg = int(kwargs.get("n_avg", 100))
+        request = ExecutionRequest(
+            kind="template",
+            template="storage.fock_spectroscopy",
+            targets={"qubit": qubit, "readout": readout, "storage": storage},
+            params={"probe_fqs": probe_fqs, **kwargs},
+            shots=n_avg,
+        )
+        return self.session.backend.run(request)
+
+    def fock_ramsey(self, *, qubit: str, readout: str, storage: str, delay=None, **kwargs):
+        """Fock-state-resolved Ramsey."""
+        n_avg = int(kwargs.get("n_avg", 1000))
+        request = ExecutionRequest(
+            kind="template",
+            template="storage.fock_ramsey",
+            targets={"qubit": qubit, "readout": readout, "storage": storage},
+            params={"delay": delay, **kwargs},
+            sweep=self.session.ensure_sweep_plan(delay, averaging=n_avg) if delay is not None else None,
+            shots=n_avg,
+        )
+        return self.session.backend.run(request)
+
+    def fock_power_rabi(self, *, qubit: str, readout: str, storage: str, **kwargs):
+        """Fock-state-resolved power Rabi."""
+        n_avg = int(kwargs.get("n_avg", 1000))
+        request = ExecutionRequest(
+            kind="template",
+            template="storage.fock_power_rabi",
+            targets={"qubit": qubit, "readout": readout, "storage": storage},
+            params={**kwargs},
+            shots=n_avg,
+        )
+        return self.session.backend.run(request)
+
 
 # ---------------------------------------------------------------------------
 # Tomography experiments
@@ -309,6 +435,18 @@ class ResetExperimentLibrary:
             targets={"qubit": qubit, "readout": readout},
             params={"threshold": threshold, **kwargs},
             shots=int(kwargs.get("n_avg", 200)),
+        )
+        return self.session.backend.run(request)
+
+    def passive_benchmark(self, *, qubit: str, readout: str, bit_size: int = 1000, **kwargs):
+        """Benchmark passive reset fidelity with random bit sequences."""
+        n_shots = int(kwargs.get("num_shots", kwargs.get("n_avg", 20_000)))
+        request = ExecutionRequest(
+            kind="template",
+            template="reset.passive_benchmark",
+            targets={"qubit": qubit, "readout": readout},
+            params={"bit_size": bit_size, **kwargs},
+            shots=n_shots,
         )
         return self.session.backend.run(request)
 

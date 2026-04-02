@@ -31,6 +31,421 @@ Each entry must include:
 
 ## Entries
 
+### 2026-04-02 — Architecture Extension: CircuitCompiler Rename + Registry-Based Dispatch
+
+**Classification: Major**
+
+**Summary:**
+
+Three-phase architecture extension to improve extensibility and naming clarity:
+
+**Phase 1 — Rename V2-suffixed symbols:**
+- `CircuitRunnerV2` → `CircuitCompiler` (class name now reflects its compiler role)
+- `compile_v2()` → `compile_program()` (canonical method name)
+- Backward-compatible aliases retained: `CircuitRunnerV2 = CircuitCompiler` in
+  `circuit_compiler.py`, `compile_v2()` emits `DeprecationWarning` and delegates
+  to `compile_program()`
+- All call sites, tests, and golden files updated
+
+**Phase 2 — Gate Lowerer Registry (Strategy pattern):**
+- New `qubox/programs/gate_lowerers/` package with `protocol.py` and `builtins.py`
+- `GateLowerer` Protocol: `__call__(ctx, gate, *, gate_index, targets, measurements, resolved_params)`
+- `CompilationContext` Protocol: typed interface for lowerer ↔ compiler interaction
+- 7 built-in lowerer classes: `MeasurementLowerer`, `IdleLowerer`, `FrameUpdateLowerer`,
+  `PlayPulseLowerer`, `QubitRotationLowerer`, `DisplacementLowerer`, `SQRLowerer`
+- `build_default_registry()` creates 13-entry mapping (gate types + aliases)
+- `CircuitCompiler._lower_gate()` dispatch replaced: if/elif chain → registry lookup
+- `CircuitCompiler.register_lowerer(gate_type, lowerer)` — public extension point
+
+**Phase 3 — Sweep Strategy Registry:**
+- New `qubox/programs/sweep_strategies.py` module
+- `SweepStrategy` Protocol: `qua_type`, `apply(ctx, qua_var, target, parameter)`
+- 4 built-in strategies: `FrequencySweepStrategy`, `AmplitudeSweepStrategy`,
+  `WaitSweepStrategy`, `PhaseSweepStrategy`
+- `classify_sweep_parameter()` — alias-based parameter name → strategy key mapping
+- `build_default_sweep_registry()` returns 4-entry strategy map
+- `CircuitCompiler._emit_sweep_body()` and `_classify_sweep_parameter()` now delegate
+  to strategies instead of hardcoded conditionals
+- `CircuitCompiler.register_sweep_strategy(name, strategy)` — public extension point
+- QUA variable type declaration now reads `strategy.qua_type` instead of hardcoded check
+
+**Test conftest modernization:**
+- `tests/gate_architecture/conftest.py` migrated from `qubox_v2_legacy.*` → `qubox.*`
+- SDK stubs and `qubox_tools` stubs preserved for test isolation
+- Minimal `qubox` package pre-registration to bypass heavy `__init__.py` imports
+
+**Files affected:**
+- `qubox/programs/circuit_compiler.py` — renamed class, registry-based dispatch
+- `qubox/programs/circuit_runner.py` — `compile_program()` canonical, `compile_v2()` deprecated
+- `qubox/programs/circuit_execution.py` — updated call site
+- `qubox/programs/circuit_protocols.py` — updated warning string
+- `qubox/backends/qm/runtime.py` — updated call site
+- `qubox/programs/gate_lowerers/__init__.py` — new package
+- `qubox/programs/gate_lowerers/protocol.py` — GateLowerer + CompilationContext protocols
+- `qubox/programs/gate_lowerers/builtins.py` — 7 built-in lowerers + default registry
+- `qubox/programs/sweep_strategies.py` — SweepStrategy protocol + 4 built-in strategies
+- `tests/gate_architecture/conftest.py` — migrated from qubox_v2_legacy to qubox
+- `tests/gate_architecture/test_gate_architecture.py` — CircuitCompiler refs + import fix
+- `tests/gate_architecture/golden/active_reset_analysis_snapshot.txt` — golden file update
+- `docs/CHANGELOG.md`
+
+---
+
+### 2026-04-01 — P0/P1/P2 Architecture Patches: Custom Sweeps, Adapter Coverage, @experiment Decorator
+
+**Classification: Major**
+
+**Summary:**
+
+Three architectural improvement patches addressing the 6.4/10 velocity assessment:
+
+**P0 — Custom Sweep Loop Generation (CircuitRunnerV2):**
+- `CircuitRunnerV2.compile()` now detects `sweep_axes` from circuit metadata and
+  emits nested QUA `for_()` loops via `from_array()` from `qualang_tools.loops`
+- Added `_SweepAxisRuntime` dataclass for sweep state during program generation
+- Added helper methods: `_parse_sweep_axes()`, `_emit_sweep_body()`,
+  `_classify_sweep_parameter()`, `_infer_sweep_target()`
+- `_lower_idle_gate()` is sweep-aware: uses QUA variable when gate has no concrete
+  duration and a wait sweep is active
+- `_lower_play_pulse()` is sweep-aware: uses `amp(sweep_var)` when no concrete
+  amplitude and an amplitude sweep is active
+- Stream processing auto-chains `.buffer(sweep_len).average()` for sweep dimensions
+- `lower_to_legacy_circuit()` now passes `SweepAxis.metadata` through to circuit metadata
+
+**P1 — Template Adapter Coverage (20 → 31 registered):**
+- 11 new `LegacyExperimentAdapter` entries: `qubit.spectroscopy_ef`,
+  `resonator.spectroscopy_x180`, `qubit.sequential_rotations`, `qubit.ramsey_chevron`,
+  `readout.ge_raw_trace`, `reset.passive_benchmark`, `readout.leakage_benchmark`,
+  `storage.ramsey`, `storage.fock_spectroscopy`, `storage.fock_ramsey`,
+  `storage.fock_power_rabi`
+- 11 new arg builder functions for translating `ExecutionRequest` params to experiment args
+- 11 new library methods on `QubitExperimentLibrary`, `ResonatorExperimentLibrary`,
+  `ReadoutExperimentLibrary`, `ResetExperimentLibrary`, `StorageExperimentLibrary`
+- Coverage: 31/51 classes (61%) registered; remaining 10 can't be single-program adapted,
+  10 have complex state dependencies
+
+**P2 — @experiment Decorator:**
+- New `qubox/experiments/decorator.py` with `@experiment()` decorator for named
+  experiment registration
+- Registry-based pattern: `experiment(name, n_avg, category)` → `ExperimentDefinition`
+- Exported from `qubox.experiments`: `experiment`, `get_registered_experiments`,
+  `lookup_experiment`
+
+**Files affected:**
+- `qubox/programs/circuit_compiler.py` — sweep loop generation + helper methods
+- `qubox/backends/qm/lowering.py` — metadata passthrough
+- `qubox/backends/qm/runtime.py` — 11 new adapters + arg builders
+- `qubox/experiments/templates/library.py` — 11 new library methods
+- `qubox/experiments/decorator.py` — new file
+- `qubox/experiments/__init__.py` — re-export decorator
+- `docs/CHANGELOG.md`
+
+---
+
+### 2026-04-01 — measureMacro Phase 6: Dead Code & Deprecation Cleanup
+
+**Classification: Moderate**
+
+**Summary:**
+
+Final cleanup pass on `measureMacro`. Removes 237 lines of dead code (1605 → 1368 lines):
+
+- **Removed 4 dead analysis wrappers** that had zero external callers (pure functions
+  remain in `readout_analysis.py`):
+  `compute_Pe_from_S()`, `compute_posterior_weights()`,
+  `compute_posterior_state_weight()`, `check_iq_blob_rotation_consistency_2d()`
+- **Removed `set_save_raw_data()`** method and `_save_raw_data` class variable (no callers)
+- **Removed `measure_with_binding()`** standalone function — superseded by
+  `emit_measurement()`, was never called from any production code
+- **Stripped all 5 `DeprecationWarning` calls** from `active_element()`, `set_pulse_op()`,
+  `_update_readout_discrimination()`, `_update_readout_quality()`, and `measure()` —
+  these methods are still actively used across 12+ production files with no complete
+  migration path, so the warnings were premature
+- **Removed unused `import warnings`** from module top-level
+
+**Validation:** 23 PASS, 1 SKIP, 0 FAIL (unchanged baseline).
+
+**Files affected:**
+- `qubox/programs/macros/measure.py`
+- `docs/CHANGELOG.md`
+
+---
+
+### 2026-04-01 — measureMacro Phase 4+5: Extract Analysis Utilities & Dead Code Removal
+
+**Classification: Major**
+
+**Summary:**
+
+Phase 4 extracts four analysis methods from `measureMacro` into pure functions in
+`qubox_tools/algorithms/readout_analysis.py`. Phase 5 removes 18 dead methods from
+`measureMacro` (572 lines removed) and adds deprecation warnings to the three
+remaining legacy API methods. Also fixes `emit_measurement()` to accept `with_state`,
+`axis`, `x90`, `yn90`, `qb_el` parameters and restores the internally-required
+`use_weight_set()` method that was incorrectly marked as dead.
+
+**New module:**
+
+- `qubox_tools/algorithms/readout_analysis.py` — 4 pure analysis functions:
+  - `compute_Pe_from_S(S, rot_mu_g, rot_mu_e)` — P(e) from projected IQ signal
+  - `compute_posterior_weights(S, disc_params, *, model_type, pi_e, require_finite)` — Bayesian posterior weights
+  - `compute_posterior_state_weight(S, disc_params, *, target_state, model_type, pi_e, require_finite)` — single-state convenience wrapper
+  - `check_iq_blob_rotation_consistency_2d(S_g, S_e, disc_params, ...)` — 2D IQ blob rotation consistency check
+
+**measureMacro thin wrappers now delegate to the new module:**
+
+- `measureMacro.compute_Pe_from_S()` → `readout_analysis.compute_Pe_from_S()`
+- `measureMacro.compute_posterior_weights()` → `readout_analysis.compute_posterior_weights()`
+- `measureMacro.compute_posterior_state_weight()` → `readout_analysis.compute_posterior_state_weight()`
+- `measureMacro.check_iq_blob_rotation_consistency_2d()` → `readout_analysis.check_iq_blob_rotation_consistency_2d()`
+
+**Deprecation warnings added to:**
+
+- `measureMacro.active_element()` — use `ReadoutHandle.element`
+- `measureMacro.set_pulse_op()` — use `ReadoutHandle` / `emit_measurement()`
+- `measureMacro.measure()` — use `emit_measurement()`
+
+**emit_measurement() signature expanded:**
+
+- Added `with_state`, `axis`, `x90`, `yn90`, `qb_el` parameters for basis rotation
+  and state discrimination parity with `measureMacro.measure()`
+
+**Dead methods removed from measureMacro (~18):**
+
+- `set_active_op`, `show_settings`, `get_gain`, `default`, `get_IQ_mod`,
+  `use_dual_demod`, `get_demod_weight_len`, `report_thresholding`,
+  `compute_Pe_from_IQ`, `compute_posterior_model`, `compute_posterior_confusion`,
+  `calibrate_readout_qua`, `export_readout_calibration`, and others
+
+**Import path fixes:**
+
+- `qubox.analysis.analysis_tools` → `qubox_tools.algorithms.transforms`
+- `qubox.analysis.post_selection` → `qubox_tools.algorithms.post_selection`
+
+**Validation:**
+
+- 23 PASS, 1 SKIP, 0 FAIL on `tools/test_all_simulations.py` (matches baseline)
+- All 4 analysis wrapper functions tested with synthetic data
+- Dead method absence verified, live method presence verified
+
+**Files modified:**
+
+- `qubox/programs/macros/measure.py` — thin wrappers, dead code removal, import fixes, deprecation warnings, `use_weight_set` restored, `emit_measurement()` expanded
+- `qubox_tools/algorithms/readout_analysis.py` — new module (4 pure analysis functions)
+- `qubox_tools/algorithms/__init__.py` — added `readout_analysis` to exports
+
+---
+
+### 2026-03-31 — Legacy Elimination: Remove backward-compat code, resolve all deprecation warnings
+
+**Classification: Major**
+
+**Summary:**
+
+Comprehensive legacy elimination pass.  All backward-compatibility shims,
+deprecated module proxies, and `DeprecationWarning` code paths have been removed.
+The `simulation_mode` default has been changed from `False` to `True` everywhere
+so sessions open safely by default.
+
+**Breaking changes:**
+
+1. **`Session.__getattr__` forwarding removed** — accessing undefined attributes
+   on `Session` now raises `AttributeError` instead of silently delegating to
+   `SessionManager` with a deprecation warning.  Use `session.hardware`,
+   `session.calibration`, `session.pulse_mgr`, etc. (new direct properties).
+2. **`SessionManager` compat aliases removed** — `hw`, `pulseOpMngr`, `mgr`,
+   `quaProgMngr` properties deleted.  Use `hardware`, `pulse_mgr` directly.
+3. **`simulation_mode` default → `True`** — `Session.open()`,
+   `SessionManager.__init__()`, `open_shared_session()`,
+   `require_shared_session()`, `open_notebook_stage()` all default to
+   simulation mode.  Pass `simulation_mode=False` for real hardware execution.
+4. **`QuaProgramManager` removed** — the backward-compat facade combining the
+   four split hardware classes has been deleted.  Use `HardwareController`,
+   `ConfigEngine`, `ProgramRunner`, `QueueManager` directly.
+5. **`qubox.analysis` shim removed** — import from `qubox_tools` directly.
+6. **`qubox.optimization` shim removed** — import from
+   `qubox_tools.optimization` directly.
+7. **Bare calibration keys rejected** — `T1`, `T2_star`, `T2_echo` (without
+   unit suffix) are no longer auto-converted.  Provide `T1_s` / `T1_ns`,
+   `T2_star_s` / `T2_star_ns`, `T2_echo_s` / `T2_echo_ns`.
+8. **`MeasurementConfig.apply_to_measure_macro()` removed** — pass
+   `MeasurementConfig` to experiment builders directly.
+9. **`ReadoutConfig` legacy value names rejected** —
+   `legacy_ge_diff_norm` and `legacy_discriminator` no longer auto-convert.
+   Use `ge_diff_norm` and `optimal_discriminator`.
+10. **Waveform `delta` parameter removed** — use `anharmonicity`.
+
+**Files modified:**
+
+- `qubox/session/session.py` — complete rewrite: remove `__getattr__`, add 8
+  direct `@property` accessors, change `simulation_mode` default to `True`
+- `qubox/experiments/session.py` — remove `hw`, `pulseOpMngr`, `mgr`,
+  `quaProgMngr` compat aliases; change `simulation_mode` default to `True`
+- `qubox/experiments/experiment_base.py` — `hw`/`pulse_mgr` properties now
+  look up `hardware`/`pulse_mgr` first (not `quaProgMngr`/`pulseOpMngr`);
+  remove displacement-reference `DeprecationWarning`
+- `qubox/notebook/runtime.py` — all `simulation_mode` defaults → `True`;
+  `session.hw` → `session.hardware` in `resolve_active_mixer_targets()`
+- `qubox/notebook/workflow.py` — `simulation_mode` default → `True`
+- `qubox/backends/qm/runtime.py` — `.hw` → `.hardware`
+- `qubox/hardware/__init__.py` — remove `QuaProgramManager` export
+- `qubox/calibration/patch_rules.py` — remove bare T1/T2_star/T2_echo fallbacks
+- `qubox/programs/macros/measure.py` — remove `DeprecationWarning` from
+  `_update_readout_discrimination()` and `_update_readout_quality()`
+- `qubox/experiments/calibration/readout_config.py` — remove legacy value
+  auto-conversion
+- `qubox/core/measurement_config.py` — remove `apply_to_measure_macro()`
+- `qubox/tools/waveforms.py` — remove `delta` parameter path from all 4
+  waveform functions
+- `qubox/analysis/__init__.py` — gut shim contents (tombstone docstring only)
+- `qubox/optimization/__init__.py` — gut shim contents (tombstone docstring only)
+
+**Files deleted:**
+
+- `qubox/analysis/cQED_attributes.py`
+- `qubox/analysis/pipelines.py`
+- `qubox/analysis/pulseOp.py`
+- `qubox/optimization/optimization.py`
+- `qubox/optimization/smooth_opt.py`
+- `qubox/optimization/stochastic_opt.py`
+- `qubox/hardware/qua_program_manager.py`
+
+**Tests updated:**
+
+- `qubox/tests/test_parameter_resolution_policy.py` — rename mock attrs
+  `hw` → `hardware`, `pulseOpMngr` → `pulse_mgr`
+- `qubox/tests/test_workflow_safety_refactor.py` — update T1/T2 bare-key tests
+  from `pytest.warns(DeprecationWarning)` to `assert patch is None`
+
+---
+
+### 2026-03-31 — Add simulation_mode to Session Launch
+
+**Classification: Moderate**
+
+**Summary:**
+
+Added a `simulation_mode: bool = False` parameter to the session-opening stack
+so experiments can be compiled and simulated via QM's simulator without
+activating any hardware outputs.  When `simulation_mode=True`:
+
+- `SessionManager.open()` skips `hardware.open_qm()` — no `QuantumMachine`
+  instance is created and RF outputs are never enabled.
+- `ProgramRunner.exec_mode` is locked to `ExecMode.SIMULATE` at construction,
+  so `run_program()` raises `JobError` on any hardware-execution attempt.
+- `qmm.simulate()` (and therefore all `experiment.simulate()` calls) continues
+  to work because `ProgramRunner.simulate()` only requires the
+  `QuantumMachinesManager`, not an open `QuantumMachine`.
+- `session.simulation_mode` property returns `True` for introspection.
+- `NotebookSessionBootstrap` stores the flag so `restore_shared_session()`
+  reopens in the same mode automatically.
+
+**Files affected:**
+
+- `qubox/experiments/session.py` — `SessionManager.__init__()`, `open()`, new `simulation_mode` property
+- `qubox/session/session.py` — `Session.open()` explicit parameter + docstring
+- `qubox/notebook/runtime.py` — `NotebookSessionBootstrap`, `open_shared_session()`, `require_shared_session()`
+- `API_REFERENCE.md` — new §17.4 Simulation Mode
+- `docs/CHANGELOG.md`
+
+### 2026-03-31 — Architecture Refactor Phase 2: Analysis Merge, Workflow Extraction, Notebook Surface Slimming
+
+**Classification: Major**
+
+**Summary:**
+
+Continued the multi-session architecture refactor from the audit plan. This session completed three major items:
+
+1. **Analysis → qubox_tools merge (Item 6):** Eliminated all 50+ `from qubox.analysis.*` import references across the codebase, redirecting them to their canonical `qubox_tools` locations (`qubox_tools.algorithms`, `qubox_tools.fitting`, `qubox_tools.data`, `qubox_tools.plotting`). The `qubox/analysis/` package now contains only backward-compatible shims with deprecation notices. 13 pure-wrapper files were deleted in the prior session; this session fixed all remaining broken import chains.
+
+2. **Workflow generalization (Item 8):** Created `qubox.workflow` package with four modules (`stages`, `calibration_helpers`, `fit_gates`, `pulse_seeding`). Core workflow primitives (stage checkpoints, fit quality gates, patch preview/apply, DRAG pulse seeding) are now importable from `qubox.workflow` without a notebook kernel. `qubox.notebook.workflow` is now a thin wrapper that adds shared-session management on top.
+
+3. **Notebook surface slimming (Item 7):** Split `qubox.notebook` exports into two tiers:
+   - `qubox.notebook` (essentials): experiments, session management, workflow, waveform generators, basic calibration tools (~65 symbols)
+   - `qubox.notebook.advanced` (infrastructure): CalibrationStore, data models, artifact management, schemas, verification, device registry (~45 symbols)
+
+**Import mapping (deleted wrappers → canonical locations):**
+- `qubox.analysis.analysis_tools` → `qubox_tools.algorithms.transforms`
+- `qubox.analysis.algorithms` → `qubox_tools.algorithms.core`
+- `qubox.analysis.cQED_models` → `qubox_tools.fitting.cqed`
+- `qubox.analysis.cQED_plottings` → `qubox_tools.plotting.cqed`
+- `qubox.analysis.output` → `qubox_tools.data.containers`
+- `qubox.analysis.metrics` → `qubox_tools.algorithms.metrics`
+- `qubox.analysis.post_selection` → `qubox_tools.algorithms.post_selection`
+- `qubox.analysis.post_process` → `qubox_tools.algorithms.post_process`
+- `qubox.analysis.pulseOp` → `qubox.core.pulse_op`
+- `qubox.analysis.pipelines` → `qubox_tools.algorithms.pipelines`
+
+**Files created:**
+- `qubox/workflow/__init__.py`
+- `qubox/workflow/stages.py`
+- `qubox/workflow/calibration_helpers.py`
+- `qubox/workflow/fit_gates.py`
+- `qubox/workflow/pulse_seeding.py`
+- `qubox/notebook/advanced.py`
+
+**Files modified (import updates — 30+ files):**
+- `qubox/experiments/base.py`, `experiment_base.py`, `session.py`
+- `qubox/experiments/calibration/gates.py`, `readout.py`, `reset.py`
+- `qubox/experiments/spectroscopy/resonator.py`, `qubit.py`
+- `qubox/experiments/time_domain/rabi.py`, `relaxation.py`, `coherence.py`, `chevron.py`
+- `qubox/experiments/cavity/storage.py`, `fock.py`
+- `qubox/experiments/tomography/wigner_tomo.py`, `qubit_tomo.py`, `fock_tomo.py`
+- `qubox/experiments/spa/flux_optimization.py`
+- `qubox/programs/macros/measure.py`
+- `qubox/backends/qm/runtime.py`
+- `qubox/hardware/program_runner.py`
+- `qubox/pulses/manager.py`, `pulse_registry.py`
+- `qubox/calibration/algorithms.py`, `pulse_train_tomo.py`
+- `qubox/notebook/__init__.py`, `workflow.py`
+
+### 2026-03-23 — Retune Mixer Validation Power Targets for Notebook 01
+
+**Classification: Moderate**
+
+**Summary:**
+
+Aligned the notebook 00 hardware-definition defaults, notebook 01 auto-calibration gain overrides, and the persisted sample `hardware.json` gains so the notebook 01 CW post-check now targets about `-30 dBm` on `transmon`, `storage`, `storage_gf`, and `resonator_gf`, while intentionally keeping `resonator` near `-40 dBm` to protect the readout path. This keeps the intended power plan explicit in both the notebook authoring flow and the runtime config that session bootstrap actually reads.
+
+**Files affected:**
+
+- `notebooks/00_hardware_defintion.ipynb`
+- `notebooks/01_mixer_calibrations.ipynb`
+- `samples/post_cavity_sample_A/config/hardware.json`
+- `docs/CHANGELOG.md`
+
+### 2026-03-24 — Validate and Fine-Tune Notebook 01 CW Calibration Power Targets
+
+**Classification: Moderate**
+
+**Summary:**
+
+Executed the notebook 00 to notebook 01 mixer-calibration flow live against the current hardware and spectrum-analyzer post-check. The first run showed `storage_gf` and `resonator_gf` overshooting the intended CW target power, so their default gains were reduced and the full auto-calibration path was rerun. The verified power plan is now approximately `-30 dBm` for `resonator_gf`, `storage`, `storage_gf`, and `transmon`, while `resonator` remains intentionally near `-40 dBm`.
+
+**Files affected:**
+
+- `notebooks/00_hardware_defintion.ipynb`
+- `notebooks/01_mixer_calibrations.ipynb`
+- `samples/post_cavity_sample_A/config/hardware.json`
+- `docs/CHANGELOG.md`
+
+### 2026-03-23 — Emit Default Element Ops in HardwareDefinition
+
+**Classification: Moderate**
+
+**Summary:**
+
+Fixed the notebook-facing `HardwareDefinition` generator so sample-level `hardware.json` now includes the default `const` and `zero` operations for every element, and both generated config files now include their schema/version fields. This removes misleading schema warnings during notebook 00 preflight and aligns the hardware-definition output with the rest of the pulse infrastructure.
+
+**Files affected:**
+
+- `qubox/core/hardware_definition.py`
+- `tests/test_schemas.py`
+- `API_REFERENCE.md`
+- `docs/CHANGELOG.md`
+- `samples/post_cavity_sample_A/config/hardware.json`
+- `samples/post_cavity_sample_A/config/devices.json`
+
 ### 2026-03-23 — Remove All Backward-Compatibility Shims
 
 **Classification: Major**
@@ -880,6 +1295,31 @@ of the legacy arbitrary qubit rotation calibration pipeline.
 ---
 
 ### 2026-02-24 — Namespace Rename: device -> sample
+
+---
+
+### 2026-03-23 — Notebook 00 Recovery for Wiring Mismatch and Schema-Versioned Devices
+
+**Classification: Moderate**
+
+**Summary:**
+
+1. **Notebook recovery for stale calibration context**
+  - Updated `notebooks/00_hardware_defintion.ipynb` so session bootstrap detects a `ContextMismatchError` caused by a wiring revision change, creates a timestamped backup of the stale cooldown `calibration.json`, deletes the stale file, and retries opening the session against the current hardware definition.
+  - This preserves strict calibration-context safety while giving the notebook an explicit recovery path after hardware-definition edits.
+
+2. **Schema-version-aware device loading**
+  - Fixed `qubox/devices/device_manager.py` so `devices.json` files with top-level metadata like `schema_version` load correctly.
+  - The loader now accepts either a flat top-level device map or a wrapped `devices` map, ignores non-dict metadata entries, and preserves `schema_version` when saving.
+
+3. **Regression coverage**
+  - Added tests covering schema-versioned flat `devices.json` loading and schema-version preservation on save.
+
+**Files affected:**
+- `notebooks/00_hardware_defintion.ipynb`
+- `qubox/devices/device_manager.py`
+- `tests/test_schemas.py`
+- `docs/CHANGELOG.md`
 
 **Classification: Major**
 
@@ -2276,3 +2716,93 @@ continues.
 - `tests/test_qubox_public_api.py`
 - `qubox_v2/pyproject.toml`
 - `docs/CHANGELOG.md` - This entry
+
+---
+
+### 2026-04-01 — measureMacro Decoupling: Phase 0–3 (ReadoutHandle + Builder + Experiment Migration)
+
+**Classification: Major**
+
+**Summary:**
+
+Decoupled all QUA builder functions and experiment subclasses from the
+`measureMacro` singleton by introducing `ReadoutHandle` as an explicit,
+immutable readout configuration carrier. This is Phase 0–3 of the
+measureMacro refactoring plan (`docs/measureMacro_refactoring_plan.md`).
+
+**What changed:**
+
+1. **`ReadoutHandle` enhanced** (`qubox/core/bindings.py`) — Added `gain`,
+   `demod_weight_sets` fields, `threshold` property shortcut, and
+   `from_measure_macro()` factory method that bridges from the singleton.
+2. **`emit_measurement()` rewritten** (`qubox/programs/macros/measure.py`) —
+   New pure function with full parity to `measureMacro.measure()`: supports
+   `with_state`, `axis` (tomography), `gain`, `adc_stream`, `targets`, and
+   single-variable return when `num_out==1`.
+3. **`emit_measurement_spec()` updated** (`qubox/programs/measurement.py`) —
+   Accepts optional `readout` parameter; when provided, dispatches to
+   `emit_measurement()` instead of `measureMacro.measure()`.
+4. **`ExperimentBase.readout_handle` property** added
+   (`qubox/experiments/experiment_base.py`) — Calls
+   `ReadoutHandle.from_measure_macro()` to provide experiments a handle.
+5. **ALL 8 builder files migrated** (36 builder functions total):
+   - `readout.py` (8), `time_domain.py` (10), `spectroscopy.py` (6),
+     `calibration.py` (5), `cavity.py` (11), `simulation.py` (1),
+     `utility.py` (1), `tomography.py` (2)
+   - Each now requires `readout: "ReadoutHandle"` as a parameter.
+   - All `measureMacro.measure(...)` → `emit_measurement(readout, ...)`.
+   - All `measureMacro.active_element()` → `readout.element`.
+   - All `measureMacro._ro_disc_params.get("threshold")` → `readout.threshold`.
+6. **`sequence.py` macros migrated** (5 methods): `qubit_state_tomography`,
+   `num_splitting_spectroscopy`, `fock_resolved_spectroscopy`, `prepare_state`,
+   `post_select`.
+7. **ALL 15 experiment subclass files updated** — Each `build_program()` now
+   passes `readout=self.readout_handle` to its builder function calls.
+8. **`circuit_runner.py` updated** — 5 builder calls now pass
+   `readout=self.session.readout_handle()`.
+9. **`circuit_compiler.py` unchanged** — Uses `measureMacro` fallback path
+   in `emit_measurement_spec(readout=None)`, left for future phase.
+
+**Not breaking (no backward compat needed per user direction):**
+- `measureMacro` singleton is still used internally by `ReadoutHandle.from_measure_macro()`
+  and as fallback in `emit_measurement_spec(readout=None)`.
+- Slimming `measureMacro` is deferred to Phase 5.
+
+**Validation:**
+
+- All 24 experiment simulation tests: **23 PASS, 1 SKIP, 0 FAIL** (matches
+  pre-migration baseline).
+- `import qubox` — clean, no syntax errors.
+
+**Files modified:**
+
+- `qubox/core/bindings.py` — ReadoutHandle enhanced + corruption fix
+- `qubox/programs/macros/measure.py` — `emit_measurement()` rewritten
+- `qubox/programs/measurement.py` — `emit_measurement_spec()` updated
+- `qubox/experiments/experiment_base.py` — `readout_handle` property added
+- `qubox/programs/builders/readout.py` — 8 functions migrated
+- `qubox/programs/builders/time_domain.py` — 10 functions migrated
+- `qubox/programs/builders/spectroscopy.py` — 6 functions migrated
+- `qubox/programs/builders/calibration.py` — 5 functions migrated
+- `qubox/programs/builders/cavity.py` — 11 functions migrated
+- `qubox/programs/builders/simulation.py` — 1 function migrated
+- `qubox/programs/builders/utility.py` — 1 function migrated
+- `qubox/programs/builders/tomography.py` — 2 functions migrated
+- `qubox/programs/macros/sequence.py` — 5 macro methods migrated
+- `qubox/experiments/time_domain/rabi.py` — readout= wired
+- `qubox/experiments/time_domain/relaxation.py` — readout= wired
+- `qubox/experiments/time_domain/coherence.py` — readout= wired
+- `qubox/experiments/time_domain/chevron.py` — readout= wired
+- `qubox/experiments/spectroscopy/resonator.py` — readout= wired
+- `qubox/experiments/spectroscopy/qubit.py` — readout= wired
+- `qubox/experiments/calibration/readout.py` — readout= wired
+- `qubox/experiments/calibration/reset.py` — readout= wired
+- `qubox/experiments/calibration/gates.py` — readout= wired
+- `qubox/experiments/tomography/qubit_tomo.py` — readout= wired
+- `qubox/experiments/tomography/fock_tomo.py` — readout= wired
+- `qubox/experiments/tomography/wigner_tomo.py` — readout= wired
+- `qubox/experiments/cavity/storage.py` — readout= wired
+- `qubox/experiments/cavity/fock.py` — readout= wired
+- `qubox/experiments/spa/flux_optimization.py` — readout= wired
+- `qubox/programs/circuit_runner.py` — readout= wired
+- `docs/CHANGELOG.md` — this entry

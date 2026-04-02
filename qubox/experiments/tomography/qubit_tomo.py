@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 
 from ..experiment_base import ExperimentBase
 from ..result import AnalysisResult, ProgramBuildResult
-from ...analysis import post_process as pp
-from ...analysis.cQED_plottings import plot_bloch_states
+from qubox_tools.algorithms import post_process as pp
+from qubox_tools.plotting.cqed import plot_bloch_states
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
 from ...programs.measurement import try_build_readout_snapshot_from_macro
@@ -51,6 +51,7 @@ class QubitStateTomography(ExperimentBase):
         )
 
         prog = cQED_programs.qubit_state_tomography(
+            readout=self.readout_handle,
             state_prep=state_prep,
             therm_clks=therm_clks,
             n_avg=n_avg,
