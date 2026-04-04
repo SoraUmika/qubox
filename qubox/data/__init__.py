@@ -1,3 +1,3 @@
-from .models import ExecutionRequest, ExperimentResult
+from .models import ExecutionRequest, ExperimentResult, RunManifest
 
-__all__ = ["ExecutionRequest", "ExperimentResult"]
+__all__ = ["ExecutionRequest", "ExperimentResult", "RunManifest"]

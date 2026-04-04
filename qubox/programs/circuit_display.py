@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .circuit_runner import CircuitBlock, Gate, MeasurementRecord, QuantumCircuit
+from .circuit_ir import CircuitBlock, Gate, MeasurementRecord, QuantumCircuit
 
 
 def _measurement_records(circuit: QuantumCircuit) -> dict[str, MeasurementRecord]:

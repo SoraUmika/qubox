@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from ..core.persistence_policy import split_output_for_persistence, sanitize_mapping_for_json
+from ..core.persistence import split_output_for_persistence, sanitize_mapping_for_json
 
 
 DEFAULT_JSON_GLOBS = (

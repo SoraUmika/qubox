@@ -1,6 +1,5 @@
 ﻿from __future__ import annotations
 
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -8,17 +7,25 @@ import numpy as np
 
 from qubox_tools.algorithms.pipelines import run_named_pipeline
 from ...calibration import CalibrationSnapshot
-from ...data import ExecutionRequest, ExperimentResult
+from ...data import ExecutionRequest, ExperimentResult, RunManifest
 from .lowering import lower_to_legacy_circuit
 
 
+def _qubox_version() -> str:
+    """Return the qubox package version, falling back gracefully."""
+    try:
+        from qubox import __version__
+        return str(__version__)
+    except Exception:
+        return ""
+
+
 @dataclass(frozen=True)
-class LegacyExperimentAdapter:
+class TemplateExperimentAdapter:
     experiment_cls: type
     artifact_tag: str
     arg_builder: Callable[[Any, ExecutionRequest], dict[str, Any]]
     run_state_builder: Callable[[dict[str, Any]], dict[str, Any]] | None = None
-    measure_context_key: str | None = None
 
 
 def _primary_axis(request: ExecutionRequest):
@@ -171,7 +178,7 @@ def _build_butterfly_args(session, request: ExecutionRequest) -> dict[str, Any]:
         "prep_kwargs": request.params.get("prep_kwargs", {"threshold": float(threshold)}),
         "k": request.params.get("k"),
         "r180": str(request.params.get("r180", "x180")),
-        "update_measure_macro": bool(request.params.get("update_measure_macro", False)),
+        "update_readout_config": bool(request.params.get("update_readout_config", False)),
         "show_analysis": bool(request.params.get("show_analysis", False)),
         "n_samples": int(request.shots or request.params.get("n_samples", 10_000)),
         "M0_MAX_TRIALS": int(request.params.get("max_trials", 16)),
@@ -318,9 +325,13 @@ def _build_qubit_tomo_args(session, request: ExecutionRequest) -> dict[str, Any]
 
 
 def _build_wigner_args(session, request: ExecutionRequest) -> dict[str, Any]:
-    gates = request.params.get("state_prep")
+    gates = request.params.get("gates", request.params.get("state_prep"))
     if gates is None:
         raise ValueError("Wigner tomography requires 'state_prep' parameter.")
+    if hasattr(gates, "play") or callable(gates):
+        gates = [gates]
+    else:
+        gates = list(gates)
     x_vals = request.params.get("x_vals")
     p_vals = request.params.get("p_vals")
     if x_vals is None or p_vals is None:
@@ -535,10 +546,10 @@ def _build_fock_power_rabi_args(session, request: ExecutionRequest) -> dict[str,
     }
 
 
-_ADAPTERS: dict[str, LegacyExperimentAdapter] | None = None
+_ADAPTERS: dict[str, TemplateExperimentAdapter] | None = None
 
 
-def _load_adapters() -> dict[str, LegacyExperimentAdapter]:
+def _load_adapters() -> dict[str, TemplateExperimentAdapter]:
     global _ADAPTERS
     if _ADAPTERS is None:
         from qubox.experiments import (
@@ -578,178 +589,175 @@ def _load_adapters() -> dict[str, LegacyExperimentAdapter]:
 
         _ADAPTERS = {
             # ── spectroscopy (existing) ──
-            "qubit.spectroscopy": LegacyExperimentAdapter(
+            "qubit.spectroscopy": TemplateExperimentAdapter(
                 experiment_cls=QubitSpectroscopy,
                 artifact_tag="qubitSpectroscopy",
                 arg_builder=_build_qubit_spec_args,
             ),
-            "resonator.spectroscopy": LegacyExperimentAdapter(
+            "resonator.spectroscopy": TemplateExperimentAdapter(
                 experiment_cls=ResonatorSpectroscopy,
                 artifact_tag="resonatorSpectroscopy",
                 arg_builder=_build_resonator_spec_args,
-                measure_context_key="readout_op",
             ),
             # ── qubit time domain (existing + new) ──
-            "qubit.power_rabi": LegacyExperimentAdapter(
+            "qubit.power_rabi": TemplateExperimentAdapter(
                 experiment_cls=PowerRabi,
                 artifact_tag="powerRabi",
                 arg_builder=_build_power_rabi_args,
                 run_state_builder=lambda params: {"op": params["op"]},
             ),
-            "qubit.ramsey": LegacyExperimentAdapter(
+            "qubit.ramsey": TemplateExperimentAdapter(
                 experiment_cls=T2Ramsey,
                 artifact_tag="T2Ramsey",
                 arg_builder=_build_ramsey_args,
             ),
-            "qubit.temporal_rabi": LegacyExperimentAdapter(
+            "qubit.temporal_rabi": TemplateExperimentAdapter(
                 experiment_cls=TemporalRabi,
                 artifact_tag="temporalRabi",
                 arg_builder=_build_temporal_rabi_args,
             ),
-            "qubit.time_rabi_chevron": LegacyExperimentAdapter(
+            "qubit.time_rabi_chevron": TemplateExperimentAdapter(
                 experiment_cls=TimeRabiChevron,
                 artifact_tag="timeRabiChevron",
                 arg_builder=_build_time_rabi_chevron_args,
             ),
-            "qubit.power_rabi_chevron": LegacyExperimentAdapter(
+            "qubit.power_rabi_chevron": TemplateExperimentAdapter(
                 experiment_cls=PowerRabiChevron,
                 artifact_tag="powerRabiChevron",
                 arg_builder=_build_power_rabi_chevron_args,
             ),
-            "qubit.t1": LegacyExperimentAdapter(
+            "qubit.t1": TemplateExperimentAdapter(
                 experiment_cls=T1Relaxation,
                 artifact_tag="T1Relaxation",
                 arg_builder=_build_t1_args,
             ),
-            "qubit.echo": LegacyExperimentAdapter(
+            "qubit.echo": TemplateExperimentAdapter(
                 experiment_cls=T2Echo,
                 artifact_tag="T2Echo",
                 arg_builder=_build_echo_args,
             ),
             # ── resonator (new) ──
-            "resonator.power_spectroscopy": LegacyExperimentAdapter(
+            "resonator.power_spectroscopy": TemplateExperimentAdapter(
                 experiment_cls=ResonatorPowerSpectroscopy,
                 artifact_tag="resonatorPowerSpectroscopy",
                 arg_builder=_build_resonator_power_spec_args,
-                measure_context_key="readout_op",
             ),
             # ── readout (new) ──
-            "readout.trace": LegacyExperimentAdapter(
+            "readout.trace": TemplateExperimentAdapter(
                 experiment_cls=ReadoutTrace,
                 artifact_tag="readoutTrace",
                 arg_builder=_build_readout_trace_args,
             ),
-            "readout.iq_blobs": LegacyExperimentAdapter(
+            "readout.iq_blobs": TemplateExperimentAdapter(
                 experiment_cls=IQBlob,
                 artifact_tag="iqBlobs",
                 arg_builder=_build_iq_blobs_args,
             ),
-            "readout.butterfly": LegacyExperimentAdapter(
+            "readout.butterfly": TemplateExperimentAdapter(
                 experiment_cls=ReadoutButterflyMeasurement,
                 artifact_tag="butterflyMeasurement",
                 arg_builder=_build_butterfly_args,
             ),
             # ── calibration (new) ──
-            "calibration.all_xy": LegacyExperimentAdapter(
+            "calibration.all_xy": TemplateExperimentAdapter(
                 experiment_cls=AllXY,
                 artifact_tag="allXY",
                 arg_builder=_build_all_xy_args,
             ),
-            "calibration.drag": LegacyExperimentAdapter(
+            "calibration.drag": TemplateExperimentAdapter(
                 experiment_cls=DRAGCalibration,
                 artifact_tag="dragCalibration",
                 arg_builder=_build_drag_args,
             ),
             # ── tomography (new) ──
-            "tomography.qubit_state": LegacyExperimentAdapter(
+            "tomography.qubit_state": TemplateExperimentAdapter(
                 experiment_cls=QubitStateTomography,
                 artifact_tag="qubitStateTomography",
                 arg_builder=_build_qubit_tomo_args,
             ),
-            "tomography.wigner": LegacyExperimentAdapter(
+            "tomography.wigner": TemplateExperimentAdapter(
                 experiment_cls=StorageWignerTomography,
                 artifact_tag="wignerTomography",
                 arg_builder=_build_wigner_args,
             ),
             # ── storage / cavity (new) ──
-            "storage.spectroscopy": LegacyExperimentAdapter(
+            "storage.spectroscopy": TemplateExperimentAdapter(
                 experiment_cls=StorageSpectroscopy,
                 artifact_tag="storageSpectroscopy",
                 arg_builder=_build_storage_spec_args,
             ),
-            "storage.t1_decay": LegacyExperimentAdapter(
+            "storage.t1_decay": TemplateExperimentAdapter(
                 experiment_cls=FockResolvedT1,
                 artifact_tag="storageT1Decay",
                 arg_builder=_build_storage_t1_args,
             ),
-            "storage.num_splitting": LegacyExperimentAdapter(
+            "storage.num_splitting": TemplateExperimentAdapter(
                 experiment_cls=NumSplittingSpectroscopy,
                 artifact_tag="numSplittingSpectroscopy",
                 arg_builder=_build_num_splitting_args,
             ),
             # ── reset (existing) ──
-            "reset.active": LegacyExperimentAdapter(
+            "reset.active": TemplateExperimentAdapter(
                 experiment_cls=ActiveQubitResetBenchmark,
                 artifact_tag="activeResetBenchmark",
                 arg_builder=_build_active_reset_args,
             ),
             # ── newly registered: spectroscopy ──
-            "qubit.spectroscopy_ef": LegacyExperimentAdapter(
+            "qubit.spectroscopy_ef": TemplateExperimentAdapter(
                 experiment_cls=QubitSpectroscopyEF,
                 artifact_tag="qubitSpectroscopyEF",
                 arg_builder=_build_qubit_spec_ef_args,
             ),
-            "resonator.spectroscopy_x180": LegacyExperimentAdapter(
+            "resonator.spectroscopy_x180": TemplateExperimentAdapter(
                 experiment_cls=ResonatorSpectroscopyX180,
                 artifact_tag="resonatorSpectroscopyX180",
                 arg_builder=_build_resonator_spec_x180_args,
-                measure_context_key="readout_op" if False else None,
             ),
             # ── newly registered: time domain ──
-            "qubit.sequential_rotations": LegacyExperimentAdapter(
+            "qubit.sequential_rotations": TemplateExperimentAdapter(
                 experiment_cls=SequentialQubitRotations,
                 artifact_tag="sequentialRotations",
                 arg_builder=_build_sequential_rotations_args,
             ),
-            "qubit.ramsey_chevron": LegacyExperimentAdapter(
+            "qubit.ramsey_chevron": TemplateExperimentAdapter(
                 experiment_cls=RamseyChevron,
                 artifact_tag="ramseyChevron",
                 arg_builder=_build_ramsey_chevron_args,
             ),
             # ── newly registered: readout ──
-            "readout.ge_raw_trace": LegacyExperimentAdapter(
+            "readout.ge_raw_trace": TemplateExperimentAdapter(
                 experiment_cls=ReadoutGERawTrace,
                 artifact_tag="readoutGERawTrace",
                 arg_builder=_build_readout_ge_raw_trace_args,
             ),
             # ── newly registered: reset & benchmarking ──
-            "reset.passive_benchmark": LegacyExperimentAdapter(
+            "reset.passive_benchmark": TemplateExperimentAdapter(
                 experiment_cls=QubitResetBenchmark,
                 artifact_tag="qubitResetBenchmark",
                 arg_builder=_build_qubit_reset_benchmark_args,
             ),
-            "readout.leakage_benchmark": LegacyExperimentAdapter(
+            "readout.leakage_benchmark": TemplateExperimentAdapter(
                 experiment_cls=ReadoutLeakageBenchmarking,
                 artifact_tag="readoutLeakageBenchmark",
                 arg_builder=_build_readout_leakage_args,
             ),
             # ── newly registered: storage / cavity ──
-            "storage.ramsey": LegacyExperimentAdapter(
+            "storage.ramsey": TemplateExperimentAdapter(
                 experiment_cls=StorageRamsey,
                 artifact_tag="storageRamsey",
                 arg_builder=_build_storage_ramsey_args,
             ),
-            "storage.fock_spectroscopy": LegacyExperimentAdapter(
+            "storage.fock_spectroscopy": TemplateExperimentAdapter(
                 experiment_cls=FockResolvedSpectroscopy,
                 artifact_tag="fockResolvedSpectroscopy",
                 arg_builder=_build_fock_spectroscopy_args,
             ),
-            "storage.fock_ramsey": LegacyExperimentAdapter(
+            "storage.fock_ramsey": TemplateExperimentAdapter(
                 experiment_cls=FockResolvedRamsey,
                 artifact_tag="fockResolvedRamsey",
                 arg_builder=_build_fock_ramsey_args,
             ),
-            "storage.fock_power_rabi": LegacyExperimentAdapter(
+            "storage.fock_power_rabi": TemplateExperimentAdapter(
                 experiment_cls=FockResolvedPowerRabi,
                 artifact_tag="fockResolvedPowerRabi",
                 arg_builder=_build_fock_power_rabi_args,
@@ -761,10 +769,46 @@ def _load_adapters() -> dict[str, LegacyExperimentAdapter]:
 class QMRuntime:
     """Canonical QM runtime for the new `qubox` API."""
 
-    circuit_runner_cls = None
+    _circuit_compiler_cls = None
 
     def __init__(self, session):
         self.session = session
+
+    def _build_manifest(
+        self,
+        request: ExecutionRequest,
+        cal_snapshot: CalibrationSnapshot | None,
+    ) -> RunManifest:
+        """Construct a RunManifest capturing full provenance for this run."""
+        import subprocess
+
+        git_sha: str | None = None
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True, text=True, timeout=3,
+            )
+            if result.returncode == 0:
+                git_sha = result.stdout.strip()[:12]
+        except Exception:
+            pass
+
+        hw_hash = ""
+        try:
+            cfg = self.session.config_engine.build_qm_config()
+            import hashlib, json
+            canonical = json.dumps(cfg, sort_keys=True, separators=(",", ":"))
+            hw_hash = hashlib.sha256(canonical.encode()).hexdigest()[:12]
+        except Exception:
+            pass
+
+        return RunManifest(
+            execution_request=request,
+            calibration_snapshot=cal_snapshot,
+            hardware_config_hash=hw_hash,
+            qubox_version=_qubox_version(),
+            git_sha=git_sha,
+        )
 
     def run(self, request: ExecutionRequest) -> ExperimentResult:
         if request.kind == "custom":
@@ -783,38 +827,35 @@ class QMRuntime:
     def _run_template(self, request: ExecutionRequest, *, execute: bool = True) -> ExperimentResult:
         adapter = _load_adapters()[request.template]
         legacy_params = adapter.arg_builder(self.session, request)
-        experiment = adapter.experiment_cls(self.session.legacy_session)
-        ctx = nullcontext()
-        if adapter.measure_context_key is not None and hasattr(experiment, "_setup_measure_context"):
-            ctx = experiment._setup_measure_context(legacy_params[adapter.measure_context_key])
+        experiment = adapter.experiment_cls(self.session.session_manager)
+        build = experiment.build_program(**legacy_params)
+        if adapter.run_state_builder is not None:
+            experiment._run_params = adapter.run_state_builder(legacy_params)
 
-        with ctx:
-            build = experiment.build_program(**legacy_params)
-            if adapter.run_state_builder is not None:
-                experiment._run_params = adapter.run_state_builder(legacy_params)
+        run_result = None
+        artifact_path = None
+        analysis = None
+        if execute:
+            run_result = experiment.run_program(
+                build.program,
+                n_total=build.n_total,
+                processors=list(build.processors),
+                **dict(build.run_program_kwargs),
+            )
+            artifact_path = str(experiment.save_output(run_result.output, adapter.artifact_tag))
+            try:
+                analysis = experiment.analyze(run_result)
+            except Exception:
+                analysis = None
 
-            run_result = None
-            artifact_path = None
-            analysis = None
-            if execute:
-                run_result = experiment.run_program(
-                    build.program,
-                    n_total=build.n_total,
-                    processors=list(build.processors),
-                    **dict(build.run_program_kwargs),
-                )
-                artifact_path = str(experiment.save_output(run_result.output, adapter.artifact_tag))
-                try:
-                    analysis = experiment.analyze(run_result)
-                except Exception:
-                    analysis = None
-
+        cal_snap = CalibrationSnapshot.from_session(self.session)
         return ExperimentResult(
             request=request,
             build=build,
             run=run_result,
             analysis=analysis,
-            calibration_snapshot=CalibrationSnapshot.from_session(self.session),
+            calibration_snapshot=cal_snap,
+            manifest=self._build_manifest(request, cal_snap),
             artifact_path=artifact_path,
             compiler_report=dict(getattr(build, "metadata", {}) or {}),
             plotter=(lambda *args, **kwargs: experiment.plot(analysis, *args, **kwargs))
@@ -824,9 +865,9 @@ class QMRuntime:
         )
 
     def _run_custom(self, request: ExecutionRequest, *, execute: bool = True) -> ExperimentResult:
-        body = request.sequence or request.circuit
+        body = request.control_program or request.sequence or request.circuit
         if body is None:
-            raise ValueError("Custom execution requires a Sequence or QuantumCircuit body.")
+            raise ValueError("Custom execution requires a Sequence, QuantumCircuit, or ControlProgram body.")
 
         legacy_circuit = lower_to_legacy_circuit(
             self.session,
@@ -834,35 +875,38 @@ class QMRuntime:
             sweep=request.sweep,
             acquisition=request.acquisition,
         )
-        n_shots = int(request.shots or getattr(request.sweep, "averaging", 1) or 1)
-        if self.circuit_runner_cls is None:
-            from qubox.programs.circuit_runner import CircuitRunner
+        control_averaging = getattr(getattr(request.control_program, "sweep_plan", None), "averaging", 1)
+        n_shots = int(request.shots or getattr(request.sweep, "averaging", control_averaging) or 1)
+        if self._circuit_compiler_cls is None:
+            from qubox.programs.circuit_compiler import CircuitCompiler
 
-            self.circuit_runner_cls = CircuitRunner
-        runner = self.circuit_runner_cls(self.session.legacy_session)
-        build = runner.compile_program(legacy_circuit, n_shots=n_shots)
+            self._circuit_compiler_cls = CircuitCompiler
+        compiler = self._circuit_compiler_cls(self.session.session_manager)
+        build = compiler.compile(legacy_circuit, n_shots=n_shots)
 
         run_result = None
         artifact_path = None
         analysis = None
         if execute:
             for element, freq in dict(getattr(build, "resolved_frequencies", {}) or {}).items():
-                self.session.legacy_session.hardware.set_element_fq(element, float(freq))
-            run_result = self.session.legacy_session.runner.run_program(
+                self.session.session_manager.hardware.set_element_fq(element, float(freq))
+            run_result = self.session.session_manager.runner.run_program(
                 build.program,
                 n_total=build.n_total,
                 processors=list(build.processors),
                 **dict(build.run_program_kwargs),
             )
-            artifact_path = str(self.session.legacy_session.save_output(run_result.output, request.template))
+            artifact_path = str(self.session.session_manager.save_output(run_result.output, request.template))
             analysis = run_named_pipeline(request.analysis, run_result=run_result, build=build)
 
+        cal_snap = CalibrationSnapshot.from_session(self.session)
         return ExperimentResult(
             request=request,
             build=build,
             run=run_result,
             analysis=analysis,
-            calibration_snapshot=CalibrationSnapshot.from_session(self.session),
+            calibration_snapshot=cal_snap,
+            manifest=self._build_manifest(request, cal_snap),
             artifact_path=artifact_path,
             compiler_report=dict(getattr(build, "metadata", {}) or {}),
             source=legacy_circuit,

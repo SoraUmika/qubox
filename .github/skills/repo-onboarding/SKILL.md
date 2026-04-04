@@ -34,17 +34,18 @@ qubox is a cQED experiment orchestration framework for Quantum Machines hardware
 
 | Directory | Contents |
 | --- | --- |
-| `qubox/` | Main package — public API, modern implementation |
+| `qubox/` | Main package — public API, experiments, calibration, hardware, QUA programs |
 | `qubox/backends/qm/` | QM-specific backend: runtime, lowering, adapter layer |
 | `qubox/calibration/` | CalibrationStore, CalibrationOrchestrator, patch rules |
 | `qubox/session/` | Session, ExperimentContext, SessionState |
-| `qubox/experiments/` | ExperimentLibrary, templates, workflows |
+| `qubox/experiments/` | ExperimentLibrary, templates, workflows, concrete experiment classes |
+| `qubox/programs/` | QUA program builders, macros, circuit compiler |
+| `qubox/hardware/` | Hardware abstraction (config engine, controller, program runner) |
 | `qubox/notebook/` | Notebook-facing import surface: experiment classes, calibration, session helpers |
-| `qubox/legacy/` | Full copy of former qubox_v2_legacy (experiment classes, QUA programs, hardware ctrl) |
-| `qubox_tools/` | Analysis, fitting, plotting, cQED models |
+| `qubox_tools/` | Analysis toolkit — fitting, plotting, algorithms, optimization |
 | `qubox_lab_mcp/` | Lab MCP server |
-| `tools/` | Agent and developer utilities |
-| `notebooks/` | Usage examples and workflow demonstrations |
+| `tools/` | Developer & agent utilities (validation, demos, logging) |
+| `notebooks/` | 28 sequential experiment notebooks |
 | `past_prompt/` | Agent prompt logs (append-only) |
 | `docs/` | CHANGELOG and extended documentation |
 | `tests/` | Unit and integration tests |
@@ -77,12 +78,12 @@ session = Session.open(sample_id="...", cooldown_id="...")
 result = session.exp.qubit.spectroscopy(frequencies=..., n_avg=100)
 ```
 
-### The Legacy Bridge
+### Package Boundaries
 
-- `qubox/legacy/` contains all experiment classes and QUA program builders from the
-  former `qubox_v2_legacy` package.
-- `qubox.notebook` exposes them as the primary import surface so notebooks need only one import.
-- Do not import directly from `qubox_v2_legacy` (deprecated package). Use `qubox.legacy.*`.
+- `qubox/` contains all experiment classes, QUA program builders, and hardware
+  control code directly (not in a legacy sublayer).
+- `qubox.notebook` re-exports experiment classes as the primary notebook import surface.
+- Do not import from `qubox_v2_legacy` or `qubox.legacy` — those packages have been eliminated.
 
 ## Python Version and Hardware
 

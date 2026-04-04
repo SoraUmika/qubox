@@ -4,12 +4,12 @@
 
 | Source Module | Test File(s) | Test Type |
 |--------------|-------------|-----------|
-| `calibration/orchestrator.py` | `qubox_v2_legacy/tests/test_calibration_fixes.py` | Unit |
-| `calibration/patch_rules.py` | `qubox_v2_legacy/tests/test_calibration_fixes.py` | Unit |
-| `calibration/*` | `qubox_v2_legacy/tests/test_calibration_cqed_params.py` | Integration |
-| `core/session_state.py` | `qubox_v2_legacy/tests/test_workflow_safety_refactor.py` | Unit |
-| `core/persistence_policy.py` | `qubox_v2_legacy/tests/test_workflow_safety_refactor.py` | Unit |
-| `core/bindings.py` | `qubox_v2_legacy/tests/test_parameter_resolution_policy.py` | Unit |
+| `calibration/orchestrator.py` | `qubox/tests/test_calibration_fixes.py` | Unit |
+| `calibration/patch_rules.py` | `qubox/tests/test_calibration_fixes.py` | Unit |
+| `calibration/*` | `qubox/tests/test_calibration_cqed_params.py` | Integration |
+| `core/session_state.py` | `qubox/tests/test_workflow_safety_refactor.py` | Unit |
+| `core/persistence_policy.py` | `qubox/tests/test_workflow_safety_refactor.py` | Unit |
+| `core/bindings.py` | `qubox/tests/test_parameter_resolution_policy.py` | Unit |
 | `gates/*` | `tests/gate_architecture/test_gate_architecture.py` | Golden snapshot |
 
 ## Golden Snapshot Tests

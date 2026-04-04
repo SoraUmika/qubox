@@ -1,4 +1,3 @@
-# qubox_v2/experiments/multi_program.py
 """Multi-program experiment base class (P2.1).
 
 ``MultiProgramExperiment`` extends :class:`ExperimentBase` for experiments

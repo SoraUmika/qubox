@@ -1,8 +1,7 @@
 """qubox.schemas — JSON config file schema validation and migration.
 
-Migrated from ``qubox_v2_legacy.core.schemas``.
-The ``_validate_pulse_specs`` type-specific check has been made standalone
-(no longer imports from qubox_v2_legacy.pulses.spec_models).
+The ``_validate_pulse_specs`` type-specific check is standalone and does not
+depend on any legacy modules.
 
 Usage::
 

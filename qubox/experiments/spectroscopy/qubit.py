@@ -17,7 +17,6 @@ from qubox_tools.fitting.cqed import qubit_spec_model
 from qubox_tools.data.containers import Output
 from ...hardware.program_runner import ExecMode, RunResult
 from ...programs import api as cQED_programs
-from ...programs.macros.measure import measureMacro
 from ...calibration.transitions import Transition, DEFAULT_TRANSITION, resolve_pulse_name
 
 

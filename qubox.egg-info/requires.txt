@@ -15,15 +15,8 @@ ruff
 ipykernel
 jupyter
 
-[gpu]
-jax[cuda12]>=0.4
-jaxlib>=0.4
-
 [gui]
 PyQt5>=5.15
 
 [mcp]
 mcp[cli]>=1.2.0
-
-[simulation]
-qutip>=5.0

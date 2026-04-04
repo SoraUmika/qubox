@@ -1,4 +1,3 @@
-# qubox_v2/experiments/configs.py
 """Typed, frozen configuration dataclasses for experiments.
 
 Each experiment has a dedicated ``*Config`` that captures its physics

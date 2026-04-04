@@ -1,6 +1,5 @@
 """qubox.preflight — pre-flight session validation.
 
-Migrated from ``qubox_v2_legacy.core.preflight``.
 Adapted to duck-type the session object so it works with both the qubox
 :class:`~qubox.session.Session` (with ``__getattr__`` forwarding) and the
 legacy ``SessionManager`` directly.

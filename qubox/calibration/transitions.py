@@ -1,6 +1,5 @@
 """qubox.calibration.transitions — canonical pulse naming conventions.
 
-Migrated from ``qubox_v2_legacy.calibration.transitions``.
 No external dependencies.
 
 The *transition* system enforces a consistent naming scheme for all

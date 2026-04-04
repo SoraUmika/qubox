@@ -1,4 +1,3 @@
-# qubox_v2/pulses/factory.py
 """PulseFactory — compile declarative pulse specs into waveform arrays.
 
 PulseFactory reads ``pulse_specs.json`` and produces concrete waveform arrays

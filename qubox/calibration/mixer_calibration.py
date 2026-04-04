@@ -1,4 +1,3 @@
-# qubox_v2/calibration/mixer_calibration.py
 """
 Manual IQ mixer calibration via external spectrum analyzer (SA124B).
 
@@ -1463,17 +1462,8 @@ class ManualMixerCalibrator:
 
     def _sanitize_db_numbers(self, obj: Any) -> Any:
         """Recursively coerce non-finite numeric values to 0.0 for JSON safety."""
-        if isinstance(obj, dict):
-            return {k: self._sanitize_db_numbers(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [self._sanitize_db_numbers(v) for v in obj]
-        if isinstance(obj, tuple):
-            return [self._sanitize_db_numbers(v) for v in obj]
-        if isinstance(obj, np.generic):
-            obj = obj.item()
-        if isinstance(obj, float):
-            return obj if np.isfinite(obj) else 0.0
-        return obj
+        from ..core.persistence import sanitize_nonfinite
+        return sanitize_nonfinite(obj)
 
     def _write_db(self, db: dict) -> None:
         """Atomically write *db* to ``calibration_db.json``.

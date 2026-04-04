@@ -1,6 +1,6 @@
 """Pulse-generation and registration utilities for the qubox toolkit.
 
-All symbols here are free of ``qubox_v2_legacy`` dependencies.
+All symbols here are self-contained within the qubox package.
 
 Sub-modules
 -----------

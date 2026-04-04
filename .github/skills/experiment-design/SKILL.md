@@ -39,7 +39,7 @@ Every experiment in qubox follows this pipeline:
 ExperimentDefinition (qubox.experiments.templates)
     │
     ▼
-QUA program builder (qubox.legacy.programs.*)
+QUA program builder (qubox.programs.*)
     │
     ▼
 Compiled QUA program

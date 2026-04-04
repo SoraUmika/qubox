@@ -1,4 +1,3 @@
-# qubox_v2/core/artifact_manager.py
 """Build-hash keyed artifact storage.
 
 ArtifactManager organises per-session artifacts under a directory keyed by
@@ -15,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .persistence_policy import sanitize_mapping_for_json
+from .persistence import sanitize_mapping_for_json
 
 _logger = logging.getLogger(__name__)
 

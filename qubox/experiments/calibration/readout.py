@@ -10,7 +10,6 @@ from typing import Any, Mapping, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
-from qm.qua import dual_demod
 
 from ..experiment_base import ExperimentBase
 from ..result import AnalysisResult, FitResult, ProgramBuildResult
@@ -27,8 +26,7 @@ from ...programs.circuit_runner import (
     make_ge_discrimination_circuit,
     make_butterfly_circuit,
 )
-from ...programs.measurement import try_build_readout_snapshot_from_macro
-from ...programs.macros.measure import measureMacro
+from ...programs.measurement import build_readout_snapshot_from_handle
 from .readout_config import ReadoutConfig
 
 _logger = get_logger(__name__)
@@ -167,7 +165,7 @@ class IQBlob(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.iq_blobs",
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
             run_program_kwargs={"targets": [("Ig", "Qg"), ("Ie", "Qe")]},
         )
 
@@ -296,7 +294,7 @@ class ReadoutGERawTrace(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.readout_ge_raw_trace",
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
         )
 
     def run(
@@ -374,7 +372,6 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
         ro_therm_clks: int | None = None,
     ) -> ProgramBuildResult:
         attr = self.attr
-        self.measure_macro.set_drive_frequency(drive_frequency)
         ro_therm_clks = _resolve_readout_therm_clks(
             self, ro_therm_clks, "ReadoutGEIntegratedTrace"
         )
@@ -423,14 +420,23 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
 
         div_clks = (pulse_len // num_div) // 4
 
-        # Legacy parity: push/restore measureMacro around program construction
-        measureMacro.push_settings()
-        measureMacro.set_pulse_op(pulseOp, active_op=ro_op)
+        explicit_readout = self._build_readout_handle(
+            element=attr.ro_el,
+            operation=ro_op,
+            drive_frequency=drive_frequency,
+            weights=(
+                [[resolved_weights[0], resolved_weights[1]], [resolved_weights[2], resolved_weights[3]]]
+                if isinstance(resolved_weights, (list, tuple)) and len(resolved_weights) >= 4
+                else None
+            ),
+            weight_length=pulse_len,
+            pulse_op=pulseOp,
+        )
 
         prog = cQED_programs.readout_ge_integrated_trace(
             attr.qb_el, resolved_weights, num_div, div_clks,
             r180, ro_depl_clks if ro_depl_clks is not None else ro_therm_clks, n_avg,
-            readout=self.readout_handle,
+            readout=explicit_readout,
         )
 
         # Legacy parity: post-processing to create g_trace/e_trace from II/IQ/QI/QQ
@@ -464,8 +470,6 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
             out["time_list"] = time_list
             return out
 
-        measureMacro.restore_settings()
-
         return ProgramBuildResult(
             program=prog,
             n_total=n_avg,
@@ -488,7 +492,7 @@ class ReadoutGEIntegratedTrace(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.readout_ge_integrated_trace",
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(explicit_readout),
             run_program_kwargs={"process_in_sim": bool(process_in_sim)},
         )
 
@@ -566,7 +570,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
         ro_element: str | None = None,
         r180: str = "x180",
         gain: float = 1.0,
-        update_measure_macro: bool = False,
+        update_readout_config: bool = False,
         burn_rot_weights: bool = True,
         apply_rotated_weights: bool = True,
         persist: bool = False,
@@ -613,25 +617,15 @@ class ReadoutGEDiscrimination(ExperimentBase):
         base_sin_name = weight_mapping[sin_key]
         base_m_sin_name = weight_mapping[m_sin_key]
 
-        # Ensure measure macro uses the resolved readout element/op mapping for this run.
-        # Keep both references in sync because notebook reloads can leave
-        # `readout.py` and `cQED_programs.py` holding different measureMacro objects.
-        macro_refs = [measureMacro]
-        prog_measure_macro = getattr(cQED_programs, "measureMacro", None)
-        if prog_measure_macro is not None and all(prog_measure_macro is not ref for ref in macro_refs):
-            macro_refs.append(prog_measure_macro)
-
-        for macro in macro_refs:
-            # Force canonical dual-demod path for IQ blob acquisition.
-            # This clears any stale sliced/per-output demodulator settings.
-            macro.set_demodulator(dual_demod.full)
-            macro.set_pulse_op(
-                pulse_info,
-                active_op=measure_op,
-                weights=[[cos_key, sin_key], [m_sin_key, cos_key]],
-                weight_len=pulse_info.length,
-            )
-            macro.set_drive_frequency(drive_frequency)
+        explicit_readout = self._build_readout_handle(
+            element=readout_element,
+            operation=measure_op,
+            drive_frequency=drive_frequency,
+            weights=[[cos_key, sin_key], [m_sin_key, cos_key]],
+            weight_length=pulse_info.length,
+            pulse_op=pulse_info,
+            gain=gain,
+        )
 
         # Store params so analyze() can build rotated weights
         self._run_params = {
@@ -639,7 +633,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
             "measure_op": measure_op,
             "burn_rot_weights": burn_rot_weights,
             "apply_rotated_weights": apply_rotated_weights,
-            "update_measure_macro": update_measure_macro,
+            "update_readout_config": update_readout_config,
             "drive_frequency": drive_frequency,
             "persist": persist,
             "base_cos_name": base_cos_name,
@@ -689,12 +683,12 @@ class ReadoutGEDiscrimination(ExperimentBase):
             except Exception:
                 prog = cQED_programs.iq_blobs(
                     readout_element, attr.qb_el, r180, qb_therm, n_samples,
-                    readout=self.readout_handle,
+                    readout=explicit_readout,
                 )
         else:
             prog = cQED_programs.iq_blobs(
                 readout_element, attr.qb_el, r180, qb_therm, n_samples,
-                readout=self.readout_handle,
+                readout=explicit_readout,
             )
         return ProgramBuildResult(
             program=prog,
@@ -707,7 +701,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
                 "ro_element": ro_element,
                 "r180": r180,
                 "gain": gain,
-                "update_measure_macro": update_measure_macro,
+                "update_readout_config": update_readout_config,
                 "burn_rot_weights": burn_rot_weights,
                 "apply_rotated_weights": apply_rotated_weights,
                 "persist": persist,
@@ -726,7 +720,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function=builder_function,
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(explicit_readout),
             run_program_kwargs={"targets": [("Ig", "Qg"), ("Ie", "Qe")]},
         )
 
@@ -737,7 +731,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
         ro_element: str | None = None,
         r180: str = "x180",
         gain: float = 1.0,
-        update_measure_macro: bool = False,
+        update_readout_config: bool = False,
         burn_rot_weights: bool = True,
         apply_rotated_weights: bool = True,
         persist: bool = False,
@@ -757,7 +751,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
             ro_element=ro_element,
             r180=r180,
             gain=gain,
-            update_measure_macro=update_measure_macro,
+            update_readout_config=update_readout_config,
             burn_rot_weights=burn_rot_weights,
             apply_rotated_weights=apply_rotated_weights,
             persist=persist,
@@ -878,10 +872,10 @@ class ReadoutGEDiscrimination(ExperimentBase):
                 if allow_inline:
                     try:
                         self._build_rotated_weights(metrics)
-                        if self._run_params.get("update_measure_macro", False):
-                            self._apply_rotated_measure_macro(metrics)
+                        if self._run_params.get("update_readout_config", False):
+                            self._apply_rotated_readout_config(metrics)
                             if self._run_params.get("persist", False):
-                                self._persist_measure_macro_state()
+                                self._persist_measure_config()
                         _logger.info("Rotated integration weights computed AND applied")
                         # Post-check: validate weights are present in config
                         validation = self.verify_rotated_weights()
@@ -912,7 +906,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
                             "payload": {"include_volatile": True},
                         },
                     ])
-                    if self._run_params.get("update_measure_macro", False):
+                    if self._run_params.get("update_readout_config", False):
                         metadata.setdefault("proposed_patch_ops", []).append(
                             {
                                 "op": "SetMeasureDiscrimination",
@@ -945,9 +939,9 @@ class ReadoutGEDiscrimination(ExperimentBase):
                     metadata["strict_mode_rotated_defs_refreshed"] = strict_defs_refreshed
                     if strict_defs_refresh_error:
                         metadata["strict_mode_rotated_defs_refresh_error"] = strict_defs_refresh_error
-                    if self._run_params.get("update_measure_macro", False):
+                    if self._run_params.get("update_readout_config", False):
                         _logger.info(
-                            "Strict mode: runtime measureMacro mutation skipped; applying rotated labels is deferred to orchestrator patch"
+                            "Strict mode: runtime readout-config mutation skipped; applying rotated labels is deferred to orchestrator patch"
                         )
                     _logger.info("Strict mode: rotated weight/macro updates emitted as patch intent")
             else:
@@ -957,10 +951,10 @@ class ReadoutGEDiscrimination(ExperimentBase):
                     metrics["angle"],
                 )
 
-            if self._run_params.get("update_measure_macro", False):
+            if self._run_params.get("update_readout_config", False):
                 allow_inline = bool(getattr(self._ctx, "allow_inline_mutations", False))
                 if allow_inline:
-                    disc_sig = self._apply_discrimination_measure_macro(metrics)
+                    disc_sig = self._apply_discrimination_readout_config(metrics)
                     if disc_sig:
                         metrics["readout_state_signature"] = disc_sig
                         metadata["readout_state_signature"] = disc_sig
@@ -980,7 +974,8 @@ class ReadoutGEDiscrimination(ExperimentBase):
                     ps_cfg = PostSelectionConfig.from_discrimination_results(
                         metrics, blob_k_g=blob_k_g, blob_k_e=blob_k_e,
                     )
-                    measureMacro.set_post_select_config(ps_cfg)
+                    if hasattr(self._ctx, "set_post_selection_config"):
+                        self._ctx.set_post_selection_config(ps_cfg, persist=False)
                     if allow_inline:
                         _logger.info("Post-selection config updated from GE discrimination")
                     else:
@@ -1170,12 +1165,8 @@ class ReadoutGEDiscrimination(ExperimentBase):
         if burn_rot_weights:
             self.burn_pulses(include_volatile=True)
 
-    def _apply_rotated_measure_macro(self, metrics: dict) -> None:
-        """Update measureMacro with legacy-compatible rotated labels.
-
-        Discrimination params are proposed via ``proposed_patch_ops`` in the
-        analysis metadata rather than mutated directly on the singleton.
-        """
+    def _apply_rotated_readout_config(self, metrics: dict) -> None:
+        """Update the explicit session readout binding with rotated labels."""
         params = self._run_params
         pulse_info = params["pulse_info"]
         measure_op = params["measure_op"]
@@ -1190,22 +1181,32 @@ class ReadoutGEDiscrimination(ExperimentBase):
         map_rot_m_sin = _name(op_prefix, "rot_m_sin")
 
         try:
-            macro_refs = [measureMacro]
-            prog_measure_macro = getattr(cQED_programs, "measureMacro", None)
-            if prog_measure_macro is not None and all(prog_measure_macro is not ref for ref in macro_refs):
-                macro_refs.append(prog_measure_macro)
+            bindings = getattr(self._ctx, "bindings", None)
+            readout_binding = getattr(bindings, "readout", None) if bindings is not None else None
+            if readout_binding is None:
+                raise RuntimeError("No readout binding available on experiment context.")
 
-            for mm in macro_refs:
-                mm.set_pulse_op(
-                    pulse_info,
-                    active_op=measure_op,
-                    weights=([map_rot_cos, map_rot_sin], [map_rot_m_sin, map_rot_cos]),
-                    weight_len=pulse_info.length,
+            readout_binding.pulse_op = pulse_info
+            readout_binding.active_op = measure_op
+            readout_binding.demod_weight_sets = [
+                [map_rot_cos, map_rot_sin],
+                [map_rot_m_sin, map_rot_cos],
+            ]
+            if pulse_info.length is not None:
+                readout_binding.acquire_in.weight_length = int(pulse_info.length)
+            if drive_frequency is not None:
+                readout_binding.drive_frequency = float(drive_frequency)
+
+            set_runtime = getattr(self._ctx, "set_runtime_setting", None)
+            if callable(set_runtime):
+                set_runtime(
+                    "active_readout_element",
+                    params.get("readout_element", getattr(self.attr, "ro_el", None)),
+                    persist=False,
                 )
-                mm.set_drive_frequency(drive_frequency)
-            _logger.info("measureMacro updated with rotated readout weights")
+            _logger.info("Active readout config updated with rotated readout weights")
         except Exception as exc:
-            _logger.warning("Failed to update measureMacro with rotated weights: %s", exc)
+            _logger.warning("Failed to update active readout config with rotated weights: %s", exc)
 
     def _discrimination_payload(self, metrics: Mapping[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -1219,7 +1220,7 @@ class ReadoutGEDiscrimination(ExperimentBase):
                 payload[key] = metrics.get(key)
         return payload
 
-    def _apply_discrimination_measure_macro(self, metrics: Mapping[str, Any]) -> dict[str, Any]:
+    def _apply_discrimination_readout_config(self, metrics: Mapping[str, Any]) -> dict[str, Any]:
         payload = self._discrimination_payload(metrics)
         params = getattr(self, "_run_params", {})
         pulse_info = params.get("pulse_info")
@@ -1263,30 +1264,29 @@ class ReadoutGEDiscrimination(ExperimentBase):
         readout_state["hash"] = _stable_hash(_canonical_readout_state_payload(readout_state))
 
         try:
-            macro_refs = [measureMacro]
-            prog_measure_macro = getattr(cQED_programs, "measureMacro", None)
-            if prog_measure_macro is not None and all(prog_measure_macro is not ref for ref in macro_refs):
-                macro_refs.append(prog_measure_macro)
-
-            for mm in macro_refs:
-                mm._update_readout_discrimination(payload)
-                mm._ro_disc_params["qbx_readout_state"] = dict(readout_state)
+            bindings = getattr(self._ctx, "bindings", None)
+            readout_binding = getattr(bindings, "readout", None) if bindings is not None else None
+            if readout_binding is not None:
+                readout_binding.discrimination.update(payload)
+            set_signature = getattr(self._ctx, "set_readout_state_signature", None)
+            if callable(set_signature):
+                set_signature(readout_state, persist=False)
 
             if getattr(self, "_run_params", {}).get("debug", False):
                 _logger.info("GE signature dict: %s", json.dumps(readout_state, default=str, sort_keys=True))
 
             _logger.info(
-                "GE discrimination state pushed to measureMacro: hash=%s thr=%.6g angle=%.6g",
+                "GE discrimination state pushed to explicit readout config: hash=%s thr=%.6g angle=%.6g",
                 readout_state["hash"],
                 readout_state["threshold"],
                 readout_state["angle"],
             )
         except Exception as exc:
-            _logger.warning("Failed to push discrimination state to measureMacro: %s", exc)
+            _logger.warning("Failed to push discrimination state to explicit readout config: %s", exc)
         return readout_state
 
-    def _persist_measure_macro_state(self) -> None:
-        """Persist measureMacro via CalibrationOrchestrator patch application.
+    def _persist_measure_config(self) -> None:
+        """Persist explicit readout config via CalibrationOrchestrator patch application.
 
         Uses the ``PersistMeasureConfig`` patch operation rather than
         writing ``measureConfig.json`` directly from experiment code.
@@ -1301,23 +1301,26 @@ class ReadoutGEDiscrimination(ExperimentBase):
         if orchestrator is not None:
             try:
                 from ...calibration.contracts import Patch
-                patch = Patch(reason="persist_measure_macro_state")
+                patch = Patch(reason="persist_measure_config")
                 patch.add("PersistMeasureConfig")
                 orchestrator.apply_patch(patch)
-                _logger.info("Persisted measureMacro state via orchestrator patch")
+                _logger.info("Persisted explicit readout config via orchestrator patch")
             except Exception as exc:
-                _logger.warning("Failed to persist measureMacro via orchestrator: %s — falling back to direct save", exc)
-                self._persist_measure_macro_state_direct()
+                _logger.warning("Failed to persist explicit readout config via orchestrator: %s — falling back to direct save", exc)
+                self._persist_measure_config_direct()
         else:
-            self._persist_measure_macro_state_direct()
+            self._persist_measure_config_direct()
 
-    def _persist_measure_macro_state_direct(self) -> None:
-        """Fallback: persist measureMacro directly (legacy path)."""
+    def _persist_measure_config_direct(self) -> None:
+        """Fallback: persist explicit readout config directly."""
         exp_path = Path(getattr(self._ctx, "experiment_path", "."))
         dst = exp_path / "config" / "measureConfig.json"
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        measureMacro.save_json(str(dst))
-        _logger.info("Persisted measureMacro state to %s (direct)", dst)
+        persist = getattr(self._ctx, "persist_measure_config", None)
+        if callable(persist):
+            persist(dst)
+            _logger.info("Persisted explicit readout config to %s (direct)", dst)
+        else:
+            raise RuntimeError("Experiment context does not expose persist_measure_config().")
 
     def verify_rotated_weights(self) -> dict[str, Any]:
         """Validate that rotated integration weights are properly applied.
@@ -1658,12 +1661,15 @@ class ReadoutWeightsOptimization(ExperimentBase):
         ro_depl_clks: int | None = None,
         n_avg: int = 100,
         persist: bool = False,
-        set_measure_macro: bool = False,
+        set_active_readout: bool = False,
         make_plots: bool = True,
         revert_on_no_improvement: bool = False,
     ) -> ProgramBuildResult:
         attr = self.attr
-        self.measure_macro.set_drive_frequency(drive_frequency)
+        bindings = getattr(self._ctx, "bindings", None)
+        readout_binding = getattr(bindings, "readout", None) if bindings is not None else None
+        if readout_binding is not None:
+            readout_binding.drive_frequency = float(drive_frequency)
 
         # Store run params for analyze()
         self._run_params = {
@@ -1672,7 +1678,7 @@ class ReadoutWeightsOptimization(ExperimentBase):
             "sin_w_key": sin_w_key,
             "m_sin_w_key": m_sin_w_key,
             "persist": persist,
-            "set_measure_macro": set_measure_macro,
+            "set_active_readout": set_active_readout,
             "revert_on_no_improvement": revert_on_no_improvement,
         }
 
@@ -1709,7 +1715,7 @@ class ReadoutWeightsOptimization(ExperimentBase):
                 "ro_depl_clks": ro_depl_clks,
                 "n_avg": n_avg,
                 "persist": bool(persist),
-                "set_measure_macro": bool(set_measure_macro),
+                "set_active_readout": bool(set_active_readout),
                 "make_plots": bool(make_plots),
                 "revert_on_no_improvement": bool(revert_on_no_improvement),
             },
@@ -1719,7 +1725,7 @@ class ReadoutWeightsOptimization(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function="ReadoutGEIntegratedTrace.build_program",
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=trace_build.readout_state,
             run_program_kwargs=dict(trace_build.run_program_kwargs or {}),
         )
 
@@ -1736,7 +1742,7 @@ class ReadoutWeightsOptimization(ExperimentBase):
         ro_depl_clks: int | None = None,
         n_avg: int = 100,
         persist: bool = False,
-        set_measure_macro: bool = False,
+        set_active_readout: bool = False,
         make_plots: bool = True,
         revert_on_no_improvement: bool = False,
     ) -> RunResult:
@@ -1751,7 +1757,7 @@ class ReadoutWeightsOptimization(ExperimentBase):
             ro_depl_clks=ro_depl_clks,
             n_avg=n_avg,
             persist=persist,
-            set_measure_macro=set_measure_macro,
+            set_active_readout=set_active_readout,
             make_plots=make_plots,
             revert_on_no_improvement=revert_on_no_improvement,
         )
@@ -1899,7 +1905,7 @@ class ReadoutWeightsOptimization(ExperimentBase):
         sin_w_key = params["sin_w_key"]
         m_sin_w_key = params["m_sin_w_key"]
         persist = params["persist"]
-        set_measure_macro = params["set_measure_macro"]
+        set_active_readout = params["set_active_readout"]
 
         attr = self.attr
         pm = self.pulse_mgr
@@ -1931,13 +1937,22 @@ class ReadoutWeightsOptimization(ExperimentBase):
         pm.append_integration_weight_mapping(pulse, opt_sin_key, opt_sin_label, override=True)
         pm.append_integration_weight_mapping(pulse, opt_m_sin_key, opt_m_sin_label, override=True)
 
-        if set_measure_macro:
-            measureMacro.set_outputs(
-                [[opt_cos_key, opt_sin_key], [opt_m_sin_key, opt_cos_key]],
-                weight_len=int(div_clks * 4),
-            )
+        if set_active_readout:
+            bindings = getattr(self._ctx, "bindings", None)
+            readout_binding = getattr(bindings, "readout", None) if bindings is not None else None
+            if readout_binding is not None:
+                readout_binding.pulse_op = pulseOp
+                readout_binding.active_op = ro_op
+                readout_binding.demod_weight_sets = [
+                    [opt_cos_key, opt_sin_key],
+                    [opt_m_sin_key, opt_cos_key],
+                ]
+                readout_binding.acquire_in.weight_length = int(div_clks * 4)
+            set_runtime = getattr(self._ctx, "set_runtime_setting", None)
+            if callable(set_runtime):
+                set_runtime("active_readout_element", attr.ro_el, persist=False)
             self.burn_pulses(include_volatile=True)
-            _logger.info("measureMacro updated with optimised weights")
+            _logger.info("Active readout config updated with optimised weights")
 
     @staticmethod
     def _normalize_complex_array(arr: np.ndarray) -> np.ndarray:
@@ -2057,7 +2072,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         prep_kwargs: dict | None = None,
         k: float | None = None,
         r180: str = "x180",
-        update_measure_macro: bool = False,
+        update_readout_config: bool = False,
         show_analysis: bool = False,
         n_samples: int = 10_000,
         M0_MAX_TRIALS: int = 16,
@@ -2071,47 +2086,39 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         self.set_standard_frequencies()
 
         sync_info: dict[str, Any] = {
-            "requested": bool(update_measure_macro),
+            "requested": bool(update_readout_config),
             "applied": False,
             "reason": "not_requested",
         }
 
-        try:
-            ro_el = getattr(self.attr, "ro_el", None)
-            thr = (getattr(measureMacro, "_ro_disc_params", {}) or {}).get("threshold", None)
-            if ro_el is not None and (thr is None):
-                measureMacro.sync_from_calibration(self.calibration_store, ro_el)
-        except Exception as exc:
-            _logger.warning("Butterfly: measureMacro.sync_from_calibration failed: %s", exc, exc_info=True)
-
-        if update_measure_macro:
-            sync_info = self._sync_measure_macro_from_current_mapping(prefer_rotated=True)
+        if update_readout_config:
+            sync_info = self._sync_readout_binding_from_current_mapping(prefer_rotated=True)
             if sync_info.get("applied"):
                 _logger.info(
-                    "Butterfly measureMacro sync applied: element=%s op=%s weights=%s",
+                    "Butterfly readout-config sync applied: element=%s op=%s weights=%s",
                     sync_info.get("element"),
                     sync_info.get("operation"),
                     sync_info.get("weights"),
                 )
             else:
                 _logger.warning(
-                    "Butterfly measureMacro sync not applied: %s",
+                    "Butterfly readout-config sync not applied: %s",
                     sync_info.get("reason", "unknown"),
                 )
 
-        ge_state = (getattr(measureMacro, "_ro_disc_params", {}) or {}).get("qbx_readout_state", None)
+        get_signature = getattr(self._ctx, "get_readout_state_signature", None)
+        ge_state = get_signature() if callable(get_signature) else None
 
         if isinstance(ge_state, Mapping) and ge_state.get("strict_mode_rotated_weights_patch_pending"):
             try:
-                element = measureMacro.active_element()
-                operation = measureMacro.active_op()
-                pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
-                weight_mapping = (pulse_info.int_weights_mapping if pulse_info is not None else {}) or {}
-                op_prefix = "" if (pulse_info is not None and pulse_info.op == "readout") else (f"{pulse_info.op}_" if pulse_info is not None else "")
-                triplet = self._pick_weight_triplet(weight_mapping, op_prefix)
-                using_rotated_labels = bool(
-                    triplet and all(str(lbl).startswith(("rot_", f"{op_prefix}rot_")) for lbl in triplet)
+                current_state = self._current_readout_state_signature()
+                weight_state = (current_state or {}).get("weights", {}) if current_state is not None else {}
+                triplet = tuple(
+                    weight_state.get(key)
+                    for key in ("cos", "sin", "minus_sin")
+                    if weight_state.get(key) is not None
                 )
+                using_rotated_labels = bool(triplet and all("rot_" in str(lbl) for lbl in triplet))
                 if using_rotated_labels:
                     _logger.warning(
                         "Strict-mode rotated-weight warning: GE requested apply_rotated_weights=True but inline application/burn was "
@@ -2156,7 +2163,8 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             post_sel_policy = None
             post_sel_kwargs = {}
             if use_stored_config and can_use_stored_postsel:
-                ps_cfg = measureMacro.get_post_select_config()
+                get_post_select = getattr(self._ctx, "get_post_selection_config", None)
+                ps_cfg = get_post_select() if callable(get_post_select) else None
                 if ps_cfg is not None:
                     post_sel_policy = ps_cfg.policy
                     post_sel_kwargs = dict(ps_cfg.kwargs) if ps_cfg.kwargs else {}
@@ -2169,7 +2177,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                 )
 
             if post_sel_policy is None:
-                ro_disc = getattr(measureMacro, "_ro_disc_params", {}) or {}
+                ro_disc = dict(getattr(self.readout_handle.binding, "discrimination", {}) or {})
                 rot_mu_g = ro_disc.get("rot_mu_g", None)
                 rot_mu_e = ro_disc.get("rot_mu_e", None)
                 sigma_g = ro_disc.get("sigma_g", None)
@@ -2224,7 +2232,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
 
         policy_norm = str(post_sel_policy).upper() if post_sel_policy is not None else "THRESHOLD"
         if policy_norm == "POSTERIOR":
-            ro_disc = getattr(measureMacro, "_ro_disc_params", {}) or {}
+            ro_disc = dict(getattr(self.readout_handle.binding, "discrimination", {}) or {})
 
             rot_mu_g = ro_disc.get("rot_mu_g", None)
             rot_mu_e = ro_disc.get("rot_mu_e", None)
@@ -2273,28 +2281,29 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             "post_sel_policy": post_sel_policy,
             "post_sel_kwargs": dict(post_sel_kwargs),
             "post_sel_source": post_sel_source,
-            "measure_macro_sync": dict(sync_info),
-            "update_measure_macro": bool(update_measure_macro),
+            "readout_config_sync": dict(sync_info),
+            "update_readout_config": bool(update_readout_config),
             "debug": bool(debug),
         }
 
         if debug:
-            ro_disc = getattr(measureMacro, "_ro_disc_params", {}) or {}
+            readout = self.readout_handle
+            ro_disc = dict(getattr(readout.binding, "discrimination", {}) or {})
             _logger.info(
-                "Butterfly BLOBS frame debug: policy=%s kwargs=%s measureMacro(angle=%s, threshold=%s)",
+                "Butterfly BLOBS frame debug: policy=%s kwargs=%s readout(angle=%s, threshold=%s)",
                 post_sel_policy,
                 post_sel_kwargs,
                 ro_disc.get("angle"),
                 ro_disc.get("threshold"),
             )
             _logger.info(
-                "Butterfly post-select uses M0 demod outputs I0/Q0 from measureMacro.measure(...); "
+                "Butterfly post-select uses M0 demod outputs I0/Q0 from explicit readout measurement; "
                 "for BLOBS those I/Q values are compared directly to Ig/Qg/Ie/Qe in policy kwargs."
             )
 
             try:
-                element = measureMacro.active_element()
-                operation = measureMacro.active_op()
+                element = readout.element
+                operation = readout.operation
                 pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
                 weight_mapping = pulse_info.int_weights_mapping if pulse_info is not None else {}
                 op_prefix = "" if (pulse_info is not None and pulse_info.op == "readout") else (f"{pulse_info.op}_" if pulse_info is not None else "")
@@ -2302,7 +2311,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
 
                 cfg_engine = getattr(self._ctx, "config_engine", None)
                 qm_cfg = cfg_engine.build_qm_config() if cfg_engine is not None else {}
-                active_weights = measureMacro.get_outputs()
+                active_weights = readout.demod_weight_sets
 
                 _logger.info(
                     "Butterfly compile preflight: element=%s op=%s pulse=%s triplet=%s active_outputs=%s",
@@ -2388,7 +2397,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                 "prep_kwargs": dict(prep_kwargs or {}),
                 "k": k,
                 "r180": r180,
-                "update_measure_macro": bool(update_measure_macro),
+                "update_readout_config": bool(update_readout_config),
                 "show_analysis": bool(show_analysis),
                 "n_samples": n_samples,
                 "M0_MAX_TRIALS": M0_MAX_TRIALS,
@@ -2403,7 +2412,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function=builder_function,
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
         )
 
     def run(
@@ -2412,7 +2421,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         prep_kwargs: dict | None = None,
         k: float | None = None,
         r180: str = "x180",
-        update_measure_macro: bool = False,
+        update_readout_config: bool = False,
         show_analysis: bool = False,
         n_samples: int = 10_000,
         M0_MAX_TRIALS: int = 16,
@@ -2427,7 +2436,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             prep_kwargs=prep_kwargs,
             k=k,
             r180=r180,
-            update_measure_macro=update_measure_macro,
+            update_readout_config=update_readout_config,
             show_analysis=show_analysis,
             n_samples=n_samples,
             M0_MAX_TRIALS=M0_MAX_TRIALS,
@@ -2464,7 +2473,8 @@ class ReadoutButterflyMeasurement(ExperimentBase):
 
             if payload:
                 np.savez(npz_path, **payload)
-                ro_disc = (getattr(measureMacro, "_ro_disc_params", {}) or {})
+                readout = self.readout_handle
+                ro_disc = dict(getattr(readout.binding, "discrimination", {}) or {})
                 meta = {
                     "timestamp": ts,
                     "tag": tag,
@@ -2473,7 +2483,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                         "threshold": ro_disc.get("threshold"),
                         "angle": ro_disc.get("angle"),
                         "fidelity_definition": ro_disc.get("fidelity_definition"),
-                        "active_outputs": measureMacro.get_outputs(),
+                        "active_outputs": readout.demod_weight_sets,
                     },
                 }
                 meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
@@ -2485,13 +2495,15 @@ class ReadoutButterflyMeasurement(ExperimentBase):
 
     def _current_readout_state_signature(self) -> dict[str, Any] | None:
         try:
-            element = measureMacro.active_element()
-            operation = measureMacro.active_op()
+            readout = self.readout_handle
+            element = readout.element
+            operation = readout.operation
             pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
             if pulse_info is None:
                 return None
             weight_mapping = pulse_info.int_weights_mapping or {}
             triplet = self._pick_weight_triplet(weight_mapping, "" if pulse_info.op == "readout" else f"{pulse_info.op}_")
+            ro_disc = dict(getattr(readout.binding, "discrimination", {}) or {})
             state = {
                 "element": element,
                 "operation": operation,
@@ -2501,9 +2513,9 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                     "sin": weight_mapping.get(triplet[1]) if triplet else None,
                     "minus_sin": weight_mapping.get(triplet[2]) if triplet else None,
                 },
-                "angle": (getattr(measureMacro, "_ro_disc_params", {}) or {}).get("angle", None),
-                "threshold": (getattr(measureMacro, "_ro_disc_params", {}) or {}).get("threshold", None),
-                "fidelity_definition": (getattr(measureMacro, "_ro_disc_params", {}) or {}).get("fidelity_definition", None),
+                "angle": ro_disc.get("angle", None),
+                "threshold": ro_disc.get("threshold", None),
+                "fidelity_definition": ro_disc.get("fidelity_definition", None),
             }
             state["hash"] = _stable_hash(_canonical_readout_state_payload(state))
             return state
@@ -2526,17 +2538,12 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                 return triplet
         return None
 
-    def _sync_measure_macro_from_current_mapping(self, *, prefer_rotated: bool = True) -> dict[str, Any]:
+    def _sync_readout_binding_from_current_mapping(self, *, prefer_rotated: bool = True) -> dict[str, Any]:
         _ = prefer_rotated  # kept for API clarity
-        try:
-            element = measureMacro.active_element()
-        except Exception:
-            element = self.attr.ro_el
-
-        try:
-            operation = measureMacro.active_op()
-        except Exception:
-            operation = "readout"
+        element = getattr(self.attr, "ro_el", None) or "resonator"
+        bindings = getattr(self._ctx, "bindings", None)
+        readout_binding = getattr(bindings, "readout", None) if bindings is not None else None
+        operation = getattr(readout_binding, "active_op", None) or "readout"
 
         pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
         if pulse_info is None:
@@ -2565,21 +2572,30 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             }
 
         cos_key, sin_key, m_sin_key = triplet
-        macro_refs = [measureMacro]
-        prog_measure_macro = getattr(cQED_programs, "measureMacro", None)
-        if prog_measure_macro is not None and all(prog_measure_macro is not ref for ref in macro_refs):
-            macro_refs.append(prog_measure_macro)
+        if readout_binding is None:
+            return {
+                "requested": True,
+                "applied": False,
+                "reason": "No readout binding available on experiment context.",
+                "element": element,
+                "operation": operation,
+            }
 
-        drive_frequency = measureMacro.get_drive_frequency()
-        for mm in macro_refs:
-            mm.set_pulse_op(
-                pulse_info,
-                active_op=operation,
-                weights=[[cos_key, sin_key], [m_sin_key, cos_key]],
-                weight_len=pulse_info.length,
-            )
-            if drive_frequency is not None:
-                mm.set_drive_frequency(drive_frequency)
+        readout_binding.pulse_op = pulse_info
+        readout_binding.active_op = operation
+        readout_binding.demod_weight_sets = [[cos_key, sin_key], [m_sin_key, cos_key]]
+        if pulse_info.length is not None:
+            readout_binding.acquire_in.weight_length = int(pulse_info.length)
+
+        drive_frequency = getattr(readout_binding, "drive_frequency", None)
+        if drive_frequency is None:
+            drive_frequency = self._run_params.get("drive_frequency")
+        if drive_frequency is not None:
+            readout_binding.drive_frequency = float(drive_frequency)
+
+        set_runtime = getattr(self._ctx, "set_runtime_setting", None)
+        if callable(set_runtime):
+            set_runtime("active_readout_element", element, persist=False)
 
         return {
             "requested": True,
@@ -2724,7 +2740,7 @@ class ReadoutButterflyMeasurement(ExperimentBase):
             if average_tries is not None:
                 metrics["average_tries"] = float(np.mean(average_tries))
 
-            ro_disc = (getattr(measureMacro, "_ro_disc_params", {}) or {})
+            ro_disc = dict(getattr(self.readout_handle.binding, "discrimination", {}) or {})
             ge_fid_pct = ro_disc.get("fidelity", None)
             if ge_fid_pct is not None and "F" in metrics:
                 ge_fid_frac = float(ge_fid_pct) / 100.0
@@ -2745,9 +2761,9 @@ class ReadoutButterflyMeasurement(ExperimentBase):
         analysis = AnalysisResult.from_run(result, metrics=metrics, metadata=metadata)
 
         if hasattr(self, "_run_params"):
-            sync = self._run_params.get("measure_macro_sync", {})
+            sync = self._run_params.get("readout_config_sync", {})
             if isinstance(sync, dict):
-                metadata["measure_macro_sync"] = sync
+                metadata["readout_config_sync"] = sync
                 metrics["readout_state_match"] = sync.get("state_match")
                 metrics["readout_state_hash_ge"] = sync.get("ge_state_hash")
                 metrics["readout_state_hash_butterfly"] = sync.get("bfly_state_hash")
@@ -2774,10 +2790,8 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                 ),
             )
 
-        if hasattr(self, "_run_params") and self._run_params.get("update_measure_macro", False):
-            # Emit proposed patch ops for readout quality update on measureMacro.
-            # The CalibrationOrchestrator will apply these via SetMeasureQuality
-            # rather than directly mutating the singleton from analyze().
+        if hasattr(self, "_run_params") and self._run_params.get("update_readout_config", False):
+            # Emit proposed patch ops for readout quality update on the explicit readout config.
             quality_payload: dict[str, Any] = {}
             for key in ("alpha", "beta", "F", "Q", "V", "t01", "t10"):
                 if key in metrics:
@@ -2825,9 +2839,8 @@ class ReadoutButterflyMeasurement(ExperimentBase):
                     if t1_us_field is not None and t1_us_field > 0:
                         T1_s = float(t1_us_field) * 1e-6
 
-                    # measureMacro.active_length() returns pulse length in ns.
-                    # Internal canonical time representation is clock cycles.
-                    active_len = getattr(measureMacro, "active_length", lambda: None)()
+                    pulse_info = getattr(self.readout_handle.binding, "pulse_op", None)
+                    active_len = getattr(pulse_info, "length", None)
                     if active_len is not None and active_len > 0:
                         t_readout_ns = float(active_len)
                         t_readout_clks = t_readout_ns / 4.0
@@ -3056,10 +3069,6 @@ class CalibrateReadoutFull(ExperimentBase):
 
         ge_kw = dict(cfg.ge_kwargs)
         bfly_kw = dict(cfg.bfly_kwargs)
-        if "update_measureMacro" in ge_kw and "update_measure_macro" not in ge_kw:
-            ge_kw["update_measure_macro"] = ge_kw.pop("update_measureMacro")
-        if "update_measureMacro" in bfly_kw and "update_measure_macro" not in bfly_kw:
-            bfly_kw["update_measure_macro"] = bfly_kw.pop("update_measureMacro")
 
         ge_n_samples_override = ge_kw.pop("n_samples", None)
         bfly_n_samples_override = bfly_kw.pop("n_samples", None)
@@ -3199,13 +3208,13 @@ class CalibrateReadoutFull(ExperimentBase):
             _logger.info("Step 1: Weight optimization")
             wopt = ReadoutWeightsOptimization(self._ctx)
             wopt_kw = dict(cfg.wopt_kwargs)
-            wopt_set_measure_macro = bool(wopt_kw.pop("set_measure_macro", False))
+            wopt_set_active_readout = bool(wopt_kw.pop("set_active_readout", False))
             wopt_result = wopt.run(
                 eff_ro_op, eff_drive_freq,
                 cfg.cos_weight_key, cfg.sin_weight_key, cfg.m_sin_weight_key,
                 r180=cfg.r180, n_avg=cfg.n_avg_weights,
                 persist=cfg.persist_weights,
-                set_measure_macro=wopt_set_measure_macro,
+                set_active_readout=wopt_set_active_readout,
                 revert_on_no_improvement=cfg.revert_on_no_improvement,
                 **wopt_kw,
             )
@@ -3218,18 +3227,12 @@ class CalibrateReadoutFull(ExperimentBase):
         ge_kw = dict(cfg.ge_kwargs)
         bfly_kw = dict(cfg.bfly_kwargs)
 
-        if "update_measureMacro" in ge_kw and "update_measure_macro" not in ge_kw:
-            ge_kw["update_measure_macro"] = ge_kw.pop("update_measureMacro")
-
-        ge_update_measure_macro = bool(ge_kw.pop("update_measure_macro", cfg.update_threshold))
+        ge_update_readout_config = bool(ge_kw.pop("update_readout_config", cfg.update_threshold))
         ge_persist = bool(ge_kw.pop("persist", cfg.update_weights))
         ge_apply_rotated_weights = bool(ge_kw.pop("apply_rotated_weights", cfg.update_weights))
         ge_n_samples_override = ge_kw.pop("n_samples", None)
 
-        if "update_measureMacro" in bfly_kw and "update_measure_macro" not in bfly_kw:
-            bfly_kw["update_measure_macro"] = bfly_kw.pop("update_measureMacro")
-
-        bfly_update_measure_macro = bool(bfly_kw.pop("update_measure_macro", cfg.update_threshold))
+        bfly_update_readout_config = bool(bfly_kw.pop("update_readout_config", cfg.update_threshold))
         bfly_n_samples_override = bfly_kw.pop("n_samples", None)
         bfly_max_trials_override = bfly_kw.pop("M0_MAX_TRIALS", cfg.M0_MAX_TRIALS)
 
@@ -3270,7 +3273,7 @@ class CalibrateReadoutFull(ExperimentBase):
                 r180=cfg.r180,
                 n_samples=ge_n_samples,
                 base_weight_keys=(opt_cos_key, opt_sin_key, opt_m_sin_key),
-                update_measure_macro=ge_update_measure_macro,
+                update_readout_config=ge_update_readout_config,
                 apply_rotated_weights=ge_apply_rotated_weights,
                 persist=ge_persist,
                 burn_rot_weights=cfg.burn_rot_weights,
@@ -3296,7 +3299,7 @@ class CalibrateReadoutFull(ExperimentBase):
             bfly_show = bfly_kw.pop("show_analysis", cfg.display_analysis)
             bfly_result = bfly.run(
                 r180=cfg.r180,
-                update_measure_macro=bfly_update_measure_macro,
+                update_readout_config=bfly_update_readout_config,
                 n_samples=bfly_n_samples,
                 M0_MAX_TRIALS=bfly_max_trials,
                 show_analysis=bfly_show,
@@ -3363,10 +3366,11 @@ class CalibrateReadoutFull(ExperimentBase):
                         patch.add("PersistMeasureConfig")
                         orchestrator.apply_patch(patch)
                     else:
-                        exp_path = Path(getattr(self._ctx, "experiment_path", "."))
-                        dst = exp_path / "config" / "measureConfig.json"
-                        dst.parent.mkdir(parents=True, exist_ok=True)
-                        measureMacro.save_json(str(dst))
+                        persist = getattr(self._ctx, "persist_measure_config", None)
+                        if callable(persist):
+                            persist()
+                        else:
+                            raise RuntimeError("Session context does not expose persist_measure_config().")
                 except Exception as exc:
                     _logger.warning("Failed to save measureConfig.json: %s", exc)
 

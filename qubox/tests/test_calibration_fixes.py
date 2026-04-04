@@ -4,7 +4,7 @@ Covers:
 1. resonator_freq field added to ElementFrequencies
 2. T2RamseyRule / T2EchoRule unit conversion (ns → s)
 3. CalibrationOrchestrator skips apply_patch when calibration_result.passed=False
-4. measureMacro._apply_defaults restores norm_params to {} instead of None
+4. Legacy measureConfig snapshots restore norm_params to {} instead of None
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import pytest
 # Helpers: load modules directly (bypass package __init__.py which requires
 # hardware-SDK dependencies not available in unit-test environments)
 # ---------------------------------------------------------------------------
-_ROOT = Path(__file__).parent.parent  # qubox_v2/
+_ROOT = Path(__file__).parent.parent
 
 
 def _load_module(rel_path: str, name: str):
@@ -36,7 +36,7 @@ def _get_models():
     mod_name = "_qubox_test_models"
     if mod_name in sys.modules:
         return sys.modules[mod_name]
-    return _load_module("calibration/models.py", mod_name)
+    return _load_module("calibration/store_models.py", mod_name)
 
 
 def _get_contracts():
@@ -165,13 +165,13 @@ class _FakeCalibrationResult:
 
 
 def test_t2_ramsey_rule_converts_ns_to_seconds():
-    """T2RamseyRule must store T2_ramsey in seconds (T2_star is in ns)."""
+    """T2RamseyRule must store T2_ramsey in seconds (T2_star_ns is in ns)."""
     patch_rules = _get_patch_rules()
     rule = patch_rules.T2RamseyRule(alias="transmon")
-    # T2_star comes from the fit in nanoseconds (e.g. 50 µs = 50000 ns)
+    # T2_star_ns comes from the fit in nanoseconds (e.g. 50 µs = 50000 ns)
     result = _FakeCalibrationResult(
         kind="t2_ramsey",
-        params={"T2_star": 50_000.0, "T2_star_us": 50.0},
+        params={"T2_star_ns": 50_000.0, "T2_star_us": 50.0},
     )
     patch = rule(result)
     assert patch is not None
@@ -190,13 +190,13 @@ def test_t2_ramsey_rule_converts_ns_to_seconds():
 
 
 def test_t2_echo_rule_converts_ns_to_seconds():
-    """T2EchoRule must store T2_echo in seconds (T2_echo param is in ns)."""
+    """T2EchoRule must store T2_echo in seconds (T2_echo_ns is in ns)."""
     patch_rules = _get_patch_rules()
     rule = patch_rules.T2EchoRule(alias="transmon")
-    # T2_echo comes from the fit in nanoseconds (e.g. 80 µs = 80000 ns)
+    # T2_echo_ns comes from the fit in nanoseconds (e.g. 80 µs = 80000 ns)
     result = _FakeCalibrationResult(
         kind="t2_echo",
-        params={"T2_echo": 80_000.0, "T2_echo_us": 80.0},
+        params={"T2_echo_ns": 80_000.0, "T2_echo_us": 80.0},
     )
     patch = rule(result)
     assert patch is not None
@@ -220,7 +220,7 @@ def test_t2_ramsey_rule_us_field_unchanged():
     rule = patch_rules.T2RamseyRule(alias="transmon")
     result = _FakeCalibrationResult(
         kind="t2_ramsey",
-        params={"T2_star": 50_000.0, "T2_star_us": 50.0},
+        params={"T2_star_ns": 50_000.0, "T2_star_us": 50.0},
     )
     patch = rule(result)
     assert patch is not None
@@ -239,7 +239,7 @@ def test_t2_echo_rule_us_field_unchanged():
     rule = patch_rules.T2EchoRule(alias="transmon")
     result = _FakeCalibrationResult(
         kind="t2_echo",
-        params={"T2_echo": 80_000.0, "T2_echo_us": 80.0},
+        params={"T2_echo_ns": 80_000.0, "T2_echo_us": 80.0},
     )
     patch = rule(result)
     assert patch is not None
@@ -342,111 +342,34 @@ def test_calibration_result_passed_property_true():
 
 
 # ---------------------------------------------------------------------------
-# Fix 4: measureMacro._apply_defaults restores norm_params to {}
+# Fix 4: explicit MeasurementConfig preserves norm_params from legacy snapshots
 # ---------------------------------------------------------------------------
 
-def _try_import_measure_macro():
-    """Attempt to import measureMacro; return None if hw-SDK unavailable."""
-    try:
-        import types, importlib
+def test_measurement_config_legacy_snapshot_restores_norm_params():
+    """Legacy measureConfig payloads must preserve norm_params as a dict."""
+    from qubox.core.measurement_config import MeasurementConfig
 
-        # A single callable/namespace stub that satisfies attribute lookups from qm.qua
-        _stub = lambda *a, **kw: None  # noqa: E731
-
-        # Build qm and qm.qua stubs
-        for mod_name in ("qm", "qm.qua"):
-            sys.modules.setdefault(mod_name, types.ModuleType(mod_name))
-
-        # Populate qm.qua with minimal callable stubs grouped by purpose:
-        qua_mod = sys.modules["qm.qua"]
-        # dual_demod has named sub-functions accessed as dual_demod.full etc.
-        dual_demod_stub = types.SimpleNamespace(
-            full=_stub, sliced=_stub, accumulated=_stub, moving_window=_stub,
-        )
-        if not hasattr(qua_mod, "dual_demod"):
-            qua_mod.dual_demod = dual_demod_stub
-        # All other QUA names are plain callables
-        for name in [
-            # State/variable declarations
-            "declare", "assign",
-            # Measurement / readout
-            "measure", "save",
-            # Timing / control flow
-            "wait", "pause", "align", "infinite_loop_",
-            # Pulse operations
-            "play", "frame_rotation_2pi", "reset_phase", "amp",
-            # Demodulation helpers
-            "fixed", "demod", "integration",
-            # Miscellaneous
-            "stream_processing", "IO1", "IO2", "program", "Math",
-        ]:
-            if not hasattr(qua_mod, name):
-                setattr(qua_mod, name, _stub)
-
-        # Provide stub for pulses.manager
-        pm_stub = types.ModuleType("_qubox_test_pm")
-        pm_stub.PulseOp = type("PulseOp", (), {"element": None, "op": None, "pulse": None, "length": None})
-        sys.modules.setdefault("qubox_v2.pulses.manager", pm_stub)
-        sys.modules.setdefault("qubox_v2.pulses", types.ModuleType("qubox_v2.pulses"))
-
-        # Stub analysis_tools and post_selection imports
-        at_stub = types.ModuleType("_qubox_test_at")
-        for fn in ["complex_encoder", "complex_decoder", "interp_logpdf",
-                   "bilinear_interp_logpdf", "compile_1d_kde_to_grid",
-                   "compile_2d_kde_to_grid"]:
-            setattr(at_stub, fn, _stub)
-        sys.modules.setdefault("qubox_v2.analysis.analysis_tools", at_stub)
-
-        ps_stub = types.ModuleType("_qubox_test_ps")
-        ps_stub.PostSelectionConfig = type("PostSelectionConfig", (), {
-            "from_dict": classmethod(lambda cls, d: None),
-        })
-        sys.modules.setdefault("qubox_v2.analysis.post_selection", ps_stub)
-
-        pp_stub = types.ModuleType("_qubox_test_pp2")
-        pp_stub.sanitize_mapping_for_json = lambda d: (dict(d), [])
-        sys.modules.setdefault("qubox_v2.core.persistence_policy", pp_stub)
-
-        spec = importlib.util.spec_from_file_location(
-            "_qubox_test_measure",
-            _ROOT / "programs/macros/measure.py",
-        )
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules["_qubox_test_measure"] = mod
-        spec.loader.exec_module(mod)
-        return mod.measureMacro
-    except Exception:
-        return None
-
-
-def test_measure_macro_apply_defaults_restores_norm_params():
-    """_apply_defaults must reset norm_params to {} (not None)."""
-    measureMacro = _try_import_measure_macro()
-    if measureMacro is None:
-        pytest.skip("measureMacro not importable without hardware SDK")
-
-    measureMacro._ro_disc_params["norm_params"] = {"scale": 1.5}
-    measureMacro._apply_defaults()
-
-    np_val = measureMacro._ro_disc_params.get("norm_params")
-    assert np_val == {}, (
-        f"norm_params should be reset to {{}} by _apply_defaults, got {np_val!r}"
+    cfg = MeasurementConfig.from_dict(
+        {
+            "_version": 5,
+            "ro_disc_params": {
+                "threshold": None,
+                "norm_params": {"scale": 1.5},
+            },
+        }
     )
 
+    assert cfg.norm_params == {"scale": 1.5}
 
-def test_measure_macro_reset_restores_norm_params():
-    """reset() (which calls _apply_defaults) must also restore norm_params to {}."""
-    measureMacro = _try_import_measure_macro()
-    if measureMacro is None:
-        pytest.skip("measureMacro not importable without hardware SDK")
 
-    measureMacro._ro_disc_params["norm_params"] = {"x": 42}
-    measureMacro.reset()
+def test_measurement_config_round_trip_preserves_empty_norm_params():
+    """Explicit configs keep empty norm_params stable across serialization."""
+    from qubox.core.measurement_config import MeasurementConfig
 
-    np_val = measureMacro._ro_disc_params.get("norm_params")
-    assert np_val == {}, (
-        f"norm_params should be {{}} after reset(), got {np_val!r}"
-    )
+    cfg = MeasurementConfig()
+    restored = MeasurementConfig.from_dict(cfg.to_dict())
+
+    assert restored.norm_params == {}
 
 
 # ---------------------------------------------------------------------------
@@ -473,15 +396,15 @@ def test_simulation_builder_uses_safe_threshold_access():
     )
 
 
-def test_measure_macro_threshold_none_safe_default():
-    """CRIT-02: .get("threshold") or 0.0 must return 0.0 when threshold is None (the default)."""
-    measureMacro = _try_import_measure_macro()
-    if measureMacro is None:
-        pytest.skip("measureMacro not importable without hardware SDK")
+def test_readout_threshold_none_safe_default():
+    """CRIT-02: explicit readout discrimination defaults safely when uncalibrated."""
+    from qubox.core.bindings import ChannelRef, InputBinding, OutputBinding, ReadoutBinding
 
-    measureMacro._apply_defaults()  # ensure threshold is None (the default)
-    thr = measureMacro._ro_disc_params.get("threshold") or 0.0
+    binding = ReadoutBinding(
+        drive_out=OutputBinding(channel=ChannelRef("oct1", "RF_out", 1)),
+        acquire_in=InputBinding(channel=ChannelRef("oct1", "RF_in", 1)),
+    )
+    thr = binding.discrimination.get("threshold") or 0.0
     assert thr == pytest.approx(0.0), (
         f"Expected 0.0 for uncalibrated threshold, got {thr!r}"
     )
-

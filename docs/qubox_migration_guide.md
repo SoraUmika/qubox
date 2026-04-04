@@ -1,5 +1,10 @@
 # qubox Migration Guide
 
+> **Historical document (2026-03-13).** This describes the original migration
+> path from `qubox_v2_legacy` to `qubox`. The `qubox_v2_legacy` package has
+> since been fully eliminated. The current API is documented in
+> [API Reference](../API_REFERENCE.md).
+
 Date: 2026-03-13
 
 ## Goal

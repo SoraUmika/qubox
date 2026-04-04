@@ -8,7 +8,7 @@ from ..result import ProgramBuildResult
 from qubox_tools.algorithms import post_process as pp
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
-from ...programs.measurement import try_build_readout_snapshot_from_macro
+from ...programs.measurement import build_readout_snapshot_from_handle
 
 
 class QubitResetBenchmark(ExperimentBase):
@@ -61,7 +61,7 @@ class QubitResetBenchmark(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.qubit_reset_benchmark",
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
         )
 
     def run(
@@ -137,7 +137,7 @@ class ActiveQubitResetBenchmark(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.active_qubit_reset_benchmark",
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
         )
 
     def run(
@@ -208,7 +208,7 @@ class ReadoutLeakageBenchmarking(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.readout_leakage_benchmarking",
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
         )
 
     def run(

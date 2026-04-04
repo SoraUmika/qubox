@@ -1,5 +1,12 @@
 # Migration Plan: Legacy Notebook â†’ qubox Notebooks
 
+> **Historical document.** This plan describes the migration from the legacy
+> notebook to qubox v3 notebooks. Many experiments listed here have been
+> migrated. References to qubox_v2_legacy and qubox.legacy describe
+> packages that have since been eliminated. The canonical import surfaces are
+> now qubox, qubox.notebook, and qubox_tools.
+
+
 > **Source**: `post_cavity_experiment_legacy.ipynb` (94 experiments, ~11,800 lines, 343 cells)
 > **Target**: `E:\qubox\notebooks/` â€” individual, modular notebooks using qubox v3 Session API
 > **Reference**: `post_cavity_experiment_legacy_migration_survey.md` (full 94-experiment catalog)

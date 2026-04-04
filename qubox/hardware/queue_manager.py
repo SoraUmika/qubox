@@ -1,4 +1,3 @@
-# qubox_v2/hardware/queue_manager.py
 """
 QueueManager: multi-user queue operations for the QM queue system.
 

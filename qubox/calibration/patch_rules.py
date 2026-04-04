@@ -1,6 +1,5 @@
 """qubox.calibration.patch_rules — calibration patch rule classes.
 
-Migrated from ``qubox_v2_legacy.calibration.patch_rules``.
 No external dependencies beyond qubox.calibration.
 
 Each rule is a callable ``(CalibrationResult) → Patch | None`` that

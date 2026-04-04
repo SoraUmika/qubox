@@ -1,9 +1,58 @@
 from __future__ import annotations
 
+import datetime as _dt
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..calibration import CalibrationProposal, CalibrationSnapshot
+
+
+@dataclass(frozen=True)
+class RunManifest:
+    """Immutable provenance record attached to every experiment run.
+
+    Captures everything needed to answer "what was the exact state of the
+    system when this result was produced?"
+    """
+
+    execution_request: ExecutionRequest | None = None
+    calibration_snapshot: CalibrationSnapshot | None = None
+    hardware_config_hash: str = ""
+    qubox_version: str = ""
+    timestamp: str = field(default_factory=lambda: _dt.datetime.now().isoformat())
+    git_sha: str | None = None
+    session_metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-friendly dict."""
+        req = None
+        if self.execution_request is not None:
+            req = {
+                "kind": self.execution_request.kind,
+                "template": self.execution_request.template,
+                "targets": dict(self.execution_request.targets),
+                "params": dict(self.execution_request.params),
+                "shots": self.execution_request.shots,
+            }
+            if self.execution_request.control_program is not None:
+                req["control_program"] = getattr(self.execution_request.control_program, "name", None)
+        cal = None
+        if self.calibration_snapshot is not None:
+            cal = {
+                "source_path": self.calibration_snapshot.source_path,
+                "version": getattr(self.calibration_snapshot, "version", ""),
+                "build_hash": getattr(self.calibration_snapshot, "build_hash", ""),
+                "mixer_calibration_path": getattr(self.calibration_snapshot, "mixer_calibration_path", ""),
+            }
+        return {
+            "execution_request": req,
+            "calibration_snapshot": cal,
+            "hardware_config_hash": self.hardware_config_hash,
+            "qubox_version": self.qubox_version,
+            "timestamp": self.timestamp,
+            "git_sha": self.git_sha,
+            "session_metadata": dict(self.session_metadata),
+        }
 
 
 @dataclass(frozen=True)
@@ -16,6 +65,7 @@ class ExecutionRequest:
     params: dict[str, Any] = field(default_factory=dict)
     sequence: Any = None
     circuit: Any = None
+    control_program: Any = None
     sweep: Any = None
     acquisition: Any = None
     shots: int | None = None
@@ -31,6 +81,7 @@ class ExperimentResult:
     run: Any = None
     analysis: Any = None
     calibration_snapshot: CalibrationSnapshot | None = None
+    manifest: RunManifest | None = None
     artifact_path: str | None = None
     compiler_report: dict[str, Any] = field(default_factory=dict)
     plotter: Any = None
@@ -49,6 +100,7 @@ class ExperimentResult:
             "artifact_path": self.artifact_path,
             "compiler_report": self.compiler_report,
             "calibration_snapshot": self.calibration_snapshot,
+            "manifest": self.manifest.to_dict() if self.manifest else None,
         }
 
     def proposal(self) -> CalibrationProposal | None:

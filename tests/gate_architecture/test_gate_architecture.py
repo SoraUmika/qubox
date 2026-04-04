@@ -176,6 +176,26 @@ def test_measurement_schema_validate_rejects_false_state_claim(gate_arch_modules
         schema.validate()
 
 
+def test_measurement_config_compilation_uses_explicit_readout_snapshot(fake_session, gate_arch_modules):
+    from qubox.core.measurement_config import MeasurementConfig
+
+    circuit = gate_arch_modules.circuit_protocols.RamseyProtocol(tau_clks=12, n_shots=3).build()
+    build = gate_arch_modules.circuit_compiler.CircuitCompiler(
+        fake_session,
+        measurement_config=MeasurementConfig(
+            threshold=0.222,
+            angle=0.333,
+            fidelity=0.97,
+        ),
+    ).compile(circuit)
+
+    assert build.readout_state is not None
+    assert build.readout_state["source"] == "MeasurementConfig"
+    assert build.readout_state["threshold"] == 0.222
+    assert build.readout_state["rotation_angle"] == 0.333
+    assert build.readout_state["element"] == "readout"
+
+
 def test_ramsey_protocol_compilation_sequence_schema_and_diagram(fake_session, gate_arch_modules):
     circuit = gate_arch_modules.circuit_protocols.RamseyProtocol(tau_clks=12, n_shots=3).build()
     build = gate_arch_modules.circuit_compiler.CircuitCompiler(fake_session).compile(circuit)

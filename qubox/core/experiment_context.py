@@ -1,5 +1,4 @@
-# qubox_v2/core/experiment_context.py
-"""Immutable experiment context carrying sample and cooldown identity.
+"""qubox.core.experiment_context — experiment context and wiring revision.
 
 An ExperimentContext is a frozen passport that travels through the system,
 binding a session to a specific sample, cooldown, and hardware wiring
@@ -8,6 +7,7 @@ configuration.  It is constructed once during session setup and never mutated.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -72,6 +72,21 @@ class ExperimentContext:
 
     @staticmethod
     def compute_wiring_rev(hardware_path: Path) -> str:
-        """Compute SHA-256 first 8 hex chars of hardware.json content."""
-        raw = hardware_path.read_bytes()
-        return hashlib.sha256(raw).hexdigest()[:8]
+        """Compute SHA-256 first 8 hex chars of hardware.json content.
+
+        Uses canonical JSON serialisation (sorted keys, compact separators)
+        so the hash is stable across whitespace/key-ordering changes.
+        """
+        raw = json.loads(hardware_path.read_bytes())
+        canonical = json.dumps(raw, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode()).hexdigest()[:8]
+
+
+def compute_wiring_rev(hardware_path: str | Path) -> str:
+    """Compute an 8-character wiring revision hash from *hardware.json*.
+
+    The hash is the first 8 hex characters of SHA-256 of the canonical
+    (sorted-keys) JSON serialisation of the file.  This is stable across
+    whitespace changes but sensitive to any structural modification.
+    """
+    return ExperimentContext.compute_wiring_rev(Path(hardware_path))

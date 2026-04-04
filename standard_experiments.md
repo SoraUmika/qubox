@@ -512,7 +512,7 @@ calibration, coherence, tomography, and cavity physics.
 
 Each experiment in this suite should:
 
-1. Compile to a valid QUA program via the legacy adapter pipeline
+1. Compile to a valid QUA program via the canonical `qubox` template/runtime pipeline
 2. Produce correct sweep structure and timing when simulated
 3. Return an `ExperimentResult` with proper build, run, and analysis stages
 4. Preserve physics intent as documented in `API_REFERENCE.md` Section 11

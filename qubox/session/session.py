@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -14,13 +15,13 @@ class Session:
     Wraps the infrastructure ``SessionManager`` and exposes commonly needed
     sub-systems as direct properties.  There is **no** generic attribute
     forwarding — access the underlying ``SessionManager`` explicitly via
-    :attr:`legacy_session` when you need something not surfaced here.
+    :attr:`session_manager` when you need something not surfaced here.
     """
 
-    legacy_session_cls = None
+    session_manager_cls = None
 
-    def __init__(self, legacy_session):
-        self._legacy = legacy_session
+    def __init__(self, session_manager):
+        self._session_manager = session_manager
         self.sweep = SweepFactory()
         self.acquire = AcquisitionFactory()
         from ..experiments import ExperimentLibrary, WorkflowLibrary
@@ -60,11 +61,11 @@ class Session:
             call to ``runner.run_program()`` raises ``JobError``.  Set to
             *False* to enable real hardware execution.
         """
-        if cls.legacy_session_cls is None:
+        if cls.session_manager_cls is None:
             from qubox.experiments.session import SessionManager
 
-            cls.legacy_session_cls = SessionManager
-        legacy = cls.legacy_session_cls(
+            cls.session_manager_cls = SessionManager
+        session_manager = cls.session_manager_cls(
             sample_id=sample_id,
             cooldown_id=cooldown_id,
             registry_base=registry_base,
@@ -72,17 +73,17 @@ class Session:
             **kwargs,
         )
         if connect:
-            legacy.open()
-        return cls(legacy)
+            session_manager.open()
+        return cls(session_manager)
 
     # ------------------------------------------------------------------
     # Direct sub-system properties (no forwarding / no deprecation)
     # ------------------------------------------------------------------
 
     @property
-    def legacy_session(self):
+    def session_manager(self):
         """The underlying ``SessionManager`` instance."""
-        return self._legacy
+        return self._session_manager
 
     @property
     def backend(self):
@@ -95,53 +96,53 @@ class Session:
     @property
     def hardware(self):
         """``HardwareController`` — element LO/IF/gain, QM instance."""
-        return self._legacy.hardware
+        return self._session_manager.hardware
 
     @property
     def config_engine(self):
         """``ConfigEngine`` — load / save / build QM config dicts."""
-        return self._legacy.config_engine
+        return self._session_manager.config_engine
 
     @property
     def calibration(self):
         """``CalibrationStore`` — frequency, coherence, discrimination data."""
-        return self._legacy.calibration
+        return self._session_manager.calibration
 
     @property
     def pulse_mgr(self):
         """``PulseOperationManager`` — pulse operation registry."""
-        return self._legacy.pulse_mgr
+        return self._session_manager.pulse_mgr
 
     @property
     def runner(self):
         """``ProgramRunner`` — execute / simulate QUA programs."""
-        return self._legacy.runner
+        return self._session_manager.runner
 
     @property
     def devices(self):
         """``DeviceManager`` — external device lifecycle."""
-        return self._legacy.devices
+        return self._session_manager.devices
 
     @property
     def orchestrator(self):
         """``CalibrationOrchestrator`` — experiment → calibration pipeline."""
-        return self._legacy.orchestrator
+        return self._session_manager.orchestrator
 
     @property
     def simulation_mode(self) -> bool:
         """True if this session was opened in simulation mode (no RF outputs)."""
-        return self._legacy.simulation_mode
+        return self._session_manager.simulation_mode
 
     # ------------------------------------------------------------------
     # Session lifecycle
     # ------------------------------------------------------------------
 
     def connect(self) -> "Session":
-        self._legacy.open()
+        self._session_manager.open()
         return self
 
     def close(self) -> None:
-        self._legacy.close()
+        self._session_manager.close()
 
     # ------------------------------------------------------------------
     # Sequence / circuit builders
@@ -152,6 +153,39 @@ class Session:
 
     def circuit(self, name: str = "circuit", **metadata: Any) -> QuantumCircuit:
         return QuantumCircuit(name=name, metadata=dict(metadata))
+
+    def control_program(self, name: str = "control_program", **metadata: Any):
+        from ..control import ControlProgram
+
+        return ControlProgram(name=name, metadata=dict(metadata))
+
+    def to_control_program(
+        self,
+        body: Any,
+        *,
+        sweep: Any = None,
+        acquisition: Any = None,
+    ):
+        from ..control import ControlProgram
+
+        if isinstance(body, ControlProgram):
+            if sweep is not None or acquisition is not None:
+                raise TypeError(
+                    "Cannot apply sweep/acquisition overrides to an existing ControlProgram; "
+                    "modify the program directly or pass a Sequence or QuantumCircuit."
+                )
+            return body
+
+        converter = getattr(body, "to_control_program", None)
+        if callable(converter):
+            return converter(sweep=sweep, acquisition=acquisition)
+
+        raise TypeError("Expected a Sequence, QuantumCircuit, or ControlProgram.")
+
+    def realize_control_program(self, body: Any):
+        from ..control import realize_control_program
+
+        return realize_control_program(self, self.to_control_program(body))
 
     def ensure_sweep_plan(self, value, *, averaging: int = 1) -> SweepPlan:
         if value is None:
@@ -168,8 +202,9 @@ class Session:
 
     def resolve_alias(self, alias: str, *, role_hint: str | None = None) -> str:
         alias_text = str(alias)
-        ctx = self._legacy.context_snapshot()
-        hardware_elements = set((getattr(self._legacy.hardware, "elements", {}) or {}).keys())
+        ctx = self._session_manager.context_snapshot()
+        hardware = getattr(self._session_manager, "hardware", getattr(self._session_manager, "hw", None))
+        hardware_elements = set((getattr(hardware, "elements", {}) or {}).keys())
         if alias_text in hardware_elements:
             return alias_text
 
@@ -186,11 +221,11 @@ class Session:
         if isinstance(center, (int, float)):
             return float(center)
         token = str(center).strip().lower()
-        ctx = self._legacy.context_snapshot()
+        ctx = self._session_manager.context_snapshot()
         if token in {"qubit.ge", "qb.ge", "q0.ge"}:
             return float(getattr(ctx, "qb_fq"))
         if token in {"qubit.ef", "qb.ef", "q0.ef"}:
-            freqs = self._legacy.calibration.get_frequencies(self.resolve_alias("qubit", role_hint="qubit"))
+            freqs = self._session_manager.calibration.get_frequencies(self.resolve_alias("qubit", role_hint="qubit"))
             if freqs is not None and getattr(freqs, "ef_freq", None) is not None:
                 return float(freqs.ef_freq)
             anh = float(getattr(ctx, "anharmonicity", 0.0) or 0.0)
@@ -202,16 +237,16 @@ class Session:
         raise KeyError(f"Unknown sweep center token: {center!r}")
 
     def resolve_pulse_length(self, target: str, op: str, *, default: int | None) -> int | None:
-        pulse = self._legacy.pulse_mgr.get_pulseOp_by_element_op(target, op, strict=False)
+        pulse = self._session_manager.pulse_mgr.get_pulseOp_by_element_op(target, op, strict=False)
         if pulse is not None and getattr(pulse, "length", None) is not None:
             return int(pulse.length)
         return default
 
     def resolve_discrimination(self, readout: str):
-        return self._legacy.calibration.get_discrimination(readout)
+        return self._session_manager.calibration.get_discrimination(readout)
 
     def get_thermalization_clks(self, channel: str, default: int | None = None) -> int | None:
-        return self._legacy.get_therm_clks(channel, default=default)
+        return self._session_manager.get_therm_clks(channel, default=default)
 
     # ------------------------------------------------------------------
     # Commonly-used delegations
@@ -219,27 +254,92 @@ class Session:
 
     def context_snapshot(self):
         """Return a ``DeviceMetadata`` snapshot from the calibration store."""
-        return self._legacy.context_snapshot()
+        return self._session_manager.context_snapshot()
 
     @property
     def experiment_path(self) -> str:
         """Filesystem path for experiment artifacts."""
-        return self._legacy.experiment_path
+        return self._session_manager.experiment_path
 
     @property
     def context(self):
         """Live context reference (mutable) from ``SessionManager``."""
-        return self._legacy.context
+        return self._session_manager.context
 
-    # ------------------------------------------------------------------
-    # Catch-all delegation to SessionManager
-    # ------------------------------------------------------------------
+    @property
+    def bindings(self):
+        """``ExperimentBindings`` instance from ``SessionManager``."""
+        return self._session_manager.bindings
 
-    def __getattr__(self, name: str):
-        """Forward any remaining attribute access to the underlying SessionManager."""
-        try:
-            return getattr(self._legacy, name)
-        except AttributeError:
-            raise AttributeError(
-                f"'{type(self).__name__}' object has no attribute {name!r}"
-            ) from None
+    def save_pulses(self) -> None:
+        """Persist pulse definitions to disk."""
+        self._session_manager.save_pulses()
+
+    def burn_pulses(self, *, include_volatile: bool = True) -> None:
+        """Push registered pulses into the QM config dict."""
+        self._session_manager.burn_pulses(include_volatile=include_volatile)
+
+    def save_output(self, output: Any, tag: str) -> None:
+        """Persist experiment output to disk."""
+        self._session_manager.save_output(output, tag)
+
+    def readout_handle(self, alias: str = "resonator", operation: str = "readout"):
+        """Return the session's readout handle for program builders."""
+        return self._session_manager.readout_handle(alias=alias, operation=operation)
+
+
+@dataclass
+class SessionFactory:
+    """Pre-configured session factory for programmatic / agent workflows.
+
+    Stores connection parameters once, then stamps out ``Session`` instances
+    via :meth:`create` without requiring notebook globals or interactive setup.
+
+    Example::
+
+        factory = SessionFactory(
+            sample_id="qubit_A",
+            cooldown_id="cd_2026_04",
+            registry_base="/data/registry",
+            qop_ip="10.157.36.68",
+            cluster_name="Cluster_2",
+        )
+        session = factory.create()                        # simulation
+        session_hw = factory.create(simulation_mode=False) # hardware
+    """
+
+    sample_id: str
+    cooldown_id: str
+    registry_base: str | Path | None = None
+    qop_ip: str | None = None
+    cluster_name: str | None = None
+    simulation_mode: bool = True
+    connect: bool = True
+    extra_kwargs: dict[str, Any] = field(default_factory=dict)
+
+    def create(self, *, simulation_mode: bool | None = None, connect: bool | None = None, **overrides: Any) -> Session:
+        """Create and return a new :class:`Session`.
+
+        Parameters
+        ----------
+        simulation_mode : bool, optional
+            Override the factory default.
+        connect : bool, optional
+            Override the factory default.
+        **overrides
+            Additional keyword arguments forwarded to ``Session.open``.
+        """
+        kwargs: dict[str, Any] = dict(self.extra_kwargs)
+        if self.qop_ip is not None:
+            kwargs.setdefault("qop_ip", self.qop_ip)
+        if self.cluster_name is not None:
+            kwargs.setdefault("cluster_name", self.cluster_name)
+        kwargs.update(overrides)
+        return Session.open(
+            sample_id=self.sample_id,
+            cooldown_id=self.cooldown_id,
+            registry_base=self.registry_base,
+            simulation_mode=simulation_mode if simulation_mode is not None else self.simulation_mode,
+            connect=connect if connect is not None else self.connect,
+            **kwargs,
+        )

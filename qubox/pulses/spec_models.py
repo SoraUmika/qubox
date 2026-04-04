@@ -1,4 +1,3 @@
-# qubox_v2/pulses/spec_models.py
 """Pydantic models for declarative pulse specifications.
 
 These models define the schema for ``pulse_specs.json``. They are used

@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .persistence_policy import sanitize_mapping_for_json
+from .persistence import sanitize_mapping_for_json
 
 if TYPE_CHECKING:
     from ..experiments.session import SessionManager

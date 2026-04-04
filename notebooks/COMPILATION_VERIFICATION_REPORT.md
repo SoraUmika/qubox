@@ -1,5 +1,9 @@
 # QUA Program Compilation Verification Report
 
+> **Historical document (2026-03-22).** This verifies compilation of experiments
+> at a point when `qubox.legacy` still existed. That package has since been
+> eliminated. The experiment classes now live directly in `qubox.experiments`.
+
 **Date:** 2026-03-22  
 **qubox version:** 3.0.0  
 **QUA SDK:** 1.2.6  

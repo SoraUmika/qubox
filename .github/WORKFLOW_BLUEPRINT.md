@@ -178,9 +178,11 @@ e:\repo\qubox\
 │               └── experiment-writeup.tex ← LaTeX writeup template
 ├── .vscode\
 │   └── mcp.json                         ← MCP server configuration
-└── qubox_v2_legacy\
-    └── ...
+└── ...
 ```
+
+> **Note:** The `qubox_v2_legacy` directory referenced in earlier versions of
+> this blueprint has been eliminated. All code now lives directly under `qubox/`.
 
 ### Windows + WSL Setup
 

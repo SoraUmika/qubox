@@ -1,4 +1,3 @@
-# qubox_v2/core/schemas.py
 """Schema validation and migration registry.
 
 Provides schema version checking for all persisted JSON files, a migration

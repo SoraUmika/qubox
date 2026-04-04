@@ -43,37 +43,6 @@ def _stable_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
-def build_readout_snapshot_from_macro() -> dict[str, Any]:
-    from .macros.measure import measureMacro
-
-    ro_disc = dict(getattr(measureMacro, "_ro_disc_params", {}) or {})
-    snapshot = {
-        "source": "measureMacro",
-        "element": measureMacro.active_element(),
-        "operation": measureMacro.active_op(),
-        "threshold": ro_disc.get("threshold"),
-        "rotation_angle": ro_disc.get("angle"),
-        "fidelity": ro_disc.get("fidelity"),
-        "fidelity_definition": ro_disc.get("fidelity_definition"),
-        "sigma_g": ro_disc.get("sigma_g"),
-        "sigma_e": ro_disc.get("sigma_e"),
-        "weights": tuple(tuple(w) if isinstance(w, (list, tuple)) else (str(w),) for w in (measureMacro.get_outputs() or [])),
-        "policy": {
-            "name": None,
-            "kwargs": {},
-        },
-    }
-    snapshot["version_hash"] = _stable_hash(snapshot)
-    return snapshot
-
-
-def try_build_readout_snapshot_from_macro() -> dict[str, Any] | None:
-    try:
-        return build_readout_snapshot_from_macro()
-    except Exception:
-        return None
-
-
 def build_readout_snapshot_from_handle(readout: Any) -> dict[str, Any]:
     cal = getattr(readout, "cal", None)
     snapshot = {
@@ -87,6 +56,33 @@ def build_readout_snapshot_from_handle(readout: Any) -> dict[str, Any]:
         "sigma_g": getattr(cal, "sigma_g", None),
         "sigma_e": getattr(cal, "sigma_e", None),
         "weights": tuple(getattr(cal, "weight_keys", ()) or ()),
+        "policy": {
+            "name": None,
+            "kwargs": {},
+        },
+    }
+    snapshot["version_hash"] = _stable_hash(snapshot)
+    return snapshot
+
+
+def build_readout_snapshot_from_measurement_config(
+    config: Any,
+    *,
+    element: str | None,
+    operation: str | None,
+    weights: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    snapshot = {
+        "source": "MeasurementConfig",
+        "element": element,
+        "operation": operation,
+        "threshold": getattr(config, "threshold", None),
+        "rotation_angle": getattr(config, "angle", None),
+        "fidelity": getattr(config, "fidelity", None),
+        "fidelity_definition": getattr(config, "fidelity_definition", None),
+        "sigma_g": getattr(config, "sigma_g", None),
+        "sigma_e": getattr(config, "sigma_e", None),
+        "weights": tuple(weights),
         "policy": {
             "name": None,
             "kwargs": {},
@@ -128,24 +124,9 @@ def emit_measurement_spec(
             qb_el=qb_el,
         )
 
-    from .macros.measure import measureMacro
-
-    kind = (spec.kind or "").lower()
-    if kind in {"iq", "discriminate", "butterfly", "adc"}:
-        return measureMacro.measure(
-            with_state=with_state,
-            targets=targets,
-            state=state,
-            gain=gain,
-            timestamp_stream=timestamp_stream,
-            adc_stream=adc_stream,
-            axis=axis,
-            x90=x90,
-            yn90=yn90,
-            qb_el=qb_el,
-        )
-
-    raise ValueError(f"Unsupported measurement kind: {spec.kind!r}")
+    raise ValueError(
+        f"emit_measurement_spec requires an explicit readout handle for measurement kind {spec.kind!r}."
+    )
 
 
 def _coerce_state_numeric(value: Any, *, field_name: str) -> float:

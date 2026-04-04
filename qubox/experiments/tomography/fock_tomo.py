@@ -12,7 +12,7 @@ from qubox_tools.algorithms import post_process as pp
 from qubox_tools.plotting.cqed import display_fock_populations
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
-from ...programs.measurement import try_build_readout_snapshot_from_macro
+from ...programs.measurement import build_readout_snapshot_from_handle
 
 
 class FockResolvedStateTomography(ExperimentBase):
@@ -80,7 +80,7 @@ class FockResolvedStateTomography(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.fock_resolved_state_tomography",
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
         )
 
     def run(

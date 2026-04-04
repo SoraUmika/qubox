@@ -134,13 +134,19 @@ Portable workflow primitives (no notebook dependency):
 
 | Package | Purpose |
 |---------|---------|
-| `gates/` | Gate models, hardware implementations, fidelity estimation |
-| `compile/` | Gate synthesis, ansatz optimization, GPU acceleration |
+| `gates/` | Runtime hardware gate implementations used by control realization |
 | `pulses/` | Pulse management, waveform generation, integration weights |
 | `devices/` | Sample/cooldown registry, device management |
-| `simulation/` | Numerical cQED simulation (QuTiP) |
 | `tools/` | Waveform generators (DRAG, Kaiser, Slepian) |
 | `verification/` | Schema checks, waveform regression |
+
+**Removed packages:** Standalone ansatz compilation (`qubox.compile`) and
+numerical cQED simulation (`qubox.simulation`) were removed from `qubox`.
+The older gate-model, fidelity, noise, and gate-sequence helpers were also
+removed from `qubox.gates`; only the runtime hardware gate layer remains.
+`qubox/gui/` and `qubox/migration/` are empty directory stubs with no code.
+
+Demo scripts and the optional GUI runner live under top-level `tools/`.
 
 ---
 

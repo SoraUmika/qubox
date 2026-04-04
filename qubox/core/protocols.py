@@ -1,15 +1,11 @@
-# qubox_v2/core/protocols.py
-"""
-Protocol interfaces that define the contracts between qubox subsystems.
+"""qubox.core.protocols — structural subtyping contracts for qubox subsystems.
 
-Using typing.Protocol (structural subtyping) so implementations don't need
-to inherit — they just need to have the right methods.
+Using ``typing.Protocol`` (structural subtyping) so implementations don't
+need to inherit — they just need to have the right methods.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Optional, Protocol, Union, runtime_checkable
-
-import numpy as np
+from typing import Any, Protocol, runtime_checkable
 
 
 # ---------------------------------------------------------------------------
@@ -93,3 +89,72 @@ class Experiment(Protocol):
     def simulate(self, sim_config: Any = None, **params: Any) -> Any: ...
     def run(self, **params: Any) -> Any: ...
     def process(self, raw_output: Any, **params: Any) -> Any: ...
+
+
+# ---------------------------------------------------------------------------
+# Session
+# ---------------------------------------------------------------------------
+@runtime_checkable
+class SessionProtocol(Protocol):
+    """Minimal typed contract for a qubox session.
+
+    Every experiment, template library, orchestrator, and backend should
+    accept ``session: SessionProtocol`` instead of untyped ``ctx: Any``.
+    The protocol captures the *intersection* of attributes that callers
+    actually use, not the union of everything ``SessionManager`` exposes.
+    """
+
+    # -- Sub-system access --
+
+    @property
+    def hardware(self) -> Any: ...
+
+    @property
+    def config_engine(self) -> Any: ...
+
+    @property
+    def calibration(self) -> Any: ...
+
+    @property
+    def pulse_mgr(self) -> Any: ...
+
+    @property
+    def runner(self) -> Any: ...
+
+    @property
+    def devices(self) -> Any: ...
+
+    @property
+    def orchestrator(self) -> Any: ...
+
+    @property
+    def simulation_mode(self) -> bool: ...
+
+    @property
+    def experiment_path(self) -> str: ...
+
+    # -- Context / snapshot --
+
+    def context_snapshot(self) -> Any: ...
+
+    # -- Resolution helpers --
+
+    def resolve_alias(self, alias: str, *, role_hint: str | None = None) -> str: ...
+
+    def resolve_center(self, center: str | float) -> float: ...
+
+    def resolve_pulse_length(
+        self, target: str, op: str, *, default: int | None,
+    ) -> int | None: ...
+
+    def resolve_discrimination(self, readout: str) -> Any: ...
+
+    def get_thermalization_clks(
+        self, channel: str, default: int | None = None,
+    ) -> int | None: ...
+
+    # -- Lifecycle --
+
+    def connect(self) -> Any: ...
+
+    def close(self) -> None: ...

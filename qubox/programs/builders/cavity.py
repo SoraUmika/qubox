@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 from contextlib import nullcontext
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from qm.qua import *
 from qualang_tools.loops import from_array
 from ..macros.measure import emit_measurement
@@ -9,7 +9,7 @@ from ..macros.sequence import sequenceMacros
 import numpy as np
 
 if TYPE_CHECKING:
-    from ...gates.gate import Gate
+    from ...core.bindings import ExperimentBindings, ReadoutHandle
 
 
 def storage_spectroscopy(qb_el, st_el, disp, sel_r180, if_frequencies, st_therm_clks, n_avg, *, readout: "ReadoutHandle", bindings: "ExperimentBindings | None" = None):
@@ -543,7 +543,7 @@ def fock_resolved_qb_ramsey(qb_el, st_el, fock_ifs, detunings, disps, sel_r90, d
     return fock_resolved_qb_ramsey
 
 def storage_wigner_tomography(
-        prep_gates: list[Gate],             # Python list of Gate instances to prepare Ï
+    prep_gates: list[Any],              # Gate-like objects or QUA callables to prepare the state
         st_el, qb_el, ro_el,
         base_disp,
         x_vals, p_vals, base_alpha,
@@ -594,7 +594,15 @@ def storage_wigner_tomography(
         with for_(rep, 0, rep < n_avg, rep + 1):
             with for_each_((m00, m01, m10, m11), m_matrix):
                 for gate in prep_gates:
-                    gate.play()
+                    if hasattr(gate, "play"):
+                        gate.play()
+                    elif callable(gate):
+                        gate()
+                    else:
+                        raise TypeError(
+                            "storage_wigner_tomography expects each prep gate to provide "
+                            ".play() or be a callable QUA macro"
+                        )
                 align(st_el, qb_el)
 
                 play(base_disp * amp(m00, m01, m10, m11), st_el)

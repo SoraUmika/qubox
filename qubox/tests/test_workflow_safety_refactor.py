@@ -10,6 +10,7 @@ Covers:
 """
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import json
 import sys
@@ -29,7 +30,7 @@ import pytest
 # files without relative imports, and proper dotted-name loading with
 # __package__ for files that use ``from ..`` / ``from .`` imports.
 # ---------------------------------------------------------------------------
-_ROOT = Path(__file__).parent.parent  # qubox_v2/
+_ROOT = Path(__file__).parent.parent
 
 
 def _load_module(rel_path: str, name: str):
@@ -172,28 +173,15 @@ def _get_result():
 
 
 def _get_fitting():
-    # fitting.py has no top-level relative imports, but calls
-    # from ..experiments.result import FitResult lazily inside fit_and_wrap.
-    _get_result()  # ensure result module is loadable
-    return _load_as_submodule("analysis/fitting.py", "qubox_v2.analysis.fitting")
+    return importlib.import_module("qubox_tools.fitting.routines")
 
 
 def _get_cqed_models():
-    return _load_module("analysis/cQED_models.py", "_wsr_cqed_models")
+    return importlib.import_module("qubox_tools.fitting.models")
 
 
 def _get_calibration_algorithms():
-    cqed_models = _get_cqed_models()
-    fitting = _get_fitting()
-    models = _get_models()
-    # Inject into qubox_v2 namespace for relative imports
-    sys.modules["qubox_v2.analysis.cQED_models"] = cqed_models
-    sys.modules["qubox_v2.analysis.fitting"] = fitting
-    sys.modules["qubox_v2.calibration.models"] = models
-    return _load_as_submodule(
-        "analysis/calibration_algorithms.py",
-        "qubox_v2.analysis.calibration_algorithms",
-    )
+    return importlib.import_module("qubox.calibration.algorithms")
 
 
 def _get_patch_rules():
@@ -219,14 +207,11 @@ def _get_orchestrator():
 
 
 def _get_cqed_attributes():
-    return _load_as_submodule(
-        "analysis/cQED_attributes.py",
-        "qubox_v2.analysis.cQED_attributes",
-    )
+    return importlib.import_module("qubox.core.device_metadata")
 
 
 def _get_measurement_config():
-    return _load_module("core/measurement_config.py", "_wsr_meas_config")
+    return importlib.import_module("qubox.core.measurement_config")
 
 
 # ============================================================================
@@ -516,10 +501,10 @@ class TestT2ExplicitUnits:
 
 
 # ============================================================================
-# P1.1 — cQED_attributes.verify_consistency
+# P1.1 — DeviceMetadata live CalibrationStore access
 # ============================================================================
-class TestVerifyConsistency:
-    """P1.1: cQED_attributes ↔ CalibrationStore consistency check."""
+class TestDeviceMetadata:
+    """P1.1: DeviceMetadata should resolve physics values live from CalibrationStore."""
 
     def _make_store(self, tmp_path, cqed_params=None):
         cal_path = tmp_path / "cal.json"
@@ -530,56 +515,51 @@ class TestVerifyConsistency:
         }))
         return _get_store().CalibrationStore(str(cal_path))
 
-    def test_consistent_returns_empty(self, tmp_path):
+    def test_resolves_live_values_from_store(self, tmp_path):
         store = self._make_store(tmp_path, {
-            "transmon": {"qubit_freq": 4.5e9, "T1": 50e-6},
-            "resonator": {"resonator_freq": 8.5e9},
-        })
-        mod = _get_cqed_attributes()
-        attr = mod.cQED_attributes(
-            qb_fq=4.5e9,
-            ro_fq=8.5e9,
-            qb_T1_relax=50e-6,
-        )
-        mismatches = attr.verify_consistency(store)
-        assert mismatches == []
-
-    def test_divergent_flags_mismatch(self, tmp_path):
-        store = self._make_store(tmp_path, {
-            "transmon": {"qubit_freq": 4.5e9},
-        })
-        mod = _get_cqed_attributes()
-        attr = mod.cQED_attributes(qb_fq=5.0e9)
-        mismatches = attr.verify_consistency(store)
-        assert len(mismatches) == 1
-        assert "qb_fq" in mismatches[0]
-
-    def test_raise_on_mismatch_flag(self, tmp_path):
-        store = self._make_store(tmp_path, {
-            "transmon": {"qubit_freq": 4.5e9},
-        })
-        mod = _get_cqed_attributes()
-        attr = mod.cQED_attributes(qb_fq=5.0e9)
-        with pytest.raises(ValueError, match="mismatch"):
-            attr.verify_consistency(store, raise_on_mismatch=True)
-
-    def test_from_calibration_store(self, tmp_path):
-        store = self._make_store(tmp_path, {
-            "transmon": {"qubit_freq": 4.5e9, "T1": 50e-6, "anharmonicity": -200e6},
+            "transmon": {"qubit_freq": 4.5e9, "T1_us": 50.0, "anharmonicity": -200e6},
             "resonator": {"resonator_freq": 8.5e9, "kappa": 1e6},
             "storage": {"storage_freq": 6.0e9, "chi": -1e6, "chi2": 50.0},
         })
         mod = _get_cqed_attributes()
-        attr = mod.cQED_attributes.from_calibration_store(
-            store, ro_el="rr", qb_el="qb", st_el="st",
+        attr = mod.DeviceMetadata(
+            qb_el="transmon",
+            ro_el="resonator",
+            st_el="storage",
+            _calibration=store,
         )
         assert attr.qb_fq == pytest.approx(4.5e9)
         assert attr.ro_fq == pytest.approx(8.5e9)
         assert attr.st_fq == pytest.approx(6.0e9)
-        assert attr.qb_T1_relax == pytest.approx(50e-6)
+        assert attr.qb_T1_relax == pytest.approx(50.0)
         assert attr.anharmonicity == pytest.approx(-200e6)
         assert attr.ro_kappa == pytest.approx(1e6)
         assert attr.st_chi == pytest.approx(-1e6)
+        assert attr.st_chi2 == pytest.approx(50.0)
+
+    def test_reflects_store_updates_without_resnapshot(self, tmp_path):
+        store = self._make_store(tmp_path, {
+            "transmon": {"qubit_freq": 4.5e9},
+        })
+        mod = _get_cqed_attributes()
+        attr = mod.DeviceMetadata(qb_el="transmon", ro_el="resonator", _calibration=store)
+        assert attr.qb_fq == pytest.approx(4.5e9)
+        store.set_cqed_params("transmon", qubit_freq=5.0e9)
+        assert attr.qb_fq == pytest.approx(5.0e9)
+
+    def test_missing_values_return_none(self, tmp_path):
+        store = self._make_store(tmp_path, {})
+        mod = _get_cqed_attributes()
+        attr = mod.DeviceMetadata(
+            qb_el="transmon",
+            ro_el="resonator",
+            st_el="storage",
+            _calibration=store,
+        )
+        assert attr.qb_fq is None
+        assert attr.ro_fq is None
+        assert attr.st_fq is None
+        assert attr.qb_T1_relax is None
 
 
 # ============================================================================
@@ -624,9 +604,10 @@ class TestMeasurementConfig:
         assert cfg.Q == pytest.approx(0.95)
         assert cfg.source == "calibration_store"
 
-    def test_from_measure_macro_snapshot(self):
+    def test_from_legacy_snapshot_payload(self):
         mod = _get_measurement_config()
         snapshot = {
+            "_version": 5,
             "ro_disc_params": {
                 "threshold": 0.3,
                 "angle": 0.8,
@@ -634,11 +615,11 @@ class TestMeasurementConfig:
             },
             "ro_quality_params": {"F": 0.92},
         }
-        cfg = mod.MeasurementConfig.from_measure_macro_snapshot(snapshot)
+        cfg = mod.MeasurementConfig.from_dict(snapshot)
         assert cfg.threshold == pytest.approx(0.3)
         assert cfg.norm_params == {"scale": 1.5}
         assert cfg.F == pytest.approx(0.92)
-        assert cfg.source == "measure_macro"
+        assert cfg.source == "legacy_measure_config"
 
     def test_to_dict(self):
         mod = _get_measurement_config()

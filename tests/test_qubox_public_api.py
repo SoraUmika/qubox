@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from qubox import ExperimentResult, Session
 from qubox.calibration import CalibrationProposal
+from qubox.control import ControlDuration, PulseInstruction
 from qubox import notebook
 from qubox.data import ExecutionRequest
 
@@ -87,7 +88,7 @@ def make_session() -> Session:
     return session
 
 
-def test_session_open_uses_configured_legacy_class(monkeypatch):
+def test_session_open_uses_configured_session_manager_class(monkeypatch):
     calls = {}
 
     class DummyManager:
@@ -97,9 +98,10 @@ def test_session_open_uses_configured_legacy_class(monkeypatch):
         def open(self):
             calls["opened"] = True
 
-    monkeypatch.setattr(Session, "legacy_session_cls", DummyManager)
+    monkeypatch.setattr(Session, "session_manager_cls", DummyManager)
     session = Session.open(sample_id="sampleA", cooldown_id="cd1", connect=True, registry_base="E:/qubox")
     assert isinstance(session, Session)
+    assert isinstance(session.session_manager, DummyManager)
     assert calls["kwargs"]["sample_id"] == "sampleA"
     assert calls["kwargs"]["cooldown_id"] == "cd1"
     assert calls["opened"] is True
@@ -132,6 +134,27 @@ def test_custom_request_uses_sequence_and_sweep_plan():
     assert request.analysis == "ramsey_like"
     assert request.shots == 11
     assert request.sweep.axes[0].parameter == "wait.duration"
+
+
+def test_control_program_helpers_are_available_without_qm():
+    session = make_session()
+    seq = session.sequence("control_seq")
+    seq.add(session.ops.x90("q0"))
+
+    converted = session.to_control_program(seq)
+    realized = session.realize_control_program(seq)
+    manual = session.control_program("manual_native").append(
+        PulseInstruction(targets=("q0",), operation="x90", duration=ControlDuration(16))
+    )
+    request = session.exp.custom(control=manual, execute=False)
+
+    assert converted.name == "control_seq"
+    assert realized.instructions[0].kind == "pulse"
+    assert realized.instructions[0].operation == "x90"
+    assert realized.instructions[0].targets == ("transmon",)
+    assert request.control_program is manual
+    assert request.template == "manual_native"
+    assert session.to_control_program(manual) is manual
 
 
 def test_standard_template_request_is_canonical():
@@ -179,7 +202,9 @@ def test_result_proposal_round_trip():
 
 def test_notebook_surface_is_lazy():
     assert "QubitSpectroscopy" in notebook.__all__
-    assert "measureMacro" in notebook.__all__
+    assert "ReadoutHandle" in notebook.__all__
+    assert "MeasurementConfig" in notebook.__all__
+    assert "PostSelectionConfig" in notebook.__all__
     assert "RunResult" in notebook.__all__
     assert "save_run_summary" in notebook.__all__
     assert "HardwareDefinition" in notebook.__all__

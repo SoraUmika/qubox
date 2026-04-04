@@ -20,8 +20,9 @@ from __future__ import annotations
 import logging
 import json
 import warnings
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from ..core.errors import ConfigError
 from ..core.logging import get_logger
@@ -35,7 +36,7 @@ from ..devices.device_manager import DeviceManager
 from ..calibration.store import CalibrationStore
 from ..core.device_metadata import DeviceMetadata
 from qubox_tools.data.containers import Output
-from ..core.persistence_policy import split_output_for_persistence
+from ..core.persistence import split_output_for_persistence
 from ..calibration.orchestrator import CalibrationOrchestrator
 
 _logger = get_logger(__name__)
@@ -108,7 +109,7 @@ class SessionManager:
             )
 
         # Context mode: resolve paths from sample registry
-        from ..devices.sample_registry import SampleRegistry
+        from ..devices.registry import SampleRegistry
         from ..devices.context_resolver import ContextResolver
 
         base = Path(registry_base) if registry_base else (
@@ -215,6 +216,8 @@ class SessionManager:
         # --- 7. Legacy compat inputs + runtime helpers ---
         self._legacy_context_path = self._resolve_path("cqed_params.json", required=False)
         self._runtime_settings = self._load_runtime_settings()
+        self._post_selection_config = None
+        self._readout_state_signature = None
         self.allow_inline_mutations = False
         self.orchestrator = CalibrationOrchestrator(self)
         self.calibration_orchestrator = self.orchestrator
@@ -260,13 +263,17 @@ class SessionManager:
             self._bindings_cache = bindings_from_hardware_config(
                 self.config_engine.hardware, self.context_snapshot(),
             )
+            self._register_alias_index()
             # Sync readout DSP state from calibration store
             try:
-                self._bindings_cache.readout.sync_from_calibration(self.calibration)
+                ro_el = getattr(self.context_snapshot(), "ro_el", None)
+                lookup_keys = (ro_el,) if ro_el is not None else ()
+                self._bindings_cache.readout.sync_from_calibration(
+                    self.calibration,
+                    lookup_keys=lookup_keys,
+                )
             except Exception:
                 pass
-            # Register aliases in calibration store
-            self._register_alias_index()
             _logger.info("ExperimentBindings derived from hardware config.")
         return self._bindings_cache
 
@@ -280,6 +287,158 @@ class SessionManager:
         alias_map = build_alias_map(self.config_engine.hardware, self.context_snapshot())
         for alias, channel_ref in alias_map.items():
             self.calibration.register_alias(alias, channel_ref.canonical_id)
+
+    @staticmethod
+    def _normalize_weight_sets(weight_sets: Any) -> list[Any]:
+        normalized: list[Any] = []
+        if weight_sets is None:
+            return normalized
+        if isinstance(weight_sets, str):
+            return [weight_sets]
+        for spec in weight_sets:
+            if isinstance(spec, str):
+                normalized.append(spec)
+            elif isinstance(spec, (list, tuple)):
+                values = [str(item) for item in spec if item is not None]
+                if values:
+                    normalized.append(values)
+        return normalized
+
+    def get_post_selection_config(self):
+        """Return the session-owned post-selection configuration, if any."""
+        cfg = self._post_selection_config
+        if cfg is None:
+            return None
+        return cfg.copy() if hasattr(cfg, "copy") else cfg
+
+    def set_post_selection_config(self, config: Any, *, persist: bool = False) -> None:
+        """Set the session-owned post-selection configuration explicitly."""
+        from qubox_tools.algorithms.post_selection import PostSelectionConfig
+
+        if config is None:
+            self._post_selection_config = None
+        elif isinstance(config, PostSelectionConfig):
+            self._post_selection_config = config.copy()
+        elif isinstance(config, dict):
+            self._post_selection_config = PostSelectionConfig.from_dict(config)
+        elif hasattr(config, "to_dict") and callable(getattr(config, "to_dict")):
+            self._post_selection_config = PostSelectionConfig.from_dict(config.to_dict())
+        else:
+            raise TypeError(
+                "set_post_selection_config expected PostSelectionConfig-compatible "
+                f"input, got {type(config).__name__}."
+            )
+
+        if persist:
+            self.persist_measure_config()
+
+    def get_readout_state_signature(self) -> dict[str, Any] | None:
+        if self._readout_state_signature is None:
+            return None
+        return dict(self._readout_state_signature)
+
+    def set_readout_state_signature(
+        self,
+        signature: Mapping[str, Any] | None,
+        *,
+        persist: bool = False,
+    ) -> None:
+        self._readout_state_signature = (
+            dict(signature)
+            if isinstance(signature, Mapping)
+            else None
+        )
+        if persist:
+            self.persist_measure_config()
+
+    @staticmethod
+    def _default_readout_weight_sets(pulse_info: Any) -> list[Any]:
+        iw_map = getattr(pulse_info, "int_weights_mapping", {}) or {}
+        if all(key in iw_map for key in ("cos", "sin", "minus_sin")):
+            return [["cos", "sin"], ["minus_sin", "cos"]]
+        return [["cos", "sin"], ["minus_sin", "cos"]]
+
+    def _apply_measurement_config(self, config: Any) -> None:
+        from ..core.measurement_config import MeasurementConfig
+
+        if not isinstance(config, MeasurementConfig):
+            raise TypeError(f"_apply_measurement_config expected MeasurementConfig, got {type(config).__name__}.")
+
+        rb = self.bindings.readout
+        resolved_element = (
+            config.element
+            or self.get_runtime_setting("active_readout_element", None)
+            or getattr(self.context_snapshot(), "ro_el", None)
+            or "resonator"
+        )
+        resolved_operation = config.operation or rb.active_op or "readout"
+
+        pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(
+            resolved_element,
+            resolved_operation,
+            strict=False,
+        )
+        if pulse_info is None and resolved_operation != "readout":
+            pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(
+                resolved_element,
+                "readout",
+                strict=False,
+            )
+            if pulse_info is not None:
+                resolved_operation = "readout"
+        if pulse_info is None:
+            raise ValueError(
+                f"No readout pulse mapping found for element={resolved_element!r}, "
+                f"operation={resolved_operation!r}."
+            )
+
+        weight_sets = self._normalize_weight_sets(config.weight_sets)
+        if not weight_sets:
+            weight_sets = self._default_readout_weight_sets(pulse_info)
+
+        rb.pulse_op = pulse_info
+        rb.active_op = resolved_operation
+        rb.demod_weight_sets = weight_sets
+        if config.drive_frequency is not None:
+            rb.drive_frequency = float(config.drive_frequency)
+        elif rb.drive_frequency is None:
+            ctx_drive_frequency = getattr(self.context_snapshot(), "ro_fq", None)
+            if isinstance(ctx_drive_frequency, (int, float)):
+                rb.drive_frequency = float(ctx_drive_frequency)
+        if config.gain is not None:
+            rb.gain = float(config.gain)
+
+        if config.weight_length is not None:
+            rb.acquire_in.weight_length = int(config.weight_length)
+
+        rb.discrimination.update(config.discrimination_payload())
+        rb.quality.update(config.quality_payload())
+
+        self.set_runtime_setting("active_readout_element", resolved_element, persist=False)
+        self.set_post_selection_config(config.post_select_config, persist=False)
+        self.set_readout_state_signature(config.readout_state_signature, persist=False)
+
+    def current_measurement_config(self):
+        from ..core.measurement_config import MeasurementConfig
+
+        ctx = self.context_snapshot()
+        operation = getattr(self.bindings.readout, "active_op", None) or "readout"
+        readout = self.readout_handle(alias=getattr(ctx, "ro_el", "resonator"), operation=operation)
+        return MeasurementConfig.from_readout_handle(
+            readout,
+            post_select_config=self.get_post_selection_config(),
+            readout_state_signature=self.get_readout_state_signature(),
+            source="session",
+        )
+
+    def persist_measure_config(self, path: str | Path | None = None) -> Path:
+        from ..core.measurement_config import MeasurementConfig
+
+        destination = Path(path) if path is not None else (self.experiment_path / "config" / "measureConfig.json")
+        cfg: MeasurementConfig = self.current_measurement_config()
+        saved_path = cfg.save_json(destination)
+        _logger.info("Saved explicit readout config to %s", saved_path)
+        return saved_path
 
     # ------------------------------------------------------------------
     # Roleless experiment factories (v2.1 API)
@@ -387,26 +546,55 @@ class SessionManager:
         operation : str
             Pulse operation (default ``"readout"``).
         """
-        from ..core.bindings import ReadoutHandle, ReadoutCal
+        from ..core.bindings import ReadoutHandle, ReadoutCal, _merge_readout_cal
 
         b = self.bindings
         rb = b.readout  # ReadoutBinding
         ctx = self.context_snapshot()
         element = getattr(ctx, "ro_el", None) or alias
 
+        pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
+        if pulse_info is None:
+            pulse_info = rb.pulse_op
+
         # Build ReadoutCal from CalibrationStore (always fresh)
         drive_freq = rb.drive_frequency
         if not isinstance(drive_freq, (int, float)) or drive_freq == 0.0:
-            drive_freq = float(getattr(ctx, "ro_fq", 0.0) or 0.0)
+            ctx_drive_freq = getattr(ctx, "ro_fq", None)
+            if isinstance(ctx_drive_freq, (int, float)) and ctx_drive_freq != 0.0:
+                drive_freq = float(ctx_drive_freq)
+            else:
+                drive_freq = 0.0
 
-        cal = ReadoutCal.from_calibration_store(
+        bound_readout = replace(
+            rb,
+            pulse_op=pulse_info,
+            active_op=operation,
+            drive_frequency=float(drive_freq),
+        )
+
+        binding_cal = ReadoutCal.from_readout_binding(bound_readout)
+
+        store_cal = ReadoutCal.from_calibration_store(
             self.calibration,
-            rb.physical_id,
+            (element, alias, rb.physical_id, rb.drive_channel_id),
             drive_freq=drive_freq,
         )
 
+        cal = _merge_readout_cal(binding_cal, store_cal, drive_frequency=float(drive_freq))
+
+        weight_sets = tuple(
+            tuple(spec) if isinstance(spec, (list, tuple)) else (spec,)
+            for spec in (bound_readout.demod_weight_sets or ())
+        )
+
         return ReadoutHandle(
-            binding=rb, cal=cal, element=element, operation=operation,
+            binding=bound_readout,
+            cal=cal,
+            element=element,
+            operation=operation,
+            gain=bound_readout.gain,
+            demod_weight_sets=weight_sets,
         )
 
     # Ergonomic shortcuts for common patterns
@@ -531,7 +719,7 @@ class SessionManager:
         """
         # Context mode: check sample-level config dir for sample files
         if self._sample_config_dir is not None:
-            from ..devices.sample_registry import SAMPLE_LEVEL_FILES
+            from ..devices.registry import SAMPLE_LEVEL_FILES
             if filename in SAMPLE_LEVEL_FILES:
                 p = self._sample_config_dir / filename
                 if p.exists():
@@ -988,8 +1176,7 @@ class SessionManager:
         apply_to_runtime_context: bool = True,
         persist_measure_config: bool = True,
     ) -> dict[str, Any]:
-        """Override active readout op/weights at runtime via ``measureMacro``."""
-        from ..programs.macros.measure import measureMacro
+        """Override active readout op/weights at runtime explicitly."""
 
         pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
         if pulse_info is None:
@@ -1002,26 +1189,18 @@ class SessionManager:
 
         selected_weights = weights
         if selected_weights is None:
-            iw_map = pulse_info.int_weights_mapping or {}
-            if all(k in iw_map for k in ("cos", "sin", "minus_sin")):
-                selected_weights = [["cos", "sin"], ["minus_sin", "cos"]]
-            else:
-                selected_weights = [["cos", "sin"], ["minus_sin", "cos"]]
+            selected_weights = self._default_readout_weight_sets(pulse_info)
 
-        measureMacro.set_pulse_op(
-            pulse_info,
-            active_op=operation,
-            weights=selected_weights,
-            weight_len=(weight_len or pulse_info.length),
-        )
-
+        rb = self.bindings.readout
+        rb.pulse_op = pulse_info
+        rb.active_op = operation
+        normalized_weights = self._normalize_weight_sets(selected_weights)
+        if normalized_weights:
+            rb.demod_weight_sets = normalized_weights
         if drive_frequency is not None:
-            measureMacro.set_drive_frequency(drive_frequency)
-
-        if demod:
-            from qm.qua import dual_demod
-            if demod == "dual_demod.full":
-                measureMacro.set_demodulator(dual_demod.full)
+            rb.drive_frequency = float(drive_frequency)
+        if weight_len is not None:
+            rb.acquire_in.weight_length = int(weight_len)
 
         if threshold is not None:
             from ..calibration.contracts import Patch
@@ -1033,11 +1212,16 @@ class SessionManager:
         if apply_to_runtime_context:
             self.set_runtime_setting("active_readout_element", element, persist=False)
 
+        if demod:
+            demod_key = str(demod)
+            if demod_key != "dual_demod.full":
+                raise ValueError(
+                    f"Unsupported demod override {demod!r}. Only 'dual_demod.full' is supported."
+                )
+
         dst = None
         if persist_measure_config:
-            dst = self.experiment_path / "config" / "measureConfig.json"
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            measureMacro.save_json(str(dst))
+            dst = self.persist_measure_config()
 
         return {
             "element": element,
@@ -1050,59 +1234,51 @@ class SessionManager:
         }
 
     def _load_measure_config(self) -> None:
-        """Load measureMacro state from measureConfig.json if it exists,
-        then sync discrimination/quality params from CalibrationStore.
-
-        When the loaded (or default) state has no PulseOp binding, the
-        method auto-binds a default readout PulseOp from the hardware
-        config so that experiments like ReadoutTrace can run without an
-        explicit ``override_readout_operation`` call.
-        """
-        from ..programs.macros.measure import measureMacro
+        """Load explicit readout config from measureConfig.json if it exists."""
+        from ..core.measurement_config import MeasurementConfig
 
         path = self._resolve_path("measureConfig.json", required=False)
         if path is not None:
-            measureMacro.load_json(str(path))
-            _logger.info("Loaded measureMacro state from %s", path)
+            try:
+                config = MeasurementConfig.load_json(path)
+                self._apply_measurement_config(config)
+                _logger.info("Loaded explicit readout config from %s", path)
+            except Exception as exc:
+                _logger.warning("Failed to load measureConfig.json from %s: %s", path, exc)
         else:
             _logger.warning(
-                "No measureConfig.json found — measureMacro will use defaults. "
-                "Run readout calibration to populate it."
+                "No measureConfig.json found — explicit readout defaults will be inferred "
+                "from hardware and calibration."
             )
 
-        # Auto-bind a default readout PulseOp from the hardware config
-        # when the current state has no pulse binding (fresh cooldown or
-        # measureConfig.json with null pulse_op).
-        if measureMacro._pulse_op is None:
-            ro_el = getattr(self.context_snapshot(), "ro_el", None)
-            if ro_el is not None:
-                pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(
-                    ro_el, "readout", strict=False,
-                )
-                if pulse_info is not None:
-                    measureMacro.set_pulse_op(pulse_info, active_op="readout")
-                    _logger.info(
-                        "Auto-bound measureMacro readout pulse from hardware config "
-                        "(element=%s)", ro_el,
-                    )
-                else:
-                    _logger.warning(
-                        "Could not auto-bind measureMacro: no 'readout' operation "
-                        "found for element %r in pulse manager.", ro_el,
-                    )
-
-        # Sync discrimination/quality params from CalibrationStore → measureMacro.
-        # CalibrationStore is the canonical source of truth; this ensures the
-        # macro reflects any CalibrationStore updates that may have occurred
-        # after the last measureConfig.json save.
-        cal = getattr(self, "calibration", None)
         ro_el = getattr(self.context_snapshot(), "ro_el", None)
+        pulse_info = None
+        if ro_el is not None:
+            active_op = getattr(self.bindings.readout, "active_op", None) or "readout"
+            pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(ro_el, active_op, strict=False)
+            if pulse_info is None and active_op != "readout":
+                pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(ro_el, "readout", strict=False)
+                if pulse_info is not None:
+                    self.bindings.readout.active_op = "readout"
+            if pulse_info is not None:
+                self.bindings.readout.pulse_op = pulse_info
+                if not self.bindings.readout.demod_weight_sets:
+                    self.bindings.readout.demod_weight_sets = self._default_readout_weight_sets(pulse_info)
+                if self.bindings.readout.acquire_in.weight_length is None and pulse_info.length is not None:
+                    self.bindings.readout.acquire_in.weight_length = int(pulse_info.length)
+            else:
+                _logger.warning(
+                    "Could not resolve a readout pulse mapping for element=%r during session open.",
+                    ro_el,
+                )
+
+        cal = getattr(self, "calibration", None)
         if cal is not None and ro_el is not None:
             try:
-                measureMacro.sync_from_calibration(cal, ro_el)
-                _logger.info("Synced measureMacro from CalibrationStore (element=%s)", ro_el)
+                self.bindings.readout.sync_from_calibration(cal, lookup_keys=(ro_el,))
+                _logger.info("Synced ReadoutBinding from CalibrationStore (element=%s)", ro_el)
             except Exception as exc:
-                _logger.warning("Failed to sync measureMacro from CalibrationStore: %s", exc)
+                _logger.warning("Failed to sync readout state from CalibrationStore: %s", exc)
 
     # ------------------------------------------------------------------
     # Ad-hoc program simulation
@@ -1167,10 +1343,7 @@ class SessionManager:
             _logger.warning("Error saving runtime settings: %s", e, exc_info=True)
         self.calibration.save()
         try:
-            from ..programs.macros.measure import measureMacro
-            dst = self.experiment_path / "config" / "measureConfig.json"
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            measureMacro.save_json(str(dst))
+            self.persist_measure_config()
         except Exception as e:
             _logger.warning("Error saving measureConfig.json on close: %s", e, exc_info=True)
         self._opened = False

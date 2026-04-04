@@ -203,7 +203,7 @@ def preflight_check(
     if mc_path is not None and mc_path.exists():
         _ok(tag, str(mc_path))
     else:
-        _warn(tag, "No measureConfig.json found — measureMacro using defaults")
+        _warn(tag, "No measureConfig.json found — explicit readout defaults will be inferred")
 
     # ---- 8. Bindings validation ----
     tag = "bindings"

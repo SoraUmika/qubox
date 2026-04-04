@@ -1,5 +1,11 @@
 # Gate → Protocol → Circuit → Backend Architecture — Review Memo
 
+> **Historical document (2025-01).** This reviews the gate/circuit architecture
+> that has since been narrowed. `qubox.gates` now contains only runtime
+> hardware gate implementations; the gate-model, fidelity, noise, and
+> gate-sequence layers described here were removed. See
+> [API Reference §2](../API_REFERENCE.md) for the current package layout.
+
 **Date**: 2025-01  
 **Scope**: Documentation & review only.  No code refactoring.
 

@@ -1,5 +1,4 @@
-﻿# qubox_v2/gates/hardware/snap.py
-from __future__ import annotations
+﻿from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 

@@ -52,14 +52,14 @@ cells.append(make_cell("code", """\
 import sys
 import numpy as np
 
-# Ensure qubox_v2_legacy is importable from the notebooks/ directory
+# Ensure qubox is importable from the notebooks/ directory
 sys.path.insert(0, r"E:\\qubox")
 
 from pathlib import Path
 from qualang_tools.units import unit
 
-from qubox_v2_legacy.experiments.session import SessionManager
-from qubox_v2_legacy.experiments import (
+from qubox.experiments.session import SessionManager
+from qubox.experiments import (
     # Spectroscopy
     ResonatorSpectroscopy,
     ResonatorPowerSpectroscopy,
@@ -99,9 +99,9 @@ from qubox_v2_legacy.experiments import (
     SPAFluxOptimization,
     SPAPumpFrequencyOptimization,
 )
-from qubox_v2_legacy.experiments.calibration import ReadoutConfig
-from qubox_v2_legacy.calibration import CalibrationOrchestrator
-from qubox_v2_legacy.devices import SampleRegistry, SampleInfo
+from qubox.experiments.calibration import ReadoutConfig
+from qubox.calibration import CalibrationOrchestrator
+from qubox.devices import SampleRegistry, SampleInfo
 
 u = unit()"""))
 
@@ -227,11 +227,11 @@ Unified setup block for reproducibility and runtime readout configuration."""))
 
 # ── 11 Snapshot + preflight code ────────────────────────
 cells.append(make_cell("code", """\
-from qubox_v2_legacy.core.session_state import SessionState
-from qubox_v2_legacy.core.artifact_manager import ArtifactManager
-from qubox_v2_legacy.core.preflight import preflight_check
-from qubox_v2_legacy.core.artifacts import save_config_snapshot
-from qubox_v2_legacy.core.schemas import validate_config_dir
+from qubox.core.session_state import SessionState
+from qubox.core.artifact_manager import ArtifactManager
+from qubox.core.preflight import preflight_check
+from qubox.core.artifacts import save_config_snapshot
+from qubox.core.schemas import validate_config_dir
 
 # Orchestrator used by calibration preview/commit cells
 orch = CalibrationOrchestrator(session)
@@ -479,7 +479,7 @@ for el, lo, if_fq in zip(elements, el_los, el_ifs):
     print(f"  {el:20s}  LO={lo/1e9:.4f} GHz  IF={if_fq/1e6:.2f} MHz")
 
 # --- Manual IQ mixer calibration via SA124B ---
-from qubox_v2_legacy.calibration import MixerCalibrationConfig, SAMeasurementHelper
+from qubox.calibration import MixerCalibrationConfig, SAMeasurementHelper
 
 cfg = MixerCalibrationConfig(
     sa_span_hz=SA_SPAN_HZ, sa_rbw=SA_RBW, sa_vbw=SA_VBW,
@@ -698,7 +698,7 @@ Updates `ref_r180` amplitude and derived primitives (cooldown-scoped)."""))
 # ── 29 Power Rabi code ──────────────────────────────────
 cells.append(make_cell("code", """\
 import importlib
-import qubox_v2_legacy.calibration.orchestrator as orch_mod
+import qubox.calibration.orchestrator as orch_mod
 importlib.reload(orch_mod)
 
 orch = orch_mod.CalibrationOrchestrator(session)
@@ -954,7 +954,7 @@ and commit via `CalibrationPatch` if the fit quality passes validation."""))
 
 # ── 44 DRAG commit code ─────────────────────────────────
 cells.append(make_cell("code", """\
-from qubox_v2_legacy.calibration.state_machine import (
+from qubox.calibration.state_machine import (  # TODO: module not yet migrated
     CalibrationStateMachine, CalibrationState,
     CalibrationPatch, PatchValidation,
 )
@@ -1097,8 +1097,6 @@ cells.append(make_cell("markdown", """\
 
 # ── 48 AllXY code ───────────────────────────────────────
 cells.append(make_cell("code", """\
-from qubox_v2_legacy.programs.macros.measure import measureMacro
-
 allxy = AllXY(session)
 result = allxy.run(n_avg=5000)
 analysis = allxy.analyze(result)
@@ -1108,12 +1106,11 @@ print(f"Gate error = {analysis.metrics.get('gate_error', float('nan')):.4f}")
 print(f"Observable = {analysis.metrics.get('observable', 'unknown')}")
 print(f"State map  = {analysis.metrics.get('state_mapping', {})}")
 print(f"Confusion correction used = {analysis.metrics.get('used_confusion_correction', False)}")
-print(f"Confusion matrix present  = {measureMacro._ro_quality_params.get('confusion_matrix') is not None}")"""))
+print(f"Confusion matrix present  = {session.bindings.readout.quality.get('confusion_matrix') is not None}")"""))
 
 # ── 49 Confusion check ──────────────────────────────────
 cells.append(make_cell("code", """\
-from qubox_v2_legacy.programs.macros.measure import measureMacro
-confusion = measureMacro._ro_quality_params.get("confusion_matrix", None)
+confusion = session.bindings.readout.quality.get("confusion_matrix", None)
 confusion"""))
 
 # ── 50 RB heading ───────────────────────────────────────
@@ -1174,7 +1171,7 @@ result = wopt.run(
     r180="x180",
     n_avg=200_000,
     persist=True,
-    set_measure_macro=True,
+    set_active_readout=True,
 )
 
 analysis = wopt.analyze(result)
@@ -1195,7 +1192,7 @@ Stores weights/threshold/confusion in the cooldown-scoped calibration."""))
 
 # ── 58 GE disc code ─────────────────────────────────────
 cells.append(make_cell("code", """\
-from qubox_v2_legacy.experiments.calibration.readout import ReadoutGEDiscrimination
+from qubox.experiments.calibration.readout import ReadoutGEDiscrimination
 
 ge = ReadoutGEDiscrimination(session)
 result = ge.run(
@@ -1203,7 +1200,7 @@ result = ge.run(
     attr.ro_fq,
     r180="x180",
     n_samples=50000,
-    update_measure_macro=True,
+    update_readout_config=True,
     apply_rotated_weights=True,
     persist=True,
 )
@@ -1235,10 +1232,10 @@ Two successive measurements to quantify QND fidelity, F, Q, and V."""))
 
 # ── 60 Butterfly code ───────────────────────────────────
 cells.append(make_cell("code", """\
-from qubox_v2_legacy.experiments.calibration.readout import ReadoutButterflyMeasurement
+from qubox.experiments.calibration.readout import ReadoutButterflyMeasurement
 
 bfly = ReadoutButterflyMeasurement(session)
-result = bfly.run(r180="x180", update_measure_macro=True, n_samples=50000)
+result = bfly.run(r180="x180", update_readout_config=True, n_samples=50000)
 
 analysis = bfly.analyze(result, update_calibration=True)
 bfly.plot(analysis, show_histogram=True, show_discriminator=True)
@@ -1262,10 +1259,10 @@ Stores all readout quality params in the cooldown-scoped calibration."""))
 # ── 62 Full readout code ────────────────────────────────
 cells.append(make_cell("code", """\
 import importlib
-import qubox_v2_legacy.experiments.calibration.readout as readout_mod
+import qubox.experiments.calibration.readout as readout_mod
 importlib.reload(readout_mod)
 
-from qubox_v2_legacy.experiments.calibration.readout import (
+from qubox.experiments.calibration.readout import (
     CalibrationReadoutFull,
     ReadoutConfig,
     ReadoutGEDiscrimination,
@@ -1273,7 +1270,7 @@ from qubox_v2_legacy.experiments.calibration.readout import (
     ReadoutWeightsOptimization,
     CalibrateReadoutFull,
 )
-from qubox_v2_legacy.programs.macros.measure import measureMacro
+from qubox.core.measurement_config import MeasurementConfig
 
 LEGACY_BLOB_K = 3.0
 LEGACY_M0_MAX_TRIALS = 1000
@@ -1310,7 +1307,7 @@ readoutConfig = ReadoutConfig(
         "persist": True,
     },
     bfly_kwargs={
-        "update_measure_macro": True,
+        "update_readout_config": True,
         "show_analysis": False,
     },
 )
@@ -1344,7 +1341,7 @@ print(f"average_tries   = {ro_pipeline_analysis.metrics.get('bfly_average_tries'
 print(f"readout_duration_ns   = {ro_pipeline_analysis.metrics.get('bfly_readout_duration_ns', float('nan'))}")
 print(f"readout_duration_clks = {ro_pipeline_analysis.metrics.get('bfly_readout_duration_clks', float('nan'))}")
 print(f"T1_decay_factor       = {ro_pipeline_analysis.metrics.get('bfly_T1_decay_factor', float('nan'))}")
-print(f"measureMacro confusion loaded: {measureMacro._ro_quality_params.get('confusion_matrix') is not None}")
+print(f"Readout config confusion loaded: {session.bindings.readout.quality.get('confusion_matrix') is not None}")
 
 fq_entry = session.calibration.get_frequencies(attr.qb_el)
 cal_qb_fq = None if fq_entry is None else getattr(fq_entry, "qubit_freq", None)
@@ -1397,20 +1394,20 @@ session artifacts. Validates persistence to cooldown-scoped paths."""))
 cells.append(make_cell("code", """\
 import importlib
 from pathlib import Path
-import qubox_v2_legacy.experiments.calibration.gates as gates_mod
+import qubox.experiments.calibration.gates as gates_mod
 importlib.reload(gates_mod)
-from qubox_v2_legacy.experiments.calibration.gates import AllXY
-from qubox_v2_legacy.programs.macros.measure import measureMacro
+from qubox.experiments.calibration.gates import AllXY
+from qubox.core.measurement_config import MeasurementConfig
 
 # Persist readout + pulse calibration artifacts (cooldown-scoped)
 session.calibration.save()
 session.save_pulses()
 measure_cfg_path = Path(session.experiment_path) / "config" / "measureConfig.json"
 measure_cfg_path.parent.mkdir(parents=True, exist_ok=True)
-measureMacro.save_json(str(measure_cfg_path))
+session.persist_measure_config(measure_cfg_path)
 
-# Reload measureMacro from disk to validate persistence path
-measureMacro.load_json(str(measure_cfg_path))
+# Reload the explicit readout config from disk to validate persistence path
+persisted_cfg = MeasurementConfig.load_json(measure_cfg_path)
 
 # Run ALLXY as post-readout sanity check
 allxy = AllXY(session)
@@ -1418,8 +1415,8 @@ allxy_result = allxy.run(n_avg=5000)
 allxy_analysis = allxy.analyze(allxy_result)
 allxy.plot(allxy_analysis)
 
-cm = measureMacro._ro_quality_params.get("confusion_matrix", None)
-tm = measureMacro._ro_quality_params.get("transition_matrix", None)
+cm = persisted_cfg.confusion_matrix
+tm = persisted_cfg.transition_matrix
 
 print("=== Calibration Summary ===")
 print(f"g_pi (ref_r180): {float(globals().get('rabi_g_pi', float('nan'))):.6f}")
@@ -1505,8 +1502,8 @@ Registers:
 
 # ── 69c Storage pulse defs code ────────────────────────
 cells.append(make_cell("code", """\
-from qubox_v2_legacy.tools.waveforms import kaiser_pulse_waveforms
-from qubox_v2_legacy.tools.generators import register_rotations_from_ref_iq
+from qubox.tools.waveforms import kaiser_pulse_waveforms
+from qubox.tools.generators import register_rotations_from_ref_iq
 
 pm = session.pulse_mgr
 
@@ -1708,7 +1705,7 @@ cells.append(make_cell("markdown", """\
 
 # ── 82 Disp pulses code ─────────────────────────────────
 cells.append(make_cell("code", """\
-from qubox_v2_legacy.tools.generators import ensure_displacement_ops
+from qubox.tools.generators import ensure_displacement_ops
 
 n_fock = 3
 
@@ -1886,7 +1883,7 @@ Verify that PulseFactory produces deterministic, correct waveforms."""))
 
 # ── 98 Waveform check code ──────────────────────────────
 cells.append(make_cell("code", """\
-from qubox_v2_legacy.verification.waveform_regression import run_all_checks
+from qubox.verification.waveform_regression import run_all_checks
 
 wf_results = run_all_checks()
 passed = sum(1 for r in wf_results if r.passed)
@@ -1997,7 +1994,7 @@ for artifact in am.list_artifacts():
 
 print()
 print("=" * 60)
-from qubox_v2_legacy.core.artifact_manager import cleanup_artifacts
+from qubox.core.artifact_manager import cleanup_artifacts
 removed = cleanup_artifacts(str(session.experiment_path), keep_latest=5, current_hash=ss.build_hash)
 if removed:
     print(f"  Cleaned up {len(removed)} old artifact directories.")
@@ -2013,9 +2010,9 @@ or logs a warning (in non-strict mode)."""))
 
 # ── 102 Context mismatch code ───────────────────────────
 cells.append(make_cell("code", """\
-from qubox_v2_legacy.core.errors import ContextMismatchError
-from qubox_v2_legacy.core.experiment_context import ExperimentContext
-from qubox_v2_legacy.calibration.store import CalibrationStore
+from qubox.core.errors import ContextMismatchError
+from qubox.core.experiment_context import ExperimentContext
+from qubox.calibration.store import CalibrationStore
 
 # Simulate a mismatched context
 wrong_ctx = ExperimentContext(
@@ -2047,7 +2044,7 @@ spectrum analyser alignment or mixer leakage checks."""))
 
 # ── 104 CW code ─────────────────────────────────────────
 cells.append(make_cell("code", """\
-from qubox_v2_legacy.programs.builders.utility import continuous_wave
+from qubox.programs.builders.utility import continuous_wave
 
 target_element = attr.qb_el
 cw_pulse = "const"
@@ -2172,3 +2169,4 @@ code_cells = sum(1 for c in cells if c["cell_type"] == "code")
 md_cells = sum(1 for c in cells if c["cell_type"] == "markdown")
 print(f"  Code cells: {code_cells}")
 print(f"  Markdown cells: {md_cells}")
+

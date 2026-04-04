@@ -6,84 +6,16 @@ import matplotlib.pyplot as plt
 from ..core.pulse_op import PulseOp
 from qubox_tools.algorithms.core import compute_waveform_fft
 from ..core.types import MAX_AMPLITUDE, BASE_AMPLITUDE
+from .models import ResourceStore
 import logging
 
 _logger = logging.getLogger(__name__)
 
-class _ResourceStore:
-    """Container for waveforms, pulses, weights and element-op mappings."""
 
-    def __init__(self) -> None:
-        self.waveforms: Dict[str, Dict[str, Any]] = {}
-        self.dig_waveforms: Dict[str, Dict[str, Any]] = {}
-        self.pulses:    Dict[str, Dict[str, Any]] = {}
-        self.weights:   Dict[str, Dict[str, Any]] = {}
-        self.el_ops:    Dict[str, Dict[str, str]] = {}
+# Backward-compat alias used internally
+_ResourceStore = ResourceStore
 
-    # â”€â”€â”€ merge this store into an arbitrary QM config dict â”€â”€â”€â”€
-    def merge_into(self, cfg: Dict[str, Any], *, warn_collisions: bool = False, tag: str = "") -> None:
-        for section, store in [
-            ("waveforms", self.waveforms),
-            ("digital_waveforms", self.dig_waveforms),
-            ("pulses", self.pulses),
-            ("integration_weights", self.weights),
-        ]:
-            target = cfg.setdefault(section, {})
-            if warn_collisions:
-                collisions = set(target) & set(store)
-                if collisions:
-                    _logger.warning(
-                        "POM %s: %d key collision(s) in '%s': %s (volatile overwrites)",
-                        tag, len(collisions), section, sorted(collisions)[:5],
-                    )
-            target.update(store)
-        elems = cfg.setdefault("elements", {})
 
-        wildcard_ops = self.el_ops.get("*") or {}
-        if isinstance(wildcard_ops, dict) and wildcard_ops:
-            for el_name, el_cfg in elems.items():
-                if not isinstance(el_cfg, dict) or str(el_name).startswith("__"):
-                    continue
-                el_cfg.setdefault("operations", {}).update(wildcard_ops)
-
-        for el, ops in self.el_ops.items():
-            if el == "*":
-                continue
-            if not isinstance(ops, dict) or not ops:
-                continue
-
-            el_cfg = elems.get(el)
-            if not isinstance(el_cfg, dict):
-                _logger.warning(
-                    "POM %s: skipping operation map for unknown element '%s'",
-                    tag,
-                    el,
-                )
-                continue
-            el_cfg.setdefault("operations", {}).update(ops)
-
-    # â”€â”€â”€ serialization helpers (perm store only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    def as_dict(self):
-        return dict(
-            waveforms=self.waveforms,
-            digital_waveforms=self.dig_waveforms,
-            pulses=self.pulses,
-            integration_weights=self.weights,
-            element_operations=self.el_ops,
-        )
-
-    def load_from_dict(self, d: Dict[str, Any]):
-        self.waveforms.update(d.get("waveforms", {}))
-        self.dig_waveforms.update(d.get("digital_waveforms", {}))
-        self.pulses.update(d.get("pulses", {}))
-        self.weights.update(d.get("integration_weights", {}))
-        self.el_ops.update(d.get("element_operations", {}))
-
-    def clear(self):
-        self.waveforms.clear(); self.pulses.clear()
-        self.weights.clear();   self.el_ops.clear()
-
-    
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 class PulseOperationManager:
     # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1921,8 +1853,8 @@ class PulseOperationManager:
     ) -> int | None:
         """
         Return the per-segment demod window length (segment_len from
-        get_integration_weight_info). This is what measureMacro calls
-        `_demod_weight_len`.
+        get_integration_weight_info). This is the explicit readout-config
+        ``weight_length`` value.
 
         If the weight can't be found and strict=False, return None;
         if strict=True, we'll raise from inside get_integration_weight_info.

@@ -1,4 +1,4 @@
-# Pulse-train tomography models (originally qubox_v2_legacy/analysis/pulse_train_models.py)
+# Pulse-train tomography models (qubox_tools.fitting.pulse_train)
 """Pure analysis functions for pulse-train tomography.
 
 This module contains the mathematical models, fitting algorithms,
@@ -6,7 +6,7 @@ parameter conversion utilities, and plotting for pulse-train
 tomography.  It has NO dependencies on QUA or experiment execution.
 
 The experiment execution functions (``run_pulse_train_tomography``,
-``make_state_prep``) remain in ``qubox_v2_legacy.calibration.pulse_train_tomo``.
+``make_state_prep``) live in ``qubox.calibration.pulse_train_tomo``.
 """
 from __future__ import annotations
 

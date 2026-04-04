@@ -1,4 +1,3 @@
-# qubox_v2/pulses/__init__.py
 """Pulse and waveform management layer.
 
 Two main entry points:

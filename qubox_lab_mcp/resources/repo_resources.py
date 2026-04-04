@@ -30,7 +30,7 @@ def register_repo_resources(mcp: Any, services: ServiceContainer) -> None:
             "notebook_dirs": [entry.path for entry in services.filesystem.list_directory("notebooks", recursive=False)] if (services.config.primary_root / "notebooks").exists() else [],
             "sample_dirs": sample_dirs,
             "notes": [
-                "Source code primarily lives under qubox/ (public API) and qubox_v2_legacy/ (runtime backend).",
+                "Source code lives under qubox/ (public API, runtime backend, and experiments).",
                 "Context-mode sample configs live under samples/<sample_id>/config.",
                 "Cooldown-specific calibration and artifact data live under samples/<sample_id>/cooldowns/<cooldown_id>/.",
             ],

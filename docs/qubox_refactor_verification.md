@@ -1,5 +1,11 @@
 # qubox Refactor Verification
 
+> **Historical document (2026-03-13).** This describes the state of the partial
+> v2 → v3 migration. The `qubox_v2_legacy` package referenced here has since
+> been fully eliminated. See [LEGACY_ELIMINATION_REPORT.md](../LEGACY_ELIMINATION_REPORT.md)
+> for details. The canonical package architecture is now in
+> [API Reference](../API_REFERENCE.md).
+
 Date: 2026-03-13
 
 ## Verdict

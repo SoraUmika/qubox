@@ -9,8 +9,8 @@ Usage
     python tools/log_prompt.py \\
         --task "add-t2-ramsey-experiment" \\
         --prompt "Add a T2 Ramsey experiment class..." \\
-        --response "Created qubox/legacy/experiments/time_domain/ramsey.py..." \\
-        --files "qubox/legacy/experiments/time_domain/ramsey.py, API_REFERENCE.md"
+        --response "Created qubox/experiments/time_domain/ramsey.py..." \\
+        --files "qubox/experiments/time_domain/ramsey.py, API_REFERENCE.md"
 
     # Interactive mode (reads prompt and response from stdin)
     python tools/log_prompt.py --task "my-task" --interactive

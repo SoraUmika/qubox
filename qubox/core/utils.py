@@ -1,4 +1,3 @@
-# qubox_v2/core/utils.py
 """
 Shared utility functions used across qubox subsystems.
 """

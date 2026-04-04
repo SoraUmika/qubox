@@ -1,14 +1,14 @@
 ﻿from __future__ import annotations
 
 import argparse
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import hashlib
 import json
 import math
 import os
 import time
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -28,7 +28,7 @@ from qubox.experiments import (
     FockResolvedPowerRabi,
     StorageSpectroscopy,
 )
-from qubox.programs.macros.measure import measureMacro
+from qubox.core.measurement_config import MeasurementConfig
 
 
 REFERENCE_SEED = {
@@ -405,7 +405,31 @@ def _stage_measure_context(session: SessionManager, attr: Any, stage_name: str):
             f"{stage_name}: no readout PulseOp found for element={ro_el!r}; required for IO sanity stage"
         )
     weight_len = int(ro_info.length) if ro_info.length is not None else None
-    return measureMacro.using_defaults(pulse_op=ro_info, active_op="readout", weight_len=weight_len)
+    apply_config = getattr(session, "_apply_measurement_config", None)
+    current_config = getattr(session, "current_measurement_config", None)
+    if not callable(apply_config) or not callable(current_config):
+        return nullcontext()
+
+    base_config = current_config()
+    staged_config = replace(
+        base_config if isinstance(base_config, MeasurementConfig) else MeasurementConfig(),
+        element=ro_el,
+        operation="readout",
+        drive_frequency=float(getattr(attr, "ro_fq", REFERENCE_SEED["ro_fq"])),
+        weight_sets=(("cos", "sin"), ("minus_sin", "cos")),
+        weight_length=weight_len,
+        source="autotune_stage_context",
+    )
+
+    @contextmanager
+    def _configured_readout():
+        apply_config(staged_config)
+        try:
+            yield
+        finally:
+            apply_config(base_config)
+
+    return _configured_readout()
 
 
 def _run_build_only(exp: Any, run_kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -630,7 +654,7 @@ def _stage_specs(attr: Any, u: Any) -> list[dict[str, Any]]:
                 "r180": "x180",
                 "n_avg": 10000,
                 "persist": False,
-                "set_measure_macro": True,
+                "set_active_readout": True,
                 "make_plots": False,
                 "revert_on_no_improvement": True,
             },
@@ -647,7 +671,7 @@ def _stage_specs(attr: Any, u: Any) -> list[dict[str, Any]]:
                 "measure_op": "readout",
                 "drive_frequency": ro_fq,
                 "r180": "x180",
-                "update_measure_macro": True,
+                "update_readout_config": True,
                 "apply_rotated_weights": True,
                 "persist": False,
                 "n_samples": 6000,
@@ -665,7 +689,7 @@ def _stage_specs(attr: Any, u: Any) -> list[dict[str, Any]]:
                 "prep_policy": "THRESHOLD",
                 "prep_kwargs": {"threshold": 0.0},
                 "n_samples": 3000,
-                "update_measure_macro": True,
+                "update_readout_config": True,
             },
             "analyze_kwargs": {"update_calibration": False},
             "required": True,

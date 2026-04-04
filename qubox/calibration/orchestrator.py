@@ -1,10 +1,5 @@
 ﻿"""qubox.calibration.orchestrator — calibration execution and patch lifecycle.
 
-Migrated from ``qubox_v2_legacy.calibration.orchestrator``.
-qubox_v2_legacy imports removed; QUA-specific ops (measureMacro sync) are
-kept as lazy runtime-only imports so this module can be loaded without
-connecting to hardware.
-
 Flow::
 
     orch = CalibrationOrchestrator(session)
@@ -25,11 +20,14 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..core.persistence import sanitize_mapping_for_json, split_output_for_persistence
 from .contracts import Artifact, CalibrationResult, Patch
 from .patch_rules import default_patch_rules
+
+if TYPE_CHECKING:
+    from ..core.protocols import SessionProtocol
 
 _logger = logging.getLogger(__name__)
 
@@ -58,7 +56,7 @@ class CalibrationOrchestrator:
         Override specific rule lists; keys are ``CalibrationResult.kind`` strings.
     """
 
-    def __init__(self, session: Any, *, patch_rules: dict[str, list[Any]] | None = None):
+    def __init__(self, session: SessionProtocol | Any, *, patch_rules: dict[str, list[Any]] | None = None):
         self.session = session
         self._applied_patches: list[str] = []
         rules = default_patch_rules(session)
@@ -182,22 +180,12 @@ class CalibrationOrchestrator:
         self.session.save_pulses()
 
         sync_ok = True
-        # Optional: sync measureMacro (hardware-specific, lazy import)
-        try:
-            from qubox.programs.macros.measure import measureMacro  # type: ignore[import]
-            ro_el = getattr(self.session.context_snapshot(), "ro_el", None)
-            if ro_el is not None:
-                measureMacro.sync_from_calibration(self.session.calibration, ro_el)
-        except ImportError:
-            pass
-        except Exception as exc:
-            _logger.warning("measureMacro sync_from_calibration failed: %s", exc)
-            sync_ok = False
-
         try:
             bindings = getattr(self.session, "bindings", None)
             if bindings is not None:
-                bindings.readout.sync_from_calibration(self.session.calibration)
+                ro_el = getattr(self.session.context_snapshot(), "ro_el", None)
+                lookup_keys = (ro_el,) if ro_el is not None else ()
+                bindings.readout.sync_from_calibration(self.session.calibration, lookup_keys=lookup_keys)
         except Exception as exc:
             _logger.warning("ReadoutBinding sync_from_calibration failed: %s", exc)
             sync_ok = False
@@ -329,16 +317,16 @@ class CalibrationOrchestrator:
                 self.session.burn_pulses(include_volatile=include_volatile)
 
     def _apply_measure_weights(self, payload: dict[str, Any]) -> None:
-        try:
-            from qubox.programs.macros.measure import measureMacro  # type: ignore[import]
-        except ImportError:
-            _logger.warning("SetMeasureWeights: measureMacro not available — skipping")
-            return
         element = str(payload.get("element", getattr(self.session.context_snapshot(), "ro_el", "rr")))
         operation = str(payload.get("operation", "readout"))
         weights = payload.get("weights")
         info = self.session.pulse_mgr.get_pulseOp_by_element_op(element, operation, strict=False)
         if info is not None and weights is not None:
+            bindings = getattr(self.session, "bindings", None)
+            readout_binding = getattr(bindings, "readout", None) if bindings is not None else None
+            if readout_binding is not None:
+                readout_binding.pulse_op = info
+                readout_binding.active_op = operation
             if isinstance(weights, dict):
                 pulse = info.pulse
                 for label, value in weights.items():
@@ -353,33 +341,50 @@ class CalibrationOrchestrator:
                         pulse, label, label, override=True,
                     )
                 return
-            measureMacro.set_pulse_op(info, active_op=operation, weights=weights, weight_len=info.length)
+            if readout_binding is not None and isinstance(weights, (list, tuple)):
+                normalized: list[Any] = []
+                for spec in weights:
+                    if isinstance(spec, str):
+                        normalized.append(spec)
+                    elif isinstance(spec, (list, tuple)):
+                        values = [str(item) for item in spec if item is not None]
+                        if values:
+                            normalized.append(values)
+                if normalized:
+                    readout_binding.demod_weight_sets = normalized
+                    if info.length is not None:
+                        readout_binding.acquire_in.weight_length = int(info.length)
+            set_runtime = getattr(self.session, "set_runtime_setting", None)
+            if callable(set_runtime):
+                set_runtime("active_readout_element", element, persist=False)
 
     def _apply_persist_measure_config(self, payload: dict[str, Any]) -> None:
-        try:
-            from qubox.programs.macros.measure import measureMacro  # type: ignore[import]
-        except ImportError:
-            _logger.warning("PersistMeasureConfig: measureMacro not available — skipping")
-            return
         dst = Path(payload.get("path") or (self.session.experiment_path / "config" / "measureConfig.json"))
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        measureMacro.save_json(str(dst))
+        persist_config = getattr(self.session, "persist_measure_config", None)
+        if not callable(persist_config):
+            raise RuntimeError("PersistMeasureConfig requires session.persist_measure_config().")
+        persist_config(dst)
 
     def _apply_measure_discrimination(self, payload: dict[str, Any]) -> None:
-        try:
-            from qubox.programs.macros.measure import measureMacro  # type: ignore[import]
-        except ImportError:
-            _logger.warning("SetMeasureDiscrimination: measureMacro not available — skipping")
-            return
-        measureMacro._update_readout_discrimination(payload)
+        bindings = getattr(self.session, "bindings", None)
+        readout_binding = getattr(bindings, "readout", None) if bindings is not None else None
+        clean_payload = dict(payload or {})
+        readout_state_signature = clean_payload.pop("readout_state_signature", None)
+        post_select_config = clean_payload.pop("post_select_config", None)
+        if readout_binding is not None:
+            readout_binding.discrimination.update(clean_payload)
+        set_signature = getattr(self.session, "set_readout_state_signature", None)
+        if callable(set_signature) and readout_state_signature is not None:
+            set_signature(readout_state_signature, persist=False)
+        set_post_select = getattr(self.session, "set_post_selection_config", None)
+        if callable(set_post_select) and post_select_config is not None:
+            set_post_select(post_select_config, persist=False)
 
     def _apply_measure_quality(self, payload: dict[str, Any]) -> None:
-        try:
-            from qubox.programs.macros.measure import measureMacro  # type: ignore[import]
-        except ImportError:
-            _logger.warning("SetMeasureQuality: measureMacro not available — skipping")
-            return
-        measureMacro._update_readout_quality(payload)
+        bindings = getattr(self.session, "bindings", None)
+        readout_binding = getattr(bindings, "readout", None) if bindings is not None else None
+        if readout_binding is not None:
+            readout_binding.quality.update(dict(payload or {}))
 
     def _set_calibration_path(self, dotted_path: str, value: Any) -> None:
         parts = dotted_path.split(".")

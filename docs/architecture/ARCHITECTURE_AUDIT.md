@@ -5,6 +5,13 @@
 **Version:** 3.0.0  
 **Method:** Code inspection, not documentation summary. Every claim references actual implementation.
 
+> Note: As of 2026-04-04, the standalone `qubox.compile` and
+> `qubox.simulation` packages described in parts of this audit were removed
+> from `qubox` and are being split toward `cqed_sim`. The older gate-model,
+> fidelity, noise, and gate-sequence side of `qubox.gates` was also removed,
+> leaving only the runtime hardware gate layer. References to those paths below
+> are historical snapshots of the earlier repository state.
+
 ---
 
 ## Table of Contents

@@ -471,6 +471,7 @@ class ExperimentLibrary:
         *,
         sequence=None,
         circuit=None,
+        control=None,
         sweep=None,
         acquire=None,
         analysis: str | None = "raw",
@@ -478,18 +479,22 @@ class ExperimentLibrary:
         name: str | None = None,
         execute: bool = True,
     ):
-        if sequence is None and circuit is None:
-            raise ValueError("custom() requires either sequence= or circuit=")
-        body = circuit if circuit is not None else sequence
+        provided = [sequence is not None, circuit is not None, control is not None]
+        if sum(provided) != 1:
+            raise ValueError("custom() requires exactly one of sequence=, circuit=, or control=")
+        body = control if control is not None else (circuit if circuit is not None else sequence)
         template_name = str(name or getattr(body, "name", "custom"))
+        control_averaging = getattr(getattr(control, "sweep_plan", None), "averaging", 1)
+        n_shots = int(control_averaging if control is not None and sweep is None and int(n_avg) == 1 else n_avg)
         request = ExecutionRequest(
             kind="custom",
             template=template_name,
             sequence=sequence,
             circuit=circuit,
+            control_program=control,
             sweep=self.session.ensure_sweep_plan(sweep, averaging=n_avg) if sweep is not None else None,
             acquisition=acquire,
-            shots=int(n_avg),
+            shots=n_shots,
             analysis=analysis,
             execute=bool(execute),
         )

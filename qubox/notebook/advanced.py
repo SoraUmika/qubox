@@ -73,8 +73,8 @@ from ..schemas import validate_config_dir, ValidationResult
 # Core types, errors, context
 # ---------------------------------------------------------------------------
 from ..core.errors import ContextMismatchError
-from ..session.context import ExperimentContext, compute_wiring_rev
-from ..session.state import SessionState
+from ..core.experiment_context import ExperimentContext, compute_wiring_rev
+from ..core.session_state import SessionState
 
 # ---------------------------------------------------------------------------
 # Verification

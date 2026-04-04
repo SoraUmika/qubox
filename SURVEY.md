@@ -1,5 +1,9 @@
 # Gate–Protocol–Circuit Architecture Survey
 
+> **Historical document (2026-03-02).** This surveys the `qubox_v2_legacy`
+> gate/circuit architecture which has since been narrowed and merged into
+> `qubox`. See [API Reference](API_REFERENCE.md) for the current architecture.
+
 **Date**: 2026-03-02  
 **Scope**: `qubox_v2_legacy` full codebase  
 **Purpose**: PHASE 0 mandatory survey before implementing the Gate → Protocol → Circuit → Backend (QUA) abstraction layer.

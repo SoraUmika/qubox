@@ -1,11 +1,20 @@
 ﻿from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+from qubox.core.bindings import (
+    ChannelRef,
+    InputBinding,
+    OutputBinding,
+    ReadoutBinding,
+    ReadoutCal,
+    ReadoutHandle,
+)
 from qubox.core.device_metadata import DeviceMetadata
 from qubox.calibration.store import CalibrationStore
 from qubox.experiments.calibration.gates import AllXY
@@ -58,8 +67,16 @@ class _FakeCtx:
         self.pulse_mgr = _FakePulseMgr()
         self.bindings = SimpleNamespace(
             qubit=SimpleNamespace(lo_frequency=6.0e9),
-            readout=SimpleNamespace(
-                drive_out=SimpleNamespace(lo_frequency=8.8e9),
+            readout=ReadoutBinding(
+                drive_out=OutputBinding(
+                    channel=ChannelRef("oct1", "RF_out", 1),
+                    lo_frequency=8.8e9,
+                ),
+                acquire_in=InputBinding(
+                    channel=ChannelRef("oct1", "RF_in", 1),
+                ),
+                active_op="readout",
+                demod_weight_sets=[["cos", "sin"], ["minus_sin", "cos"]],
                 drive_frequency=8.6e9,
             ),
             storage=None,
@@ -68,6 +85,26 @@ class _FakeCtx:
 
     def context_snapshot(self) -> DeviceMetadata:
         return DeviceMetadata(qb_el="qubit", ro_el="resonator", st_el="storage", _calibration=self.calibration)
+
+    def readout_handle(self, alias: str = "resonator", operation: str = "readout") -> ReadoutHandle:
+        pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(alias, operation, strict=False)
+        bound_readout = replace(
+            self.bindings.readout,
+            pulse_op=pulse_info,
+            active_op=operation,
+            drive_frequency=float(self.bindings.readout.drive_frequency or 8.6e9),
+        )
+        return ReadoutHandle(
+            binding=bound_readout,
+            cal=ReadoutCal.from_readout_binding(bound_readout),
+            element=alias,
+            operation=operation,
+            gain=bound_readout.gain,
+            demod_weight_sets=tuple(
+                tuple(spec) if isinstance(spec, (list, tuple)) else (spec,)
+                for spec in (bound_readout.demod_weight_sets or ())
+            ),
+        )
 
 
 def _make_ctx(
@@ -90,7 +127,7 @@ def _make_ctx(
 
 def test_allxy_override_beats_calibration(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "qubox_v2.experiments.calibration.gates.cQED_programs.all_xy",
+        "qubox.experiments.calibration.gates.cQED_programs.all_xy",
         lambda *args, **kwargs: ("all_xy", args, kwargs),
     )
     exp = AllXY(_make_ctx(tmp_path, qb_therm_clks=5000))
@@ -103,7 +140,7 @@ def test_allxy_override_beats_calibration(tmp_path, monkeypatch):
 
 def test_power_rabi_uses_calibration_when_no_override(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "qubox_v2.experiments.time_domain.rabi.cQED_programs.power_rabi",
+        "qubox.experiments.time_domain.rabi.cQED_programs.power_rabi",
         lambda *args, **kwargs: ("power_rabi", args, kwargs),
     )
     exp = PowerRabi(_make_ctx(tmp_path, qb_therm_clks=6789))
@@ -122,7 +159,7 @@ def test_power_rabi_uses_calibration_when_no_override(tmp_path, monkeypatch):
 
 def test_power_rabi_missing_calibration_raises_clear_error(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "qubox_v2.experiments.time_domain.rabi.cQED_programs.power_rabi",
+        "qubox.experiments.time_domain.rabi.cQED_programs.power_rabi",
         lambda *args, **kwargs: ("power_rabi", args, kwargs),
     )
     exp = PowerRabi(_make_ctx(tmp_path, qb_therm_clks=None))
@@ -139,7 +176,7 @@ def test_power_rabi_missing_calibration_raises_clear_error(tmp_path, monkeypatch
 
 def test_allxy_missing_calibration_raises_clear_error(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "qubox_v2.experiments.calibration.gates.cQED_programs.all_xy",
+        "qubox.experiments.calibration.gates.cQED_programs.all_xy",
         lambda *args, **kwargs: ("all_xy", args, kwargs),
     )
     exp = AllXY(_make_ctx(tmp_path, qb_therm_clks=None))
@@ -150,7 +187,7 @@ def test_allxy_missing_calibration_raises_clear_error(tmp_path, monkeypatch):
 
 def test_resonator_spectroscopy_override_beats_calibration(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "qubox_v2.experiments.spectroscopy.resonator.cQED_programs.resonator_spectroscopy",
+        "qubox.experiments.spectroscopy.resonator.cQED_programs.resonator_spectroscopy",
         lambda *args, **kwargs: ("res_spec", args, kwargs),
     )
     exp = ResonatorSpectroscopy(_make_ctx(tmp_path, ro_therm_clks=3000))
@@ -170,7 +207,7 @@ def test_resonator_spectroscopy_override_beats_calibration(tmp_path, monkeypatch
 
 def test_t2_ramsey_uses_calibration_when_no_override(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "qubox_v2.experiments.time_domain.coherence.cQED_programs.T2_ramsey",
+        "qubox.experiments.time_domain.coherence.cQED_programs.T2_ramsey",
         lambda *args, **kwargs: ("t2_ramsey", args, kwargs),
     )
     exp = T2Ramsey(_make_ctx(tmp_path, qb_therm_clks=3456))
@@ -190,7 +227,7 @@ def test_t2_ramsey_uses_calibration_when_no_override(tmp_path, monkeypatch):
 
 def test_qubit_spectroscopy_uses_calibration_when_no_override(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "qubox_v2.experiments.spectroscopy.qubit.cQED_programs.qubit_spectroscopy",
+        "qubox.experiments.spectroscopy.qubit.cQED_programs.qubit_spectroscopy",
         lambda *args, **kwargs: ("qb_spec", args, kwargs),
     )
     exp = QubitSpectroscopy(_make_ctx(tmp_path, qb_therm_clks=2222))
@@ -211,7 +248,7 @@ def test_qubit_spectroscopy_uses_calibration_when_no_override(tmp_path, monkeypa
 
 def test_num_splitting_uses_storage_calibration_when_no_override(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "qubox_v2.experiments.cavity.storage.cQED_programs.num_splitting_spectroscopy",
+        "qubox.experiments.cavity.storage.cQED_programs.num_splitting_spectroscopy",
         lambda *args, **kwargs: ("num_split", args, kwargs),
     )
     exp = NumSplittingSpectroscopy(_make_ctx(tmp_path, st_therm_clks=7777))
@@ -230,7 +267,7 @@ def test_num_splitting_uses_storage_calibration_when_no_override(tmp_path, monke
 
 def test_iq_blob_missing_calibration_raises_clear_error(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "qubox_v2.experiments.calibration.readout.cQED_programs.iq_blobs",
+        "qubox.experiments.calibration.readout.cQED_programs.iq_blobs",
         lambda *args, **kwargs: ("iq_blobs", args, kwargs),
     )
     exp = IQBlob(_make_ctx(tmp_path, qb_therm_clks=None))

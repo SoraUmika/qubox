@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from qualang_tools.loops import from_array
@@ -27,16 +27,16 @@ from ..experiments.result import ProgramBuildResult
 from ..gates.hardware.displacement import DisplacementHardware
 from ..gates.hardware.qubit_rotation import QubitRotationHardware
 from ..gates.hardware.sqr import SQRHardware
-from ..programs.macros.measure import measureMacro
 from ..programs.measurement import (
     MeasureSpec,
     StateRule,
+    build_readout_snapshot_from_handle,
+    build_readout_snapshot_from_measurement_config,
     emit_measurement_spec,
-    try_build_readout_snapshot_from_macro,
 )
 from ..tools.waveforms import drag_gaussian_pulse_waveforms
 from .circuit_postprocess import build_state_derivation_processor
-from .circuit_runner import (
+from .circuit_ir import (
     CalibrationReference,
     Gate,
     MeasurementRecord,
@@ -46,6 +46,10 @@ from .circuit_runner import (
     _UNSET,
     _stable_payload,
 )
+
+
+if TYPE_CHECKING:
+    from ..core.protocols import SessionProtocol
 
 
 @dataclass(frozen=True)
@@ -182,7 +186,7 @@ class _SweepAxisRuntime:
 class CircuitCompiler:
     """Generic circuit-to-QUA compiler with gate lowering and sweep support."""
 
-    def __init__(self, session: Any):
+    def __init__(self, session: SessionProtocol | Any, *, measurement_config: Any = None):
         self.session = session
         self.attr = self._context_snapshot()
         self.calibration = getattr(session, "calibration", None)
@@ -190,6 +194,8 @@ class CircuitCompiler:
         self.hw = getattr(session, "hw", getattr(session, "quaProgMngr", None))
         if self.pulse_mgr is None:
             raise RuntimeError("CircuitCompiler requires a pulse manager on the session context.")
+        self._measurement_config = measurement_config
+        self._active_readout_snapshot: dict[str, Any] | None = None
         self._trace: list[InstructionTraceEntry] = []
         self._gate_resolutions: list[GateResolution] = []
         self._base_frequencies: dict[str, float] = {}
@@ -231,6 +237,7 @@ class CircuitCompiler:
         self._current_if = {}
         self._resolved_state_rules = {}
         self._post_processing_plan = []
+        self._active_readout_snapshot = None
 
         measurement_schema = self._normalize_measurement_schema(circuit)
         measurement_schema.validate()
@@ -344,6 +351,20 @@ class CircuitCompiler:
                 ),
             )
 
+        # Capture calibration snapshot for reproducibility
+        cal_snapshot = None
+        try:
+            from ..calibration.models import CalibrationSnapshot
+            cal = getattr(self.session, "calibration", None)
+            if cal is not None and hasattr(cal, "to_dict"):
+                cal_snapshot = CalibrationSnapshot(
+                    source_path=str(getattr(cal, "path", "<in-memory>")),
+                    data=dict(cal.to_dict()),
+                    version=str(cal.to_dict().get("version", "")),
+                )
+        except Exception:
+            pass
+
         return ProgramBuildResult(
             program=prog,
             n_total=n_total,
@@ -357,7 +378,8 @@ class CircuitCompiler:
                 sc.parameter: {"values": sc.values.tolist(), "length": len(sc.values), "mode": sc.apply_mode}
                 for sc in sweep_configs
             } if sweep_configs else None,
-            measure_macro_state=self._measure_macro_state(),
+            readout_state=self._readout_state(),
+            calibration_snapshot=cal_snapshot,
             metadata=metadata,
         )
 
@@ -490,7 +512,7 @@ class CircuitCompiler:
         return MeasurementSchema(records=tuple(records))
 
     def _default_stream(self, *, name: str, qua_type: str):
-        from .circuit_runner import StreamSpec
+        from .circuit_ir import StreamSpec
 
         return StreamSpec(name=name, qua_type=qua_type, shape=("shots",), aggregate="save_all")
 
@@ -573,7 +595,12 @@ class CircuitCompiler:
         resolved_params["operation"] = ResolvedParameter(value=operation, source="override")
         resolved_params["drive_frequency"] = ResolvedParameter(value=drive_frequency, source="calibration")
 
-        self._configure_measure_macro(target=target, operation=operation, drive_frequency=drive_frequency)
+        readout = self._build_readout_handle(
+            target=target,
+            operation=operation,
+            drive_frequency=drive_frequency,
+        )
+        self._active_readout_snapshot = self._build_readout_snapshot(readout)
         align()
 
         measure_spec = MeasureSpec(kind=str(gate.params.get("kind", runtime.record.kind)))
@@ -583,6 +610,7 @@ class CircuitCompiler:
             targets=target_vars if target_vars else None,
             with_state=False,
             state=None,
+            readout=readout,
         )
         for stream_name, qua_var in runtime.variables.items():
             save(qua_var, runtime.streams[stream_name])
@@ -703,6 +731,25 @@ class CircuitCompiler:
                     params={"duration_clks": int(duration)},
                 )
             )
+
+    def _lower_barrier(
+        self,
+        gate: Gate,
+        *,
+        targets: tuple[str, ...],
+        resolved_params: dict[str, ResolvedParameter],
+    ) -> None:
+        if targets:
+            align(*targets)
+        else:
+            align()
+        self._trace.append(
+            InstructionTraceEntry(
+                op="align",
+                target=",".join(targets) if targets else None,
+                params={"targets": list(targets)},
+            )
+        )
 
     def _lower_frame_update(
         self,
@@ -1271,21 +1318,113 @@ class CircuitCompiler:
             return source_var < value
         raise ValueError(f"Unsupported gate condition comparator: {comparator!r}")
 
-    def _configure_measure_macro(self, *, target: str, operation: str, drive_frequency: float) -> None:
+    def _build_readout_handle(self, *, target: str, operation: str, drive_frequency: float):
+        from ..core.bindings import (
+            ChannelRef,
+            InputBinding,
+            OutputBinding,
+            ReadoutBinding,
+            ReadoutCal,
+            ReadoutHandle,
+        )
+
         pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(target, operation, strict=False)
         if pulse_info is None:
             raise RuntimeError(f"Missing readout pulse mapping for target={target!r}, operation={operation!r}")
 
         weight_mapping = pulse_info.int_weights_mapping or {}
         cos_key, sin_key, minus_sin_key = self._default_weight_keys(operation=operation, mapping=weight_mapping)
+        weight_keys = (cos_key, sin_key, minus_sin_key)
+        weight_length = getattr(pulse_info, "length", None)
 
-        measureMacro.set_pulse_op(
-            pulse_info,
+        handle_factory = getattr(self.session, "readout_handle", None)
+        base_handle = None
+        if callable(handle_factory):
+            try:
+                base_handle = handle_factory(alias=target, operation=operation)
+            except TypeError:
+                try:
+                    base_handle = handle_factory()
+                except Exception:
+                    base_handle = None
+            except Exception:
+                base_handle = None
+
+        if base_handle is None:
+            if self.calibration is not None:
+                base_cal = ReadoutCal.from_calibration_store(
+                    self.calibration,
+                    target,
+                    drive_freq=float(drive_frequency),
+                )
+            else:
+                base_cal = ReadoutCal(drive_frequency=float(drive_frequency))
+            base_binding = ReadoutBinding(
+                drive_out=OutputBinding(channel=ChannelRef("compiler", "RF_out", 0)),
+                acquire_in=InputBinding(channel=ChannelRef("compiler", "RF_in", 0)),
+                pulse_op=pulse_info,
+                active_op=operation,
+                demod_weight_sets=[[cos_key, sin_key], [minus_sin_key, cos_key]],
+                drive_frequency=float(drive_frequency),
+            )
+            base_handle = ReadoutHandle(
+                binding=base_binding,
+                cal=base_cal,
+                element=target,
+                operation=operation,
+            )
+
+        base_binding = replace(
+            base_handle.binding,
+            pulse_op=pulse_info,
             active_op=operation,
-            weights=[[cos_key, sin_key], [minus_sin_key, cos_key]],
-            weight_len=getattr(pulse_info, "length", None),
+            demod_weight_sets=[[cos_key, sin_key], [minus_sin_key, cos_key]],
+            drive_frequency=float(drive_frequency),
         )
-        measureMacro.set_drive_frequency(float(drive_frequency))
+
+        base_cal = getattr(base_handle, "cal", None) or ReadoutCal(drive_frequency=float(drive_frequency))
+        if self._measurement_config is None:
+            threshold = getattr(base_cal, "threshold", None)
+            rotation_angle = getattr(base_cal, "rotation_angle", None)
+            confusion_matrix = getattr(base_cal, "confusion_matrix", None)
+            fidelity = getattr(base_cal, "fidelity", None)
+        else:
+            threshold = getattr(self._measurement_config, "threshold", None)
+            rotation_angle = getattr(self._measurement_config, "angle", None)
+            confusion_matrix = getattr(self._measurement_config, "confusion_matrix", None)
+            fidelity = getattr(self._measurement_config, "fidelity", None)
+
+        cal = ReadoutCal(
+            drive_frequency=float(drive_frequency),
+            demod_method=getattr(base_cal, "demod_method", "dual_demod.full"),
+            weight_keys=weight_keys,
+            weight_length=weight_length,
+            threshold=threshold,
+            rotation_angle=rotation_angle,
+            confusion_matrix=confusion_matrix,
+            fidelity=fidelity,
+            post_select_threshold=getattr(base_cal, "post_select_threshold", None),
+            post_select_max_retries=int(getattr(base_cal, "post_select_max_retries", 3) or 3),
+        )
+
+        return replace(
+            base_handle,
+            binding=base_binding,
+            cal=cal,
+            element=target,
+            operation=operation,
+        )
+
+    def _build_readout_snapshot(self, readout: Any) -> dict[str, Any]:
+        if self._measurement_config is not None:
+            weight_keys = tuple(getattr(getattr(readout, "cal", None), "weight_keys", ()) or ())
+            return build_readout_snapshot_from_measurement_config(
+                self._measurement_config,
+                element=getattr(readout, "element", None),
+                operation=getattr(readout, "operation", None),
+                weights=weight_keys,
+            )
+        return build_readout_snapshot_from_handle(readout)
 
     def _default_weight_keys(self, *, operation: str, mapping: dict[str, str] | str) -> tuple[str, str, str]:
         if not isinstance(mapping, dict):
@@ -1313,16 +1452,16 @@ class CircuitCompiler:
                 flattened[f"{gate.gate_name}.{name}"] = value.to_dict()
         return flattened
 
-    def _measure_macro_state(self) -> dict[str, Any] | None:
+    def _readout_state(self) -> dict[str, Any] | None:
+        if self._active_readout_snapshot is not None:
+            return dict(self._active_readout_snapshot)
         try:
-            snap = getattr(measureMacro, "_snapshot", None)
-            if callable(snap):
-                return snap()
+            target = self._resolve_target("readout")
+            readout = self._build_readout_handle(
+                target=target,
+                operation="readout",
+                drive_frequency=self._base_frequency_for(target),
+            )
+            return self._build_readout_snapshot(readout)
         except Exception:
-            pass
-        return try_build_readout_snapshot_from_macro()
-
-
-# ── Backward-compatibility alias ────────────────────────────────────────────
-CircuitRunnerV2 = CircuitCompiler
-"""Deprecated alias — use :class:`CircuitCompiler` instead."""
+            return None

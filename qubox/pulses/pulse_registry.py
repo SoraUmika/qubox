@@ -1,4 +1,3 @@
-# qubox_v2/pulses/pulse_registry.py
 """Clean pulse registration API.
 
 PulseRegistry provides a simplified interface for adding, modifying, and

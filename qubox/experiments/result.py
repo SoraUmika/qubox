@@ -224,8 +224,11 @@ class ProgramBuildResult:
     sweep_axes: dict[str, Any] | None = None
     """``{axis_name: array_or_description}`` for each swept parameter."""
 
-    measure_macro_state: dict[str, Any] | None = None
-    """Snapshot of ``measureMacro`` configuration at build time."""
+    readout_state: dict[str, Any] | None = None
+    """Snapshot of the active readout configuration at build time."""
+
+    calibration_snapshot: Any = None
+    """``CalibrationSnapshot`` captured at build time for reproducibility."""
 
     timestamp: str = field(default_factory=lambda: _dt.datetime.now().isoformat())
     """ISO-8601 build time."""

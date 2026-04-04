@@ -1,4 +1,3 @@
-# qubox_v2/calibration/pulse_train_tomo.py
 """Pulse-train tomography — QUA experiment execution.
 
 QUA-dependent functions (``make_state_prep``, ``run_pulse_train_tomography``)

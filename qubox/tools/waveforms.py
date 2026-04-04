@@ -1,10 +1,8 @@
 """Pulse waveform generators for the qubox toolkit.
 
-All functions here are pure-Python / NumPy / SciPy with no dependency on
-``qubox_v2_legacy``.  They are the canonical waveform-generation utilities
-used by notebooks, experiments, and calibration routines.
-
-Migrated from ``qubox_v2_legacy.tools.waveforms``.
+All functions here are pure-Python / NumPy / SciPy.  They are the canonical
+waveform-generation utilities used by notebooks, experiments, and calibration
+routines.
 """
 
 from __future__ import annotations

@@ -1,4 +1,3 @@
-# qubox_v2/core/config.py
 """
 Pydantic v2 models for typed, validated hardware configuration.
 

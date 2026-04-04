@@ -20,8 +20,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-simulation = ["qutip>=5.0"]
-gpu        = ["jax[cuda12]>=0.4", "jaxlib>=0.4"]
 gui        = ["PyQt5>=5.15"]
 dev        = ["pytest>=7.0", "pytest-cov", "ruff", "ipykernel", "jupyter"]
 mcp        = ["mcp[cli]>=1.2.0"]

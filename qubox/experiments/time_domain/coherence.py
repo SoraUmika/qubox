@@ -16,7 +16,6 @@ from qubox_tools.fitting.cqed import T2_ramsey_model, T2_echo_model
 from qubox_tools.algorithms.transforms import project_complex_to_line_real
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
-from ...programs.macros.measure import measureMacro
 
 
 def _resolve_qb_therm_clks(exp: ExperimentBase, value: int | None, owner: str) -> int:

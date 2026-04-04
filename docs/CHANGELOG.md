@@ -1,7 +1,7 @@
 ﻿# qubox Change Log
 
 > **Note:** Historical entries below may reference `qubox_v2` — the package that
-> was renamed to `qubox_v2_legacy`. The canonical user-facing package is now `qubox`.
+> was renamed and eventually eliminated. The canonical package is now `qubox`.
 
 ## Change-Log Policy
 
@@ -30,6 +30,528 @@ Each entry must include:
 ---
 
 ## Entries
+
+### 2026-04-04 — Documentation Cleanup Pass
+
+**Classification: Minor**
+
+**Summary:**
+
+Docs-only cleanup to make repository documentation clearer, internally
+consistent, and aligned with the live codebase after the legacy elimination
+and package tree pruning completed earlier on 2026-04-04.
+
+Key changes:
+
+- Rewrote `README.md` with a structured documentation map (canonical /
+  supporting / historical), consistent import surfaces table, and cleaned
+  repository layout.
+- Cleaned `API_REFERENCE.md`: removed redundant "Important corrections vs
+  older docs" framing, tightened notes & limitations, removed stale
+  `qubox.legacy` reference in §6.2.
+- Updated architecture references in `AGENTS.md` §4 and §11 directory guide.
+- Updated `CLAUDE.md` and `.github/copilot-instructions.md` architecture
+  sections to match the unified layout description.
+- Fixed stale `qubox.legacy` / `qubox_v2_legacy` references in skill files:
+  `experiment-design/SKILL.md`, `repo-onboarding/SKILL.md`,
+  `codebase-refactor-reviewer/references/test-map.md`.
+- Fixed stale `qubox_v2_legacy` reference in `.github/WORKFLOW_BLUEPRINT.md`.
+- Updated `site_docs/architecture/package-map.md` scope-boundary note.
+- Fixed stale backend policy in `docs/qubox_architecture.md`.
+- Added historical-document labels to 9 docs that reference removed packages:
+  `docs/qubox_architecture.md`, `docs/qubox_refactor_verification.md`,
+  `docs/qubox_tools_analysis_split.md`, `docs/qubox_migration_guide.md`,
+  `docs/qubox_experiment_framework_refactor_proposal.md`,
+  `docs/architecture_review.md`, `docs/gate_architecture_review.md`,
+  `docs/codebase_graph_survey.md`, `SURVEY.md`,
+  `notebooks/migration_plan.md`, `notebooks/COMPILATION_VERIFICATION_REPORT.md`.
+
+**Files affected:**
+
+- `README.md`
+- `API_REFERENCE.md`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.github/copilot-instructions.md`
+- `.github/WORKFLOW_BLUEPRINT.md`
+- `docs/qubox_architecture.md`
+- `docs/qubox_refactor_verification.md`
+- `docs/qubox_tools_analysis_split.md`
+- `docs/qubox_migration_guide.md`
+- `docs/qubox_experiment_framework_refactor_proposal.md`
+- `docs/architecture_review.md`
+- `docs/gate_architecture_review.md`
+- `docs/codebase_graph_survey.md`
+- `docs/CHANGELOG.md`
+- `site_docs/architecture/package-map.md`
+- `.github/skills/experiment-design/SKILL.md`
+- `.github/skills/repo-onboarding/SKILL.md`
+- `.github/skills/codebase-refactor-reviewer/references/test-map.md`
+- `SURVEY.md`
+- `notebooks/migration_plan.md`
+- `notebooks/COMPILATION_VERIFICATION_REPORT.md`
+
+### 2026-04-04 — Move Demo And GUI Utilities Out Of The qubox Package Namespace
+
+**Classification: Moderate**
+
+**Summary:**
+
+Moved the non-core demo and GUI helper scripts out of `qubox/` into top-level
+`tools/` so the package boundary stays focused on runtime, calibration,
+workflow, and QUA-facing code. The dead `qubox.migration` stub was removed,
+the public docs were updated to point users at `tools/demos/` and
+`tools/program_gui.py`, and the remaining verification docstrings were cleaned
+to use the current `qubox` import path.
+
+**Files affected:**
+
+- `tools/program_gui.py`
+- `tools/demos/quickstart.py`
+- `tools/demos/circuit_architecture_demo.py`
+- `tools/demos/session_startup_demo.py`
+- `qubox/gui/*`
+- `qubox/examples/*`
+- `qubox/migration/__init__.py`
+- `qubox/autotune/__init__.py`
+- `qubox/verification/waveform_regression.py`
+- `qubox/verification/schema_checks.py`
+- `README.md`
+- `API_REFERENCE.md`
+- `site_docs/architecture/package-map.md`
+- `docs/CHANGELOG.md`
+
+### 2026-04-04 — Remove Non-Core Gate Modeling Stack From qubox.gates
+
+**Classification: Major**
+
+**Summary:**
+
+Removed the dormant gate-model, gate-sequence, fidelity, noise, and free-
+evolution modules from `qubox.gates`, leaving only the runtime hardware gate
+implementations used by control realization and QUA compilation. The legacy
+`Gate` model wrapper was also removed from the active builders in favor of
+simple gate-like protocols or loose typing where needed. The wider non-core
+scan also removed the empty `qubox.analysis` and `qubox.optimization`
+tombstone directories.
+
+**Files affected:**
+
+- `qubox/gates/*`
+- `qubox/gates/models/*`
+- `qubox/programs/builders/simulation.py`
+- `qubox/programs/builders/cavity.py`
+- `README.md`
+- `API_REFERENCE.md`
+- `docs/CHANGELOG.md`
+- `site_docs/api/gates.md`
+- `site_docs/architecture/package-map.md`
+- `docs/architecture_audit.md`
+- `docs/architecture/ARCHITECTURE_AUDIT.md`
+- `qubox.egg-info/SOURCES.txt`
+- `qubox/analysis`
+- `qubox/optimization`
+
+### 2026-04-04 — Remove Standalone Simulation And Ansatz Compile Packages From qubox
+
+**Classification: Major**
+
+**Summary:**
+
+Removed the dormant `qubox.compile` and `qubox.simulation` package trees from
+`qubox` so the repository boundary stays focused on session orchestration,
+calibration, QUA compilation, and QM-hosted validation. Numerical cQED system
+simulation and ansatz-style gate-synthesis workflows are now explicitly out of
+scope for `qubox` and are intended to move to `cqed_sim` instead. QM-hosted
+simulation support used for compiled-program validation remains in place.
+
+**Files affected:**
+
+- `qubox/compile/*`
+- `qubox/simulation/*`
+- `pyproject.toml`
+- `qubox.egg-info/requires.txt`
+- `qubox.egg-info/SOURCES.txt`
+- `README.md`
+- `API_REFERENCE.md`
+- `test_migration.py`
+- `site_docs/api/gates.md`
+- `site_docs/architecture/package-map.md`
+- `docs/architecture_audit.md`
+- `docs/architecture/ARCHITECTURE_AUDIT.md`
+- `docs/CHANGELOG.md`
+
+### 2026-04-04 — Reconcile Canonical API And Agent Instruction Docs
+
+**Classification: Minor**
+
+**Summary:**
+
+Removed stale references to the deleted in-repo legacy package surface from the
+agent instruction docs and replaced the corrupted `API_REFERENCE.md` content
+with a reconciled reference built from the live package layout, exports, and QM
+runtime structure. This change is documentation-only and does not alter runtime
+behavior.
+
+**Files affected:**
+
+- `AGENTS.md`
+- `.github/copilot-instructions.md`
+- `API_REFERENCE.md`
+- `docs/CHANGELOG.md`
+
+### 2026-04-03 — Remove measureMacro And Finish Explicit Readout Calibration Flow
+
+**Classification: Major**
+
+**Summary:**
+
+Removed the remaining `measureMacro` singleton from the active code path.
+Readout-calibration experiments, validation helpers, and notebook verification
+tools now seed and persist explicit `MeasurementConfig` / `ReadoutHandle`
+state instead of mutating hidden global measurement state. The
+`qubox.programs.macros` package now exports only `emit_measurement()` and
+`sequenceMacros`, notebook-facing calibration examples use
+`set_active_readout` / `update_readout_config`, and `ProgramBuildResult`
+snapshots consistently use `readout_state`.
+
+**Files affected:**
+
+- `qubox/programs/macros/measure.py`
+- `qubox/programs/macros/__init__.py`
+- `qubox/programs/gate_lowerers/protocol.py`
+- `qubox/core/bindings.py`
+- `qubox/pulses/manager.py`
+- `qubox/programs/macros/sequence.py`
+- `qubox/experiments/calibration/readout.py`
+- `qubox/experiments/result.py`
+- `qubox/programs/circuit_compiler.py`
+- `tools/validate_circuit_runner_serialization.py`
+- `tools/validate_gate_tuning_visualization.py`
+- `tools/test_all_simulations.py`
+- `qubox/autotune/run_post_cavity_autotune_v1_1.py`
+- `qubox/backends/qm/runtime.py`
+- `tests/test_readout_binding_ownership.py`
+- `tests/test_qubox_public_api.py`
+- `tests/gate_architecture/test_gate_architecture.py`
+- `qubox/tests/test_workflow_safety_refactor.py`
+- `qubox/tests/test_calibration_fixes.py`
+- `notebooks/verify_compilation.py`
+- `notebooks/post_cavity_experiment_context.ipynb`
+- `notebooks/post_cavity_experiment_quantum_circuit.ipynb`
+- `API_REFERENCE.md`
+- `docs/CHANGELOG.md`
+
+### 2026-04-03 — Remove Legacy Session Alias And Standard-Experiment Readout Fallbacks
+
+**Classification: Major**
+
+**Summary:**
+
+Removed the deprecated `Session.legacy_session` access path in favor of
+`session.session_manager`, deleted `CircuitRunner.compile_v2()`, and pushed
+more of the active standard-experiment stack onto explicit binding-backed
+readout flow. The QM runtime now instantiates notebook/template experiments
+through the shared `SessionManager` directly, resonator readout-operation
+selection no longer mutates `measureMacro`, and additional experiment build
+artifacts now capture readout provenance from explicit `ReadoutHandle`s rather
+than re-reading singleton state. The hosted standard-experiment simulator trust
+gate remained green at 20/20 after the refactor.
+
+**Files affected:**
+
+- `qubox/session/session.py`
+- `qubox/backends/qm/runtime.py`
+- `qubox/programs/circuit_runner.py`
+- `qubox/calibration/models.py`
+- `qubox/experiments/workflows/library.py`
+- `qubox/experiments/spectroscopy/resonator.py`
+- `qubox/experiments/spectroscopy/qubit.py`
+- `qubox/experiments/time_domain/coherence.py`
+- `qubox/experiments/time_domain/rabi.py`
+- `qubox/experiments/calibration/gates.py`
+- `qubox/experiments/calibration/readout.py`
+- `qubox/experiments/calibration/reset.py`
+- `qubox/experiments/tomography/qubit_tomo.py`
+- `qubox/experiments/tomography/wigner_tomo.py`
+- `qubox/experiments/tomography/fock_tomo.py`
+- `qubox/tests/test_parameter_resolution_policy.py`
+- `tools/validate_standard_experiments_simulation.py`
+- `tests/test_standard_experiments_simulation_helper.py`
+- `tests/test_qubox_public_api.py`
+- `README.md`
+- `API_REFERENCE.md`
+- `tutorials/01_getting_started_basic_experiments.ipynb`
+
+### 2026-04-03 — Finalize Removal Of Tombstone Analysis Namespaces
+
+**Classification: Moderate**
+
+**Summary:**
+
+Removed the last in-repo references to the deleted `qubox.analysis`
+compatibility surface, migrated the circuit-validation tools onto
+calibration-backed `DeviceMetadata`, and deleted the leftover
+`qubox.analysis` / `qubox.optimization` tombstone packages so the tree now
+matches the documented import surface.
+
+**Changes:**
+
+- Replaced stale `qubox.analysis.cQED_attributes` imports in the two circuit-validation tools
+- Switched those tool-local session shims from mutable `cQED_attributes` snapshots to live `DeviceMetadata`
+- Deleted the empty `qubox.analysis` and `qubox.optimization` tombstone namespaces
+- Clarified in the API reference that those namespaces are no longer importable
+
+**Files affected:**
+
+- `tools/validate_circuit_runner_serialization.py` — use `DeviceMetadata` instead of removed analysis shim
+- `tools/validate_gate_tuning_visualization.py` — use `DeviceMetadata` instead of removed analysis shim
+- `API_REFERENCE.md` — clarified the final namespace-removal state
+- `docs/CHANGELOG.md` — added this entry
+
+### 2026-04-03 — Simulator Pull Fallback For Trust-Gate Validation
+
+**Classification: Moderate**
+
+**Summary:**
+
+Hardened the hosted standard-experiment simulator validator against intermittent
+QM sample-stream failures by retrying `get_simulated_samples()` and, when the
+QM backend still refuses the sample pull, falling back to the waveform metadata
+already returned by the simulator job. This keeps the trust-gate focused on
+compiled scheduling structure instead of misclassifying transient sample-pull
+transport failures as compilation regressions.
+
+**Changes:**
+
+- Added retry logic around simulator sample retrieval in the standard validation tool
+- Added a waveform-metadata fallback that reconstructs controller activity masks when sample pulls fail
+- Recorded the effective validation source (`samples` vs `waveform_report`) in PASS/FAIL messages and JSON reports
+- Added unit coverage for waveform fallback reconstruction and fallback activation
+
+**Files affected:**
+
+- `tools/validate_standard_experiments_simulation.py` — retry + waveform-report fallback for simulator validation
+- `tests/test_standard_experiments_simulation_helper.py` — added fallback reconstruction tests
+- `docs/CHANGELOG.md` — added this entry
+
+### 2026-04-03 — Standard Simulator Trust-Gate Fixes
+
+**Classification: Moderate**
+
+**Summary:**
+
+Resolved the previously failing QM simulator trust-gate cases by fixing the
+standard-experiment validation helper inputs, enforcing a legal minimum pulse
+duration in `TimeRabiChevron`, and restoring callable state-preparation support
+for storage Wigner tomography.
+
+**Changes:**
+
+- Registered the missing `r0` qubit pulse alias used by AllXY in the simulator helper
+- Adjusted quick-validation timing inputs so T1, Ramsey, Echo, and storage T1 avoid illegal sub-4-cycle waits
+- Passed an explicit minimal `state_prep` macro for NumSplitting in the simulator helper
+- Updated `TimeRabiChevron` to start its duration sweep at the QM backend's legal minimum pulse length
+- Allowed storage Wigner tomography prep steps to be supplied as either gate-like objects or callable QUA macros
+- Normalized QM runtime Wigner args so the documented `state_prep=` API is converted into the expected `gates` list
+- Re-ran `tools/validate_standard_experiments_simulation.py`; the report now shows `20` passes and `0` errors
+
+**Files affected:**
+
+- `tools/validate_standard_experiments_simulation.py` — fixed simulator helper pulse registration and quick-mode inputs
+- `qubox/experiments/time_domain/chevron.py` — enforced legal minimum pulse duration for `TimeRabiChevron`
+- `qubox/programs/builders/cavity.py` — accepted callable prep macros in storage Wigner builder
+- `qubox/backends/qm/runtime.py` — normalized Wigner `state_prep` into `gates`
+- `tools/simulation_validation_report.json` — updated full-suite validation result
+- `limitations/qua_related_limitations.md` — removed the now-resolved standard-suite limitation entry
+- `docs/CHANGELOG.md` — added this entry
+
+### 2026-04-03 — Control-Program Execution Bridge
+
+**Classification: Major**
+
+**Summary:**
+
+Completed the next control-layer milestone by making `ControlProgram` a
+first-class custom execution body. Sessions can now build or normalize
+control programs directly, `session.exp.custom(control=...)` can compile
+them through the QM backend, and control-native barriers and pulse-phase
+wrapping are lowered explicitly instead of being dropped.
+
+**Changes:**
+
+- Added `Session.control_program()` and `Session.to_control_program()` helpers
+- Added `Session.realize_control_program()` and a best-effort control realizer for forward gate→pulse bridging
+- Added `control_program` support to `ExecutionRequest` and `session.exp.custom(...)`
+- Extended QM lowering so `ControlProgram` bodies map into legacy circuit IR for compilation
+- Added explicit `align` / barrier lowering in `CircuitCompiler`
+- Localized pulse-phase lowering by emitting matching pre/post frame updates around `PulseInstruction`
+- Documented the current QM-lowering limitation for conditional `AcquireInstruction`
+- Fixed two targeted public-surface regressions found during the earlier validation pass:
+  `Session.resolve_alias()` now tolerates legacy sessions exposing `hw`, and
+  `qubox.notebook.__all__` again exports `save_run_summary`
+
+**Files affected:**
+
+- `qubox/data/models.py` — added `ExecutionRequest.control_program` and manifest summary support
+- `qubox/experiments/templates/library.py` — added `control=` to custom requests
+- `qubox/session/session.py` — added control-program helpers and alias fallback fix
+- `qubox/backends/qm/lowering.py` — lowered `ControlProgram` instructions into circuit IR
+- `qubox/backends/qm/runtime.py` — accepted control-program custom bodies
+- `qubox/programs/gate_lowerers/builtins.py` — added barrier lowerer
+- `qubox/programs/circuit_compiler.py` — lowered `align` / barrier gates
+- `qubox/notebook/__init__.py` — restored `save_run_summary` export
+- `tests/test_control_program.py` — added control-program execution-path coverage
+- `tests/test_qubox_public_api.py` — added session control-helper coverage
+- `API_REFERENCE.md` — documented the new control-program session and custom-request APIs
+- `limitations/qua_related_limitations.md` — documented unsupported conditional acquire lowering
+- `docs/CHANGELOG.md` — added this entry
+
+**Validation:**
+
+- `get_errors` reported no diagnostics in the edited Python files
+- `c:/python312/python.exe -m pytest tests/test_control_program.py tests/test_qubox_public_api.py -q` → passed (`11 passed`)
+- Ruff still unavailable in the active Python environment unless installed separately
+
+### 2026-04-02 — Control-Layer IR Kickoff
+
+**Classification: Major**
+
+**Summary:**
+
+Started the new simulator/hardware bridge implementation by introducing a
+canonical symbolic control-layer package and lowering hooks from `Sequence`
+and `QuantumCircuit`. This establishes a shared transport for future pulse,
+gate, QM, and simulator backends without replacing the current execution path
+yet.
+
+**Changes:**
+
+- Added new `qubox.control` package with control-layer dataclasses for semantic gates,
+  pulse instructions, waits, barriers, frame updates, frequency updates, acquisitions,
+  sweep plans, durations, and provenance tags
+- Added adapters that lower `Sequence` and `QuantumCircuit` into `ControlProgram`
+- Added `.to_control_program()` methods to `Sequence` and `QuantumCircuit`
+- Added focused unit tests for control-program lowering, implicit acquisition insertion,
+  sweep preservation, and stable payload/text inspection
+- Updated `API_REFERENCE.md` to document the new lowering methods and the new symbolic
+  control-layer direction
+
+**Files affected:**
+
+- `qubox/control/__init__.py` — control-layer export surface
+- `qubox/control/models.py` — canonical symbolic control IR dataclasses
+- `qubox/control/adapters.py` — sequence/circuit lowering adapters
+- `qubox/sequence/models.py` — added `Sequence.to_control_program()`
+- `qubox/circuit/models.py` — added `QuantumCircuit.to_control_program()`
+- `tests/test_control_program.py` — new unit tests
+- `API_REFERENCE.md` — documented new lowering methods
+- `docs/CHANGELOG.md` — added this entry
+
+**Validation:**
+
+- `get_errors` reported no workspace diagnostics in the new or edited Python files
+- `c:/python312/python.exe -m pytest tests/test_control_program.py -q` → passed (`3 passed`)
+- `c:/python312/python.exe -m pytest tests/test_control_program.py tests/test_qubox_public_api.py -q` surfaced 3 pre-existing unrelated failures in `tests/test_qubox_public_api.py`
+- `c:/python312/python.exe -m ruff ...` could not be run because `ruff` is not installed in the active Python environment
+
+### 2026-04-02 — Legacy Code Elimination
+
+**Classification: Major**
+
+**Summary:**
+
+Complete removal of all legacy (`qubox_v2_legacy`, `qubox/legacy/`, `qubox.legacy`) references
+from the codebase. The legacy packages were already deleted in prior refactors; this change
+eliminates every remaining dead reference, stale comment, and backward-compatibility shim.
+
+**Changes:**
+
+- Removed `# qubox_v2/` path-marker header comments from 69 source files
+- Removed `CircuitRunnerV2 = CircuitCompiler` backward-compatibility alias
+- Removed 2 dead test functions that imported from `qubox_v2_legacy` (package doesn't exist)
+- Updated all `qubox_v2_legacy.*` imports in `tools/` scripts to `qubox.*` equivalents
+- Updated `qubox.legacy.*` imports in `notebooks/verify_compilation.py` to `qubox.*`
+- Replaced stale `qubox_v2_legacy` docstring/comment references in 17 source files
+- Updated `qubox_lab_mcp/resources/repo_resources.py` description (removed legacy path)
+- Updated `CLAUDE.md`: removed `qubox/legacy/` from architecture, updated memory table and banned patterns
+- Updated `docs/CHANGELOG.md` header note
+
+**Files affected:**
+
+- 69 files: `# qubox_v2/` header comment removal (across `qubox/compile/`, `qubox/gates/`,
+  `qubox/core/`, `qubox/calibration/`, `qubox/verification/`, `qubox/hardware/`, `qubox/pulses/`,
+  `qubox/programs/`, `qubox/simulation/`, `qubox/gui/`, `qubox/migration/`, `qubox/examples/`,
+  `qubox/experiments/`, `qubox/tests/`)
+- `qubox/programs/circuit_compiler.py` — removed `CircuitRunnerV2` alias
+- `tests/qubox_tools/test_analysis_split.py` — removed 2 dead legacy test functions
+- `tools/pulses_converter.py` — redirected imports
+- `tools/analyze_imports.py` — redirected imports
+- `tools/validate_notebooks.py` — redirected imports
+- `tools/validate_gate_tuning_visualization.py` — redirected imports
+- `tools/validate_circuit_runner_serialization.py` — redirected imports
+- `tools/log_prompt.py` — updated example paths
+- `notebooks/verify_compilation.py` — redirected imports
+- `qubox/verification/__init__.py` — updated docstring
+- `qubox_lab_mcp/resources/repo_resources.py` — updated description
+- `qubox_tools/fitting/pulse_train.py` — updated docstring
+- `CLAUDE.md` — updated architecture reference and banned patterns
+- `docs/CHANGELOG.md` — updated header note, added this entry
+
+**Validation:**
+
+- `grep -r qubox_v2_legacy *.py` → 0 results
+- `grep -r "# qubox_v2/" qubox/*.py` → 0 results
+- `grep -r CircuitRunnerV2 *.py` → 0 results
+- Test suite: 8 pre-existing failures (unchanged), 56 passing (up from 54 — 2 dead tests removed)
+
+---
+
+### 2026-04-02 — Architecture Refactor Phases 0–5
+
+**Classification: Major**
+
+**Summary:**
+
+Six-phase architecture refactoring driven by `docs/architecture_audit.md`:
+- **Phase 0**: Deleted 4 duplicate modules (session/context.py, session/state.py, core/persistence_policy.py, devices/sample_registry.py), redirected all imports
+- **Phase 1**: Enhanced `SessionProtocol` typing on `ExperimentBase.__init__`, `CircuitCompiler.__init__`, `CalibrationOrchestrator.__init__`; enhanced `CalibrationSnapshot.from_session()` factory; added calibration snapshot capture to `ExperimentBase.build_program()` and `CircuitCompiler`
+- **Phase 2**: Made `measureMacro` instantiable (was singleton-only); `CircuitCompiler` now uses per-instance approach when `measurement_config` is provided
+- **Phase 3**: Extracted 12 IR frozen dataclasses + helpers from `circuit_runner.py` → new `circuit_ir.py` (460→ lines); migrated 6 downstream importers; `circuit_runner.py` re-exports for backward compat; deprecated `CircuitRunner.compile()` in favor of `CircuitCompiler.compile()`; migrated `circuit_execution.py` and `QMRuntime._run_custom` to use `CircuitCompiler` directly
+- **Phase 4**: Fixed hardcoded `qubox_version="3.0.0"` in `QMRuntime` to import from `qubox.__version__`; added `mixer_calibration_path` field to `CalibrationSnapshot`; deduplicated `sanitize_nonfinite()` utility (was duplicated in HardwareController + ManualMixerCalibrator); added `CalibrationSnapshot.to_dict()` serialization; updated `RunManifest.to_dict()` to include mixer_calibration_path
+- **Phase 5**: Created `SessionFactory` dataclass for programmatic/agent session creation; exported from `qubox.__init__.__all__`
+
+**Files created:**
+
+- `qubox/programs/circuit_ir.py` — IR types extracted from circuit_runner.py
+
+**Files modified:**
+
+- `qubox/programs/circuit_runner.py` — IR types replaced with re-exports from circuit_ir; `compile()` deprecated
+- `qubox/programs/circuit_compiler.py` — imports from circuit_ir; lazy StreamSpec import updated
+- `qubox/programs/circuit_display.py` — imports from circuit_ir
+- `qubox/programs/circuit_postprocess.py` — imports from circuit_ir
+- `qubox/programs/circuit_protocols.py` — imports from circuit_ir
+- `qubox/programs/circuit_execution.py` — uses CircuitCompiler directly
+- `qubox/programs/__init__.py` — added circuit_ir export; updated docstring
+- `qubox/backends/qm/lowering.py` — imports from circuit_ir
+- `qubox/backends/qm/runtime.py` — uses CircuitCompiler; version from __version__; _qubox_version() helper
+- `qubox/calibration/models.py` — CalibrationSnapshot: mixer_calibration_path field, to_dict(), from_session with mixer path detection
+- `qubox/calibration/mixer_calibration.py` — _sanitize_db_numbers delegates to core.persistence.sanitize_nonfinite
+- `qubox/core/persistence.py` — added sanitize_nonfinite() utility
+- `qubox/data/models.py` — RunManifest.to_dict() includes mixer_calibration_path
+- `qubox/hardware/controller.py` — _sanitize_calibration_db_file uses sanitize_nonfinite
+- `qubox/session/session.py` — added SessionFactory dataclass; added readout_handle() delegation
+- `qubox/session/__init__.py` — exports SessionFactory
+- `qubox/__init__.py` — exports SessionFactory
+
+**Validation:**
+
+- All 55 passing tests remain passing (pre-existing failures unchanged)
+- No syntax errors in any modified file
+- No runtime imports of qubox_v2_legacy or qubox.legacy remain
+
+---
 
 ### 2026-04-02 — Architecture Extension: CircuitCompiler Rename + Registry-Based Dispatch
 

@@ -1,4 +1,3 @@
-# qubox_v2/core/hardware_definition.py
 """Notebook-first hardware definition.
 
 Lets users define all hardware elements, LO/IF frequencies, wiring, and

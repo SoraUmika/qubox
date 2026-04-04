@@ -1,6 +1,5 @@
 """qubox.calibration.contracts — calibration result and patch contracts.
 
-Migrated from ``qubox_v2_legacy.calibration.contracts``.
 No external dependencies.
 
 These dataclasses form the contract between experiment analysis code and

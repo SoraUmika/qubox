@@ -183,7 +183,7 @@ def _try_drag_gaussian_fit(
     Q_samples: np.ndarray,
 ) -> tuple[str, dict] | None:
     """Brute-force DRAG Gaussian parameter detection."""
-    from qubox_v2_legacy.tools.waveforms import drag_gaussian_pulse_waveforms
+    from qubox.tools.waveforms import drag_gaussian_pulse_waveforms
 
     length = len(I_samples)
     peak_amp = float(np.max(np.abs(I_samples)))
@@ -238,7 +238,7 @@ def _verify_drag_gaussian(
     params: dict,
 ) -> bool:
     """Verify that params reproduce the target waveform."""
-    from qubox_v2_legacy.tools.waveforms import drag_gaussian_pulse_waveforms
+    from qubox.tools.waveforms import drag_gaussian_pulse_waveforms
 
     try:
         I_gen, Q_gen = drag_gaussian_pulse_waveforms(
@@ -268,7 +268,7 @@ def _verify_drag_cosine(
     params: dict,
 ) -> bool:
     """Verify that params reproduce the target waveform."""
-    from qubox_v2_legacy.tools.waveforms import drag_cosine_pulse_waveforms
+    from qubox.tools.waveforms import drag_cosine_pulse_waveforms
 
     try:
         I_gen, Q_gen = drag_cosine_pulse_waveforms(

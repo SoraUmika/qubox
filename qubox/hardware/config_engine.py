@@ -1,4 +1,3 @@
-# qubox_v2/hardware/config_engine.py
 """
 ConfigEngine: hardware config loading, saving, patching, and QM-config building.
 

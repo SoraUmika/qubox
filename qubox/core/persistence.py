@@ -1,7 +1,6 @@
 """qubox.core.persistence — JSON sanitization and array persistence policy.
 
-Migrated from ``qubox_v2_legacy.core.persistence_policy`` with no changes to
-logic.  Provides helpers used by CalibrationStore, ArtifactManager, and the
+Provides helpers used by CalibrationStore, ArtifactManager, and the
 config-snapshot utilities to ensure JSON serialisability and to drop
 shot-level raw arrays that would bloat disk artifacts.
 """
@@ -201,3 +200,19 @@ def _is_numeric_sequence(value: "list[Any] | tuple[Any, ...]") -> bool:
             continue
         return False
     return True
+
+
+def sanitize_nonfinite(obj: Any, *, replacement: float = 0.0) -> Any:
+    """Recursively replace non-finite numeric values (NaN, Inf) with *replacement*.
+
+    Used by mixer calibration persistence to ensure JSON safety.
+    """
+    if isinstance(obj, dict):
+        return {k: sanitize_nonfinite(v, replacement=replacement) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [sanitize_nonfinite(v, replacement=replacement) for v in obj]
+    if isinstance(obj, np.generic):
+        obj = obj.item()
+    if isinstance(obj, (float, int)):
+        return float(obj) if np.isfinite(float(obj)) else replacement
+    return obj

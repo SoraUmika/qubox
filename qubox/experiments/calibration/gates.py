@@ -15,7 +15,7 @@ from qubox_tools.fitting.cqed import rb_survival_model
 from qubox_tools.algorithms.core import random_sequences
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
-from ...programs.measurement import try_build_readout_snapshot_from_macro
+from ...programs.measurement import build_readout_snapshot_from_handle
 from ...calibration.pulse_train_tomo import (
     run_pulse_train_tomography,
     fit_pulse_train_model,
@@ -102,7 +102,7 @@ class AllXY(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.all_xy",
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
             sweep_axes={"ops": ops},
         )
 
@@ -408,7 +408,7 @@ class DRAGCalibration(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.drag_calibration_YALE",
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
             sweep_axes={"amps": amps},
             run_program_kwargs={"targets": [("I1", "Q1"), ("I2", "Q2")]},
         )

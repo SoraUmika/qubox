@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -9,20 +9,20 @@ import shutil
 
 import numpy as np
 from qm import generate_qua_script
-from qubox_v2_legacy.programs.macros.measure import measureMacro
 
-from qubox_v2_legacy.calibration import CalibrationStore
-from qubox_v2_legacy.programs import api as cQED_programs
-from qubox_v2_legacy.hardware.config_engine import ConfigEngine
-from qubox_v2_legacy.pulses.manager import PulseOperationManager
-from qubox_v2_legacy.analysis.cQED_attributes import cQED_attributes
-from qubox_v2_legacy.core.bindings import bindings_from_hardware_config
-from qubox_v2_legacy.programs.circuit_runner import (
+from qubox.calibration import CalibrationStore
+from qubox.programs import api as cQED_programs
+from qubox.hardware.config_engine import ConfigEngine
+from qubox.pulses.manager import PulseOperationManager
+from qubox.core.bindings import ReadoutCal, ReadoutHandle, _merge_readout_cal, bindings_from_hardware_config
+from qubox.core.device_metadata import DeviceMetadata
+from qubox.core.measurement_config import MeasurementConfig
+from qubox.programs.circuit_runner import (
     CircuitRunner,
     make_power_rabi_circuit,
     make_xy_pair_circuit,
 )
-from qubox_v2_legacy.programs.gate_tuning import GateTuningStore, make_xy_tuning_record
+from qubox.programs.gate_tuning import GateTuningStore, make_xy_tuning_record
 
 
 @dataclass
@@ -30,11 +30,91 @@ class LocalSessionShim:
     config_engine: Any
     pulse_mgr: Any
     bindings: Any
+    calibration: CalibrationStore
     _context_snapshot: Any
     gate_tuning_store: GateTuningStore | None = None
 
     def context_snapshot(self) -> Any:
         return self._context_snapshot
+
+    @staticmethod
+    def _default_readout_weight_sets(_pulse_info: Any) -> list[list[str]]:
+        return [["cos", "sin"], ["minus_sin", "cos"]]
+
+    def apply_measurement_config(self, config: MeasurementConfig) -> None:
+        rb = self.bindings.readout
+        ctx = self.context_snapshot()
+        resolved_element = config.element or getattr(ctx, "ro_el", None) or "resonator"
+        resolved_operation = config.operation or rb.active_op or "readout"
+
+        pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(resolved_element, resolved_operation, strict=False)
+        if pulse_info is None and resolved_operation != "readout":
+            pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(resolved_element, "readout", strict=False)
+            if pulse_info is not None:
+                resolved_operation = "readout"
+        if pulse_info is None:
+            raise ValueError(
+                f"No readout pulse mapping found for element={resolved_element!r}, operation={resolved_operation!r}."
+            )
+
+        weight_sets = [list(spec) for spec in config.weight_sets] if config.weight_sets else self._default_readout_weight_sets(pulse_info)
+        rb.pulse_op = pulse_info
+        rb.active_op = resolved_operation
+        rb.demod_weight_sets = weight_sets
+        if config.drive_frequency is not None:
+            rb.drive_frequency = float(config.drive_frequency)
+        elif rb.drive_frequency is None:
+            ctx_drive_freq = getattr(ctx, "ro_fq", None)
+            if isinstance(ctx_drive_freq, (int, float)):
+                rb.drive_frequency = float(ctx_drive_freq)
+        if config.gain is not None:
+            rb.gain = float(config.gain)
+        if config.weight_length is not None:
+            rb.acquire_in.weight_length = int(config.weight_length)
+
+        rb.discrimination.update(config.discrimination_payload())
+        rb.quality.update(config.quality_payload())
+
+    def readout_handle(self, alias: str = "resonator", operation: str | None = None) -> ReadoutHandle:
+        rb = self.bindings.readout
+        ctx = self.context_snapshot()
+        element = getattr(ctx, "ro_el", None) or alias
+        resolved_operation = operation or rb.active_op or "readout"
+
+        pulse_info = self.pulse_mgr.get_pulseOp_by_element_op(element, resolved_operation, strict=False)
+        if pulse_info is None:
+            pulse_info = rb.pulse_op
+
+        drive_freq = rb.drive_frequency
+        if not isinstance(drive_freq, (int, float)) or drive_freq == 0.0:
+            ctx_drive_freq = getattr(ctx, "ro_fq", None)
+            drive_freq = float(ctx_drive_freq) if isinstance(ctx_drive_freq, (int, float)) else 0.0
+
+        bound_readout = replace(
+            rb,
+            pulse_op=pulse_info,
+            active_op=resolved_operation,
+            drive_frequency=float(drive_freq),
+        )
+        binding_cal = ReadoutCal.from_readout_binding(bound_readout)
+        store_cal = ReadoutCal.from_calibration_store(
+            self.calibration,
+            (element, alias, rb.physical_id, rb.drive_channel_id),
+            drive_freq=drive_freq,
+        )
+        cal = _merge_readout_cal(binding_cal, store_cal, drive_frequency=float(drive_freq))
+        weight_sets = tuple(
+            tuple(spec) if isinstance(spec, (list, tuple)) else (spec,)
+            for spec in (bound_readout.demod_weight_sets or ())
+        )
+        return ReadoutHandle(
+            binding=bound_readout,
+            cal=cal,
+            element=element,
+            operation=resolved_operation,
+            gain=bound_readout.gain,
+            demod_weight_sets=weight_sets,
+        )
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -90,6 +170,41 @@ def _prepare_temp_registry(*, repo_root: Path, sample_id: str, cooldown_id: str)
     return temp_root
 
 
+def _seed_calibration_from_cqed_params(calibration: CalibrationStore, cqed_path: Path) -> dict[str, str]:
+    raw = json.loads(cqed_path.read_text(encoding="utf-8"))
+    roles = {
+        "qubit": str(raw.get("qb_el") or "transmon"),
+        "readout": str(raw.get("ro_el") or "resonator"),
+        "storage": str(raw.get("st_el") or "storage"),
+    }
+
+    qb_freqs = calibration.get_frequencies(roles["qubit"])
+    qb_params = calibration.get_cqed_params(roles["qubit"])
+    qb_updates: dict[str, float] = {}
+    if raw.get("qb_fq") is not None and getattr(qb_freqs, "qubit_freq", None) is None:
+        qb_updates["qubit_freq"] = float(raw["qb_fq"])
+    if raw.get("anharmonicity") is not None and getattr(qb_params, "anharmonicity", None) is None:
+        qb_updates["anharmonicity"] = float(raw["anharmonicity"])
+    if qb_updates:
+        calibration.set_cqed_params(roles["qubit"], **qb_updates)
+
+    ro_freqs = calibration.get_frequencies(roles["readout"])
+    ro_updates: dict[str, float] = {}
+    if raw.get("ro_fq") is not None and getattr(ro_freqs, "resonator_freq", None) is None:
+        ro_updates["resonator_freq"] = float(raw["ro_fq"])
+    if ro_updates:
+        calibration.set_cqed_params(roles["readout"], **ro_updates)
+
+    st_freqs = calibration.get_frequencies(roles["storage"])
+    st_updates: dict[str, float] = {}
+    if raw.get("st_fq") is not None and getattr(st_freqs, "storage_freq", None) is None:
+        st_updates["storage_freq"] = float(raw["st_fq"])
+    if st_updates:
+        calibration.set_cqed_params(roles["storage"], **st_updates)
+
+    return roles
+
+
 def _load_local_session(*, repo_root: Path, sample_id: str, cooldown_id: str) -> LocalSessionShim:
     temp_root = _prepare_temp_registry(repo_root=repo_root, sample_id=sample_id, cooldown_id=cooldown_id)
 
@@ -101,62 +216,28 @@ def _load_local_session(*, repo_root: Path, sample_id: str, cooldown_id: str) ->
     pulse_mgr = PulseOperationManager.from_json(cooldown_cfg / "pulses.json")
     cfg_engine.merge_pulses(pulse_mgr, include_volatile=True)
 
-    ctx = cQED_attributes.from_json(sample_cfg / "cqed_params.json")
     calibration = CalibrationStore(cooldown_cfg / "calibration.json")
-    _overlay_calibration_context(ctx, calibration)
+    seeded_roles = _seed_calibration_from_cqed_params(calibration, sample_cfg / "cqed_params.json")
+    roles = ((cfg_engine.hardware.get_qubox_extras().bindings or {}).get("roles") or {})
+    if not isinstance(roles, dict) or not roles:
+        roles = seeded_roles
+    ctx = DeviceMetadata.from_roles(roles, calibration=calibration)
     bindings = bindings_from_hardware_config(cfg_engine.hardware, ctx)
 
-    measure_cfg = cooldown_cfg / "measureConfig.json"
-    if measure_cfg.exists():
-        measureMacro.load_json(str(measure_cfg))
-
-    return LocalSessionShim(
+    session = LocalSessionShim(
         config_engine=cfg_engine,
         pulse_mgr=pulse_mgr,
         bindings=bindings,
+        calibration=calibration,
         _context_snapshot=ctx,
         gate_tuning_store=GateTuningStore(),
     )
 
+    measure_cfg = cooldown_cfg / "measureConfig.json"
+    if measure_cfg.exists():
+        session.apply_measurement_config(MeasurementConfig.load_json(measure_cfg))
 
-def _overlay_calibration_context(ctx: cQED_attributes, calibration: CalibrationStore) -> None:
-    resonator = calibration.get_cqed_params("resonator")
-    transmon = calibration.get_cqed_params("transmon")
-    storage = calibration.get_cqed_params("storage")
-
-    if resonator is not None:
-        if resonator.resonator_freq is not None:
-            ctx.ro_fq = resonator.resonator_freq
-        if resonator.kappa is not None:
-            ctx.ro_kappa = resonator.kappa
-        if resonator.ro_therm_clks is not None:
-            setattr(ctx, "ro_therm_clks", resonator.ro_therm_clks)
-
-    if transmon is not None:
-        if transmon.qubit_freq is not None:
-            ctx.qb_fq = transmon.qubit_freq
-        if transmon.anharmonicity is not None:
-            ctx.anharmonicity = transmon.anharmonicity
-        if transmon.qb_therm_clks is not None:
-            setattr(ctx, "qb_therm_clks", transmon.qb_therm_clks)
-
-    if storage is not None:
-        if storage.storage_freq is not None:
-            ctx.st_fq = storage.storage_freq
-        if storage.chi is not None:
-            ctx.st_chi = storage.chi
-        if storage.chi2 is not None:
-            ctx.st_chi2 = storage.chi2
-        if storage.chi3 is not None:
-            ctx.st_chi3 = storage.chi3
-        if storage.kerr is not None:
-            ctx.st_K = storage.kerr
-        if storage.kerr2 is not None:
-            ctx.st_K2 = storage.kerr2
-        if storage.fock_freqs is not None:
-            ctx.fock_fqs = np.asarray(storage.fock_freqs, dtype=float)
-        if storage.st_therm_clks is not None:
-            setattr(ctx, "st_therm_clks", storage.st_therm_clks)
+    return session
 
 
 def _serialize(session: LocalSessionShim, program: Any) -> str:
@@ -209,6 +290,7 @@ def run_validation(*, sample_id: str = "post_cavity_sample_A", cooldown_id: str 
         64,
         qb_el=qb_el,
         bindings=session_legacy.bindings,
+        readout=session_legacy.readout_handle(),
     )
     x180_circuit, x180_sweep = make_power_rabi_circuit(
         qb_el=qb_el,
@@ -229,6 +311,7 @@ def run_validation(*, sample_id: str = "post_cavity_sample_A", cooldown_id: str 
         64,
         qb_el=qb_el,
         bindings=session_legacy.bindings,
+        readout=session_legacy.readout_handle(),
     )
     x90_circuit, x90_sweep = make_power_rabi_circuit(
         qb_el=qb_el,
@@ -240,7 +323,13 @@ def run_validation(*, sample_id: str = "post_cavity_sample_A", cooldown_id: str 
     )
     x90_tuned = tuned_runner.compile(x90_circuit, sweep=x90_sweep)
 
-    xy_legacy_prog = cQED_programs.all_xy(qb_el, [("x180", "x90")], qb_therm, 64)
+    xy_legacy_prog = cQED_programs.all_xy(
+        qb_el,
+        [("x180", "x90")],
+        qb_therm,
+        64,
+        readout=session_legacy.readout_handle(),
+    )
     xy_circuit, xy_sweep = make_xy_pair_circuit(qb_el=qb_el, qb_therm_clks=qb_therm, n_avg=64, op_a="x180", op_b="x90")
     xy_tuned = tuned_runner.compile(xy_circuit, sweep=xy_sweep)
 

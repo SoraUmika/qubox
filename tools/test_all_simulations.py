@@ -45,12 +45,12 @@ attr = session.context_snapshot()
 sim_config = QuboxSimulationConfig(duration_ns=SIM_DURATION_NS, plot=False)
 
 # Set a dummy discrimination threshold for simulation testing.
-# Without readout calibration, measureMacro._ro_disc_params["threshold"] is None,
+# Without readout calibration, explicit readout discrimination may be unset,
 # which makes experiments that do state discrimination fail at QUA compile time.
-from qubox.programs.macros.measure import measureMacro
-if measureMacro._ro_disc_params.get("threshold") is None:
-    measureMacro._ro_disc_params["threshold"] = 0.0
-    print("Set dummy measureMacro threshold = 0.0 for simulation testing")
+readout_binding = session.bindings.readout
+if readout_binding.discrimination.get("threshold") is None:
+    readout_binding.discrimination["threshold"] = 0.0
+    print("Set dummy readout threshold = 0.0 for simulation testing")
 
 ro_fq = float(attr.ro_fq)
 qb_fq = float(attr.qb_fq)

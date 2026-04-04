@@ -33,5 +33,15 @@ class QuantumCircuit:
             metadata=dict(self.metadata),
         )
 
+    def to_control_program(
+        self,
+        *,
+        sweep: SweepPlan | None = None,
+        acquisition: AcquisitionSpec | None = None,
+    ) -> ControlProgram:
+        from ..control.adapters import circuit_to_control_program
+
+        return circuit_to_control_program(self, sweep=sweep, acquisition=acquisition)
+
     def inspect(self) -> str:
         return self.to_sequence().inspect()

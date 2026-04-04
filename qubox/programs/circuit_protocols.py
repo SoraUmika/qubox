@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .circuit_runner import (
+from .circuit_ir import (
     CalibrationReference,
     CircuitBlock,
     ConditionalGate,

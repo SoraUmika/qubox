@@ -1,4 +1,3 @@
-# qubox_v2/hardware/controller.py
 """
 HardwareController: live element control (LO, IF, gain, output mode, calibration).
 
@@ -23,7 +22,7 @@ from octave_sdk import RFOutputMode, OctaveLOSource
 from qm import QuantumMachine, QuantumMachinesManager
 
 from ..core.errors import ConfigError, ConnectionError
-from ..core.persistence_policy import sanitize_mapping_for_json
+from ..core.persistence import sanitize_mapping_for_json
 from ..core.utils import get_nested, key_like, numeric_keys_to_ints, require, with_retries
 from .config_engine import ConfigEngine, QM_TOPLEVEL_WHITELIST
 
@@ -828,24 +827,13 @@ class HardwareController:
 
     def _sanitize_calibration_db_file(self) -> None:
         """Replace non-finite numbers in calibration_db.json with 0.0."""
+        from ..core.persistence import sanitize_nonfinite
+
         if self._cal_db_dir is None:
             return
         db_path = self._cal_db_dir / "calibration_db.json"
         if not db_path.exists():
             return
-
-        def _sanitize(obj: Any) -> Any:
-            if isinstance(obj, dict):
-                return {k: _sanitize(v) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [_sanitize(v) for v in obj]
-            if isinstance(obj, tuple):
-                return [_sanitize(v) for v in obj]
-            if isinstance(obj, np.generic):
-                obj = obj.item()
-            if isinstance(obj, (float, int)):
-                return float(obj) if np.isfinite(float(obj)) else 0.0
-            return obj
 
         try:
             raw = json.loads(db_path.read_text(encoding="utf-8-sig"))
@@ -853,7 +841,7 @@ class HardwareController:
             _logger.exception("Failed reading calibration DB for sanitization: %s", db_path)
             return
 
-        sanitized = _sanitize(raw)
+        sanitized = sanitize_nonfinite(raw)
         if sanitized != raw:
             with open(db_path, "w", encoding="utf-8") as f:
                 json.dump(sanitized, f, indent=2, allow_nan=False)

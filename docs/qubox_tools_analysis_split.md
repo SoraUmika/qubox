@@ -1,5 +1,12 @@
 # qubox_tools Analysis Split
 
+> **Historical document (2026-03-13).** This records the original extraction of
+> analysis code from `qubox_v2_legacy` into `qubox_tools`. The `qubox_v2_legacy`
+> package referenced here has since been fully eliminated. The import paths in
+> the mapping table below are historical; all analysis code now lives in
+> `qubox_tools` and the current package map is in
+> [Architecture — Package Map](../site_docs/architecture/package-map.md).
+
 Date: 2026-03-13
 
 ## Purpose

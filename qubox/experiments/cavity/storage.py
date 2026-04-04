@@ -608,12 +608,11 @@ class StorageChiRamsey(ExperimentBase):
         ro_fq = self._resolve_readout_frequency()
         qb_fq = self._resolve_qubit_frequency()
 
-        # Guard: measureMacro must be configured before running chi Ramsey
-        from ...programs.macros.measure import measureMacro
-        if not measureMacro._demod_weight_sets:
+        # Guard: an explicit readout configuration must be available before running chi Ramsey.
+        if not getattr(self.readout_handle, "demod_weight_sets", None):
             raise RuntimeError(
-                "measureMacro has no outputs configured. "
-                "Run CalibrateReadoutFull (or measureMacro.set_outputs()) first."
+                "Active readout config has no outputs configured. "
+                "Run CalibrateReadoutFull (or override the readout operation) first."
             )
 
         prog = cQED_programs.storage_chi_ramsey(

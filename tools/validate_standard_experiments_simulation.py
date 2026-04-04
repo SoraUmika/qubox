@@ -3,7 +3,7 @@
 Validate the 20 standard experiments via QM simulator.
 
 For each experiment:
-  1. Instantiate the legacy experiment class via SessionManager
+  1. Instantiate the canonical experiment class via Session
   2. Call build_program() with minimal parameters (n_avg=1, small sweeps)
   3. Simulate via qmm.simulate() (no hardware execution)
   4. Check that the compiled QUA program produces non-trivial waveforms
@@ -47,10 +47,138 @@ class ValidationResult:
     status: str  # "PASS", "FAIL", "SKIP", "ERROR"
     compile_time_s: float = 0.0
     sim_duration_ns: int = 0
+    sample_source: str = "samples"
     message: str = ""
     has_analog_output: bool = False
     has_digital_output: bool = False
     qua_script_lines: int = 0
+
+
+def _event_duration_ns(event: dict[str, Any]) -> int:
+    duration = int(event.get("duration", 0) or 0)
+    if duration > 0:
+        return duration
+    length = int(event.get("length", 0) or 0)
+    if length > 0:
+        return length
+    samples = event.get("samples")
+    if samples is not None:
+        return max(1, len(samples))
+    return 1
+
+
+def _dense_port_activity(
+    events: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    *,
+    duration_ns: int,
+    dtype: type[np.float64] | type[np.bool_],
+) -> np.ndarray:
+    max_end = max(
+        (
+            int(event.get("timestamp", 0) or 0) + _event_duration_ns(event)
+            for event in events
+        ),
+        default=0,
+    )
+    length = max(int(duration_ns), max_end, 1)
+    samples = np.zeros(length, dtype=dtype)
+    for event in events:
+        start = max(0, int(event.get("timestamp", 0) or 0))
+        stop = min(length, start + _event_duration_ns(event))
+        if stop <= start:
+            stop = min(length, start + 1)
+        if np.issubdtype(dtype, np.bool_):
+            samples[start:stop] = True
+        else:
+            samples[start:stop] += 1.0
+    return samples
+
+
+def _dense_waveform_activity(
+    waveforms: list[Any] | tuple[Any, ...],
+    *,
+    duration_ns: int,
+    dtype: type[np.float64] | type[np.bool_],
+) -> np.ndarray:
+    max_end = max((int(getattr(waveform, "ends_at", 0) or 0) for waveform in waveforms), default=0)
+    length = max(int(duration_ns), max_end, 1)
+    samples = np.zeros(length, dtype=dtype)
+    for waveform in waveforms:
+        start = max(0, int(getattr(waveform, "timestamp", 0) or 0))
+        stop = min(length, int(getattr(waveform, "ends_at", start + 1) or (start + 1)))
+        if stop <= start:
+            stop = min(length, start + 1)
+        if np.issubdtype(dtype, np.bool_):
+            samples[start:stop] = True
+        else:
+            samples[start:stop] += 1.0
+    return samples
+
+
+def _build_waveform_report_samples(job: Any, *, duration_ns: int):
+    from qm.simulate import SimulatorControllerSamples, SimulatorSamples
+
+    report = None
+    if hasattr(job, "get_simulated_waveform_report"):
+        report = job.get_simulated_waveform_report()
+    if report is None:
+        return None
+
+    simulator_samples: dict[str, SimulatorControllerSamples] = {}
+    for controller_name, controller_report in report.report_by_controllers().items():
+        port_report = controller_report.get_report_by_output_ports()
+        analog = {
+            port: _dense_waveform_activity(waveforms, duration_ns=duration_ns, dtype=np.float64)
+            for port, waveforms in port_report.flat_analog_out.items()
+            if waveforms
+        }
+        digital = {
+            port: _dense_waveform_activity(waveforms, duration_ns=duration_ns, dtype=np.bool_)
+            for port, waveforms in port_report.flat_digital_out.items()
+            if waveforms
+        }
+        simulator_samples[controller_name] = SimulatorControllerSamples(analog=analog, digital=digital)
+
+    if not simulator_samples:
+        return None
+
+    return SimulatorSamples(simulator_samples)
+
+
+def _build_waveform_metadata_samples(job: Any, *, duration_ns: int):
+    from qm.simulate import SimulatorControllerSamples, SimulatorSamples
+
+    analog_report = job.simulated_analog_waveforms() or {}
+    digital_report = job.simulated_digital_waveforms() or {}
+
+    if isinstance(analog_report, dict) and isinstance(analog_report.get("waveforms"), dict):
+        analog_report = analog_report["waveforms"]
+    if isinstance(digital_report, dict) and isinstance(digital_report.get("waveforms"), dict):
+        digital_report = digital_report["waveforms"]
+
+    analog_controllers = (analog_report.get("controllers") or {})
+    digital_controllers = (digital_report.get("controllers") or {})
+    controller_names = sorted(set(analog_controllers) | set(digital_controllers))
+    if not controller_names:
+        return None
+
+    simulator_samples: dict[str, SimulatorControllerSamples] = {}
+    for controller_name in controller_names:
+        analog_ports = ((analog_controllers.get(controller_name) or {}).get("ports") or {})
+        digital_ports = ((digital_controllers.get(controller_name) or {}).get("ports") or {})
+        analog = {
+            port: _dense_port_activity(events, duration_ns=duration_ns, dtype=np.float64)
+            for port, events in analog_ports.items()
+            if events
+        }
+        digital = {
+            port: _dense_port_activity(events, duration_ns=duration_ns, dtype=np.bool_)
+            for port, events in digital_ports.items()
+            if events
+        }
+        simulator_samples[controller_name] = SimulatorControllerSamples(analog=analog, digital=digital)
+
+    return SimulatorSamples(simulator_samples)
 
 
 # ---------------------------------------------------------------------------
@@ -63,25 +191,39 @@ def inject_calibration_data(session):
     cqed_params.  We inject physical-ish values so that experiments
     that call get_readout_frequency() etc. can resolve.
     """
-    from qubox_v2_legacy.programs.macros.measure import measureMacro
-
     cal = session.calibration
+    attr = session.context_snapshot()
+    qb_el = attr.qb_el
+    ro_el = attr.ro_el
+    st_el = attr.st_el
 
     # --- Element frequencies (from cqed_params.json & prior calibration) ---
-    cal.set_frequencies("resonator", resonator_freq=8.596e9)
-    cal.set_frequencies("transmon", qubit_freq=6.15e9)
-    cal.set_frequencies("storage", storage_freq=5.35e9)
+    cal.set_frequencies(ro_el, resonator_freq=8.596e9)
+    cal.set_frequencies(qb_el, qubit_freq=6.15e9)
+    cal.set_frequencies(st_el, storage_freq=5.35e9)
 
     # --- Thermalization clocks ---
-    cal.set_cqed_params("transmon", qb_therm_clks=DEFAULT_QB_THERM)
-    cal.set_cqed_params("resonator", ro_therm_clks=DEFAULT_RO_THERM)
-    cal.set_cqed_params("storage", st_therm_clks=DEFAULT_ST_THERM)
+    cal.set_cqed_params(qb_el, qb_therm_clks=DEFAULT_QB_THERM)
+    cal.set_cqed_params(ro_el, ro_therm_clks=DEFAULT_RO_THERM)
+    cal.set_cqed_params(st_el, st_therm_clks=DEFAULT_ST_THERM)
 
     # --- Readout discrimination threshold (needed for with_state=True) ---
-    measureMacro._ro_disc_params["threshold"] = 0.0
-    measureMacro._ro_disc_params["angle"] = 0.0
+    cal.set_discrimination(
+        ro_el,
+        threshold=0.0,
+        angle=0.0,
+        mu_g=[-0.1, 0.0],
+        mu_e=[0.1, 0.0],
+        sigma_g=0.02,
+        sigma_e=0.02,
+        fidelity=1.0,
+    )
 
-    print("[INIT] Injected calibration frequencies & discrimination threshold")
+    readout_binding = getattr(getattr(session, "bindings", None), "readout", None)
+    if readout_binding is not None and hasattr(readout_binding, "sync_from_calibration"):
+        readout_binding.sync_from_calibration(cal)
+
+    print("[INIT] Injected calibration frequencies & stored readout discrimination")
 
 
 def register_simulation_pulses(session):
@@ -91,9 +233,8 @@ def register_simulation_pulses(session):
     We register simple flat-pulse (constant-amplitude) versions of the
     standard gate operations so experiments can build QUA programs.
     """
-    from qubox_v2_legacy.analysis.pulseOp import PulseOp
-    from qubox_v2_legacy.programs.macros.measure import measureMacro
-    from qubox_v2_legacy.tools.generators import ensure_displacement_ops
+    from qubox.core.pulse_op import PulseOp
+    from qubox.tools.generators import ensure_displacement_ops
 
     pm = session.pulse_mgr
     attr = session.context_snapshot()
@@ -106,6 +247,7 @@ def register_simulation_pulses(session):
     amp = 0.25
 
     qubit_ops = {
+        "r0": 0.0,
         "x180": amp,
         "x90": amp / 2,
         "y180": amp,
@@ -167,42 +309,49 @@ def register_simulation_pulses(session):
     # --- Merge volatile (temp) pulses into config ---
     session.config_engine.merge_pulses(pm, include_volatile=True)
 
-    # --- Bind measureMacro ---
+    # --- Bind the explicit readout state used by modern builders ---
     readout_pop = PulseOp(
         element=ro_el,
         op="readout",
         type="measurement",
         length=1000,
     )
-    measureMacro.set_pulse_op(readout_pop, active_op="readout")
+    readout_binding = session.bindings.readout
+    readout_binding.pulse_op = readout_pop
+    readout_binding.active_op = "readout"
+    readout_binding.sync_from_calibration(session.calibration, lookup_keys=(ro_el,))
+    ro_freqs = session.calibration.get_frequencies(ro_el)
+    if ro_freqs is not None and getattr(ro_freqs, "resonator_freq", None) is not None:
+        readout_binding.drive_frequency = float(ro_freqs.resonator_freq)
 
     print(f"[INIT] Registered {len(qubit_ops)} qubit gate ops, "
           f"{len(sel_ops)} selective ops, 2 displacement ops")
-    print(f"[INIT] measureMacro bound to {ro_el}:readout")
+    print(f"[INIT] Readout binding configured for {ro_el}:readout via calibration-backed sync")
 
 
 # ---------------------------------------------------------------------------
 # Session setup
 # ---------------------------------------------------------------------------
 def create_session():
-    """Create and open a SessionManager connected to the hosted QM server."""
-    from qubox_v2_legacy.experiments.session import SessionManager
+    """Create and open a Session connected to the hosted QM server."""
+    from qubox import Session
 
-    print(f"[INIT] Creating SessionManager for {SAMPLE_ID}/{COOLDOWN_ID}...")
+    print(f"[INIT] Creating Session for {SAMPLE_ID}/{COOLDOWN_ID}...")
     print(f"[INIT] QOP: {QOP_IP}, Cluster: {CLUSTER_NAME}")
-    session = SessionManager(
+    session = Session.open(
         sample_id=SAMPLE_ID,
         cooldown_id=COOLDOWN_ID,
         registry_base=REGISTRY_BASE,
+        simulation_mode=True,
+        connect=False,
         qop_ip=QOP_IP,
         cluster_name=CLUSTER_NAME,
         load_devices=False,
     )
-    # Clear device specs to avoid _log_device_connectivity timeout
-    # during open() — external LOs are not needed for simulation.
+    # External LOs are not needed for simulation.
     session.devices.specs.clear()
-    session.open()
-    print("[INIT] SessionManager opened successfully.")
+    session.connect()
+    print("[INIT] Session opened successfully.")
 
     # Inject calibration data and register simulation pulses
     inject_calibration_data(session)
@@ -215,15 +364,37 @@ def create_session():
 # Per-experiment build + simulate
 # ---------------------------------------------------------------------------
 def simulate_program(session, program, duration_ns: int = SIM_DURATION_NS):
-    """Simulate a QUA program and return (sim_samples, compile_time)."""
+    """Simulate a QUA program and return (sim_samples, compile_time, sample_source)."""
+    from qm import SimulationConfig
+    from qm.exceptions import QMSimulationError
+
     t0 = time.time()
-    sim_samples = session.runner.simulate(
-        program,
-        duration=duration_ns,
-        plot=False,
-    )
-    elapsed = time.time() - t0
-    return sim_samples, elapsed
+    cfg = session.config_engine.build_qm_config()
+    sim_config = SimulationConfig(duration=max(1, int(duration_ns) // 4))
+    job = session.runner._qmm.simulate(cfg, program, sim_config)
+
+    pull_delays_s = (0.0, 0.25, 0.75)
+    last_error: QMSimulationError | None = None
+    for delay_s in pull_delays_s:
+        if delay_s:
+            time.sleep(delay_s)
+        try:
+            sim_samples = job.get_simulated_samples()
+            elapsed = time.time() - t0
+            return sim_samples, elapsed, "samples"
+        except QMSimulationError as exc:
+            last_error = exc
+
+    fallback_samples = _build_waveform_report_samples(job, duration_ns=duration_ns)
+    if fallback_samples is None:
+        fallback_samples = _build_waveform_metadata_samples(job, duration_ns=duration_ns)
+    if fallback_samples is not None:
+        elapsed = time.time() - t0
+        return fallback_samples, elapsed, "waveform_report"
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Simulation sample retrieval failed without a recoverable waveform-report fallback.")
 
 
 def check_sim_output(sim_samples) -> tuple[bool, bool]:
@@ -257,11 +428,11 @@ def get_qua_script(program) -> str:
 
 # ---------------------------------------------------------------------------
 # Experiment definitions — each returns (build, sim_duration_ns)
-# Uses correct import paths from qubox_v2_legacy.experiments
+# Uses correct import paths from qubox.experiments
 # ---------------------------------------------------------------------------
 
 def build_readout_trace(session):
-    from qubox_v2_legacy.experiments import ReadoutTrace
+    from qubox.experiments import ReadoutTrace
     exp = ReadoutTrace(session)
     attr = exp.attr
     build = exp.build_program(
@@ -273,7 +444,7 @@ def build_readout_trace(session):
 
 
 def build_resonator_spectroscopy(session):
-    from qubox_v2_legacy.experiments import ResonatorSpectroscopy
+    from qubox.experiments import ResonatorSpectroscopy
     exp = ResonatorSpectroscopy(session)
     attr = exp.attr
     lo_ro = exp.get_readout_lo()
@@ -290,7 +461,7 @@ def build_resonator_spectroscopy(session):
 
 
 def build_resonator_power_spectroscopy(session):
-    from qubox_v2_legacy.experiments import ResonatorPowerSpectroscopy
+    from qubox.experiments import ResonatorPowerSpectroscopy
     exp = ResonatorPowerSpectroscopy(session)
     attr = exp.attr
     lo_ro = exp.get_readout_lo()
@@ -310,7 +481,7 @@ def build_resonator_power_spectroscopy(session):
 
 
 def build_qubit_spectroscopy(session):
-    from qubox_v2_legacy.experiments import QubitSpectroscopy
+    from qubox.experiments import QubitSpectroscopy
     exp = QubitSpectroscopy(session)
     attr = exp.attr
     lo_qb = exp.get_qubit_lo()
@@ -329,7 +500,7 @@ def build_qubit_spectroscopy(session):
 
 
 def build_temporal_rabi(session):
-    from qubox_v2_legacy.experiments import TemporalRabi
+    from qubox.experiments import TemporalRabi
     exp = TemporalRabi(session)
     build = exp.build_program(
         pulse="x180",
@@ -344,7 +515,7 @@ def build_temporal_rabi(session):
 
 
 def build_power_rabi(session):
-    from qubox_v2_legacy.experiments import PowerRabi
+    from qubox.experiments import PowerRabi
     exp = PowerRabi(session)
     build = exp.build_program(
         max_gain=0.5,
@@ -358,7 +529,7 @@ def build_power_rabi(session):
 
 
 def build_time_rabi_chevron(session):
-    from qubox_v2_legacy.experiments import TimeRabiChevron
+    from qubox.experiments import TimeRabiChevron
     exp = TimeRabiChevron(session)
     build = exp.build_program(
         if_span=4e6,
@@ -374,7 +545,7 @@ def build_time_rabi_chevron(session):
 
 
 def build_power_rabi_chevron(session):
-    from qubox_v2_legacy.experiments import PowerRabiChevron
+    from qubox.experiments import PowerRabiChevron
     exp = PowerRabiChevron(session)
     build = exp.build_program(
         if_span=4e6,
@@ -390,13 +561,13 @@ def build_power_rabi_chevron(session):
 
 
 def build_t1_relaxation(session):
-    from qubox_v2_legacy.experiments import T1Relaxation
+    from qubox.experiments import T1Relaxation
     exp = T1Relaxation(session)
     # Note: T1Relaxation resolves qb_therm_clks internally from calibration
     build = exp.build_program(
-        delay_end=200,
-        dt=50,
-        delay_begin=4,
+        delay_end=208,
+        dt=48,
+        delay_begin=16,
         r180="x180",
         n_avg=1,
         use_circuit_runner=False,
@@ -405,13 +576,13 @@ def build_t1_relaxation(session):
 
 
 def build_t2_ramsey(session):
-    from qubox_v2_legacy.experiments import T2Ramsey
+    from qubox.experiments import T2Ramsey
     exp = T2Ramsey(session)
     build = exp.build_program(
         qb_detune=0,
-        delay_end=200,
-        dt=50,
-        delay_begin=4,
+        delay_end=208,
+        dt=48,
+        delay_begin=16,
         r90="x90",
         n_avg=1,
         qb_therm_clks=DEFAULT_QB_THERM,
@@ -420,12 +591,12 @@ def build_t2_ramsey(session):
 
 
 def build_t2_echo(session):
-    from qubox_v2_legacy.experiments import T2Echo
+    from qubox.experiments import T2Echo
     exp = T2Echo(session)
     build = exp.build_program(
-        delay_end=200,
-        dt=50,
-        delay_begin=4,
+        delay_end=224,
+        dt=64,
+        delay_begin=32,
         r180="x180",
         r90="x90",
         n_avg=1,
@@ -435,7 +606,7 @@ def build_t2_echo(session):
 
 
 def build_iq_blobs(session):
-    from qubox_v2_legacy.experiments import IQBlob
+    from qubox.experiments import IQBlob
     exp = IQBlob(session)
     build = exp.build_program(
         r180="x180",
@@ -446,7 +617,7 @@ def build_iq_blobs(session):
 
 
 def build_all_xy(session):
-    from qubox_v2_legacy.experiments import AllXY
+    from qubox.experiments import AllXY
     exp = AllXY(session)
     build = exp.build_program(
         n_avg=1,
@@ -456,7 +627,7 @@ def build_all_xy(session):
 
 
 def build_drag_calibration(session):
-    from qubox_v2_legacy.experiments import DRAGCalibration
+    from qubox.experiments import DRAGCalibration
     exp = DRAGCalibration(session)
     amps = np.linspace(-0.5, 0.5, 5)
     build = exp.build_program(
@@ -468,7 +639,7 @@ def build_drag_calibration(session):
 
 
 def build_readout_butterfly(session):
-    from qubox_v2_legacy.experiments import ReadoutButterflyMeasurement
+    from qubox.experiments import ReadoutButterflyMeasurement
     exp = ReadoutButterflyMeasurement(session)
     build = exp.build_program(
         prep_policy="threshold",
@@ -481,7 +652,7 @@ def build_readout_butterfly(session):
 
 
 def build_qubit_state_tomography(session):
-    from qubox_v2_legacy.experiments import QubitStateTomography
+    from qubox.experiments import QubitStateTomography
     from qm import qua
 
     def state_prep():
@@ -497,7 +668,7 @@ def build_qubit_state_tomography(session):
 
 
 def build_storage_spectroscopy(session):
-    from qubox_v2_legacy.experiments import StorageSpectroscopy
+    from qubox.experiments import StorageSpectroscopy
     exp = StorageSpectroscopy(session)
     attr = exp.attr
     lo_st = session.hardware.get_element_lo(attr.st_el)
@@ -514,7 +685,7 @@ def build_storage_spectroscopy(session):
 
 
 def build_storage_t1_decay(session):
-    from qubox_v2_legacy.experiments import FockResolvedT1
+    from qubox.experiments import FockResolvedT1
     exp = FockResolvedT1(session)
     attr = exp.attr
     fock_fqs = getattr(attr, "fock_fqs", None)
@@ -522,9 +693,9 @@ def build_storage_t1_decay(session):
         fock_fqs = [attr.qb_fq or 6.15e9]
     build = exp.build_program(
         fock_fqs=fock_fqs[:1],
-        delay_end=200,
-        dt=50,
-        delay_begin=4,
+        delay_end=208,
+        dt=48,
+        delay_begin=16,
         sel_r180="sel_x180",
         n_avg=1,
         st_therm_clks=DEFAULT_ST_THERM,
@@ -533,7 +704,12 @@ def build_storage_t1_decay(session):
 
 
 def build_num_splitting(session):
-    from qubox_v2_legacy.experiments import NumSplittingSpectroscopy
+    from qubox.experiments import NumSplittingSpectroscopy
+    from qm import qua
+
+    def state_prep():
+        qua.wait(4)
+
     exp = NumSplittingSpectroscopy(session)
     attr = exp.attr
     qb_fq = attr.qb_fq or 6.15e9
@@ -542,6 +718,7 @@ def build_num_splitting(session):
         rf_spans=[2e6],
         df=1e6,
         sel_r180="sel_x180",
+        state_prep=state_prep,
         n_avg=1,
         st_therm_clks=DEFAULT_ST_THERM,
     )
@@ -549,7 +726,7 @@ def build_num_splitting(session):
 
 
 def build_wigner_tomography(session):
-    from qubox_v2_legacy.experiments import StorageWignerTomography
+    from qubox.experiments import StorageWignerTomography
     from qm import qua
 
     def state_prep():
@@ -643,9 +820,10 @@ def main():
             result.qua_script_lines = len(qua_script.splitlines()) if qua_script else 0
 
             # Step 3: simulate
-            sim_samples, sim_time = simulate_program(session, program, duration_ns=sim_dur)
+            sim_samples, sim_time, sample_source = simulate_program(session, program, duration_ns=sim_dur)
             result.compile_time_s = build_time + sim_time
             result.sim_duration_ns = sim_dur
+            result.sample_source = sample_source
 
             # Step 4: check output
             has_analog, has_digital = check_sim_output(sim_samples)
@@ -658,7 +836,8 @@ def main():
                     f"analog={'Y' if has_analog else 'N'}, "
                     f"digital={'Y' if has_digital else 'N'}, "
                     f"QUA lines={result.qua_script_lines}, "
-                    f"time={result.compile_time_s:.2f}s"
+                    f"time={result.compile_time_s:.2f}s, "
+                    f"source={result.sample_source}"
                 )
                 print(f"PASS ({result.message})")
             else:
@@ -666,7 +845,8 @@ def main():
                 result.message = (
                     f"No non-zero analog or digital output. "
                     f"QUA lines={result.qua_script_lines}, "
-                    f"sim_dur={sim_dur}ns"
+                    f"sim_dur={sim_dur}ns, "
+                    f"source={result.sample_source}"
                 )
                 print(f"FAIL ({result.message})")
 
@@ -719,6 +899,7 @@ def main():
                 "status": r.status,
                 "compile_time_s": round(r.compile_time_s, 3),
                 "sim_duration_ns": r.sim_duration_ns,
+                "sample_source": r.sample_source,
                 "has_analog_output": r.has_analog_output,
                 "has_digital_output": r.has_digital_output,
                 "qua_script_lines": r.qua_script_lines,

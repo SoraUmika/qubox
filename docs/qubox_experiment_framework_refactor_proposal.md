@@ -1,5 +1,11 @@
 # qubox Experiment Framework: Architectural Review and Refactor Proposal
 
+> **Historical document (2026-03-13).** This proposal was written against the
+> `qubox_v2_legacy` codebase. Many of its recommendations have been
+> incorporated into the current `qubox` architecture. See
+> [Architecture — Package Map](../site_docs/architecture/package-map.md) for
+> the live package structure.
+
 Date: 2026-03-13
 
 ## Scope and Audit Basis

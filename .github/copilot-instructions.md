@@ -57,11 +57,17 @@ A code change that breaks a notebook without acknowledgment is incomplete work.
 ## Architecture
 
 ```text
-qubox/              Main package (public API)
-qubox/legacy/       Former qubox_v2_legacy — experiment classes, QUA programs
-qubox/notebook/     Notebook-facing import surface
-qubox_tools/        Analysis, fitting, plotting
-tools/              Agent and developer utilities
+qubox/              Main package — public API, experiments, calibration, hardware, QUA programs
+qubox/notebook/     Notebook-facing import surface (~65 essentials + ~45 advanced symbols)
+qubox/backends/qm/  QM runtime adapter and lowering path
+qubox/control/      ControlProgram IR and realization helpers
+qubox_tools/        Analysis toolkit — fitting, plotting, algorithms, optimization
+qubox_lab_mcp/      Lab MCP server
+tools/              Developer & agent utilities (validation, demos, logging)
+notebooks/          28 sequential experiment notebooks
+tests/              Pytest test suite
+docs/               CHANGELOG, architecture docs, design reviews
+samples/            Sample & cooldown data directories
 past_prompt/        Prompt logs (append-only)
 limitations/        Known QUA/hardware limitations
 ```
@@ -76,7 +82,7 @@ from legacy to qubox — one at a time — while preserving behavior. See `AGENT
 
 ## Key Rules
 
-- Do not import from `qubox_v2_legacy` — use `qubox.legacy.*` instead.
+- Do not import from `qubox_v2_legacy` or `qubox.legacy` — those packages do not exist. Use `qubox`, `qubox.notebook`, or concrete `qubox.*` modules instead.
 - Do not assume QM API compatibility beyond version 1.2.6.
 - Do not scatter temp scripts outside `tools/`.
 - Log every completed task to `past_prompt/YYYY-MM-DD_HH-MM-SS_<task>.md`.

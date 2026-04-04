@@ -16,7 +16,7 @@ from qubox_tools.fitting.routines import fit_and_wrap, generalized_fit, build_fi
 from qubox_tools.fitting.cqed import resonator_spec_model
 from ...hardware.program_runner import ExecMode, RunResult
 from ...programs import api as cQED_programs
-from ...programs.macros.measure import measureMacro
+from ...programs.measurement import build_readout_snapshot_from_handle
 
 
 def _resolve_ro_therm_clks(exp: ExperimentBase, value: int | None, owner: str) -> int:
@@ -46,19 +46,6 @@ class ResonatorSpectroscopy(ExperimentBase):
     resonator resonance.
     """
 
-    def _setup_measure_context(self, readout_op: str):
-        """Return measureMacro context manager for readout-based experiments."""
-        attr = self.attr
-        ro_info = self.pulse_mgr.get_pulseOp_by_element_op(attr.ro_el, readout_op)
-        if ro_info is None:
-            raise ValueError(
-                f"No PulseOp for element={attr.ro_el!r}, op={readout_op!r}."
-            )
-        weight_len = int(ro_info.length) if ro_info.length is not None else None
-        return measureMacro.using_defaults(
-            pulse_op=ro_info, active_op=readout_op, weight_len=weight_len,
-        )
-
     def _build_impl(
         self,
         readout_op: str,
@@ -72,12 +59,13 @@ class ResonatorSpectroscopy(ExperimentBase):
         lo_freq = self.get_readout_lo()
         if_freqs = create_if_frequencies(attr.ro_el, rf_begin, rf_end, df, lo_freq)
         ro_therm = _resolve_ro_therm_clks(self, ro_therm_clks, "ResonatorSpectroscopy")
+        readout = self._build_readout_handle(operation=readout_op)
 
         prog = cQED_programs.resonator_spectroscopy(
             if_freqs, ro_therm, n_avg,
             ro_el=attr.ro_el,
             bindings=self._bindings_or_none,
-            readout=self.readout_handle,
+            readout=readout,
         )
 
         return ProgramBuildResult(
@@ -97,7 +85,7 @@ class ResonatorSpectroscopy(ExperimentBase):
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.resonator_spectroscopy",
             sweep_axes={"frequencies": lo_freq + if_freqs},
-            measure_macro_state={"readout_op": readout_op},
+            readout_state=build_readout_snapshot_from_handle(readout),
             run_program_kwargs={"axis": 0},
         )
 
@@ -110,17 +98,16 @@ class ResonatorSpectroscopy(ExperimentBase):
         n_avg: int = 1000,
         ro_therm_clks: int | None = None,
     ) -> RunResult:
-        with self._setup_measure_context(readout_op):
-            build = self.build_program(
-                readout_op=readout_op, rf_begin=rf_begin,
-                rf_end=rf_end, df=df, n_avg=n_avg,
-                ro_therm_clks=ro_therm_clks,
-            )
-            return self.run_program(
-                build.program, n_total=build.n_total,
-                processors=list(build.processors),
-                **build.run_program_kwargs,
-            )
+        build = self.build_program(
+            readout_op=readout_op, rf_begin=rf_begin,
+            rf_end=rf_end, df=df, n_avg=n_avg,
+            ro_therm_clks=ro_therm_clks,
+        )
+        return self.run_program(
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
+            **build.run_program_kwargs,
+        )
 
     def simulate(self, sim_config=None, **params):
         readout_op = params.get("readout_op")
@@ -128,8 +115,7 @@ class ResonatorSpectroscopy(ExperimentBase):
             raise TypeError(
                 "simulate() missing required keyword argument: 'readout_op'"
             )
-        with self._setup_measure_context(readout_op):
-            return super().simulate(sim_config, **params)
+        return super().simulate(sim_config, **params)
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, p0=None, **kw) -> AnalysisResult:
         freqs = result.output.extract("frequencies")
@@ -216,19 +202,6 @@ class ResonatorSpectroscopy(ExperimentBase):
 class ResonatorPowerSpectroscopy(ExperimentBase):
     """Resonator frequency × readout gain 2-D sweep."""
 
-    def _setup_measure_context(self, readout_op: str):
-        """Return measureMacro context manager for readout-based experiments."""
-        attr = self.attr
-        ro_info = self.pulse_mgr.get_pulseOp_by_element_op(attr.ro_el, readout_op)
-        if ro_info is None:
-            raise ValueError(
-                f"No PulseOp for element={attr.ro_el!r}, op={readout_op!r}."
-            )
-        weight_len = int(ro_info.length) if ro_info.length is not None else None
-        return measureMacro.using_defaults(
-            pulse_op=ro_info, active_op=readout_op, weight_len=weight_len,
-        )
-
     def _build_impl(
         self,
         readout_op: str,
@@ -246,11 +219,12 @@ class ResonatorPowerSpectroscopy(ExperimentBase):
         if_freqs = create_if_frequencies(attr.ro_el, rf_begin, rf_end, df, lo_freq)
         gains = np.geomspace(g_min, g_max, N_a)
         ro_therm = _resolve_ro_therm_clks(self, ro_therm_clks, "ResonatorPowerSpectroscopy")
+        readout = self._build_readout_handle(operation=readout_op)
 
         prog = cQED_programs.resonator_power_spectroscopy(
             if_freqs, gains, ro_therm, n_avg,
             bindings=self._bindings_or_none,
-            readout=self.readout_handle,
+            readout=readout,
         )
 
         return ProgramBuildResult(
@@ -272,7 +246,7 @@ class ResonatorPowerSpectroscopy(ExperimentBase):
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.resonator_power_spectroscopy",
             sweep_axes={"frequencies": lo_freq + if_freqs, "gains": gains},
-            measure_macro_state={"readout_op": readout_op},
+            readout_state=build_readout_snapshot_from_handle(readout),
         )
 
     def run(
@@ -287,17 +261,16 @@ class ResonatorPowerSpectroscopy(ExperimentBase):
         n_avg: int = 1000,
         ro_therm_clks: int | None = None,
     ) -> RunResult:
-        with self._setup_measure_context(readout_op):
-            build = self.build_program(
-                readout_op=readout_op, rf_begin=rf_begin,
-                rf_end=rf_end, df=df,
-                g_min=g_min, g_max=g_max, N_a=N_a, n_avg=n_avg,
-                ro_therm_clks=ro_therm_clks,
-            )
-            result = self.run_program(
-                build.program, n_total=build.n_total,
-                processors=list(build.processors),
-            )
+        build = self.build_program(
+            readout_op=readout_op, rf_begin=rf_begin,
+            rf_end=rf_end, df=df,
+            g_min=g_min, g_max=g_max, N_a=N_a, n_avg=n_avg,
+            ro_therm_clks=ro_therm_clks,
+        )
+        result = self.run_program(
+            build.program, n_total=build.n_total,
+            processors=list(build.processors),
+        )
         self.save_output(result.output, "cavityPowerSpectroscopy")
         return result
 
@@ -307,8 +280,7 @@ class ResonatorPowerSpectroscopy(ExperimentBase):
             raise TypeError(
                 "simulate() missing required keyword argument: 'readout_op'"
             )
-        with self._setup_measure_context(readout_op):
-            return super().simulate(sim_config, **params)
+        return super().simulate(sim_config, **params)
 
     def analyze(self, result: RunResult, *, update_calibration: bool = False, **kw) -> AnalysisResult:
         freqs = result.output.extract("frequencies")

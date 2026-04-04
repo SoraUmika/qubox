@@ -14,9 +14,10 @@ from __future__ import annotations
 from .calibration import CalibrationProposal, CalibrationSnapshot
 from .circuit import QuantumCircuit, QuantumGate
 from .core.device_metadata import DeviceMetadata
-from .data import ExecutionRequest, ExperimentResult
+from .core.protocols import SessionProtocol
+from .data import ExecutionRequest, ExperimentResult, RunManifest
 from .sequence import AcquisitionSpec, Condition, Operation, Sequence, SweepAxis, SweepPlan
-from .session import Session
+from .session import Session, SessionFactory
 
 __version__ = "3.0.0"
 
@@ -32,8 +33,11 @@ __all__ = [
     "Operation",
     "QuantumCircuit",
     "QuantumGate",
+    "RunManifest",
     "Sequence",
     "Session",
+    "SessionFactory",
+    "SessionProtocol",
     "SweepAxis",
     "SweepPlan",
 ]

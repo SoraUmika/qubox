@@ -36,7 +36,7 @@ class ReadoutWorkflowLibrary:
             def run(self_nonlocal):
                 from qubox.experiments.calibration.readout import CalibrateReadoutFull
 
-                experiment = CalibrateReadoutFull(session.legacy_session)
+                experiment = CalibrateReadoutFull(session.session_manager)
                 payload = experiment.build_plan(
                     ro_op=kwargs.get("ro_op"),
                     drive_frequency=kwargs.get("drive_frequency"),

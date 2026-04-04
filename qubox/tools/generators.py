@@ -1,11 +1,11 @@
 """Pulse-registration generators for the qubox toolkit.
 
 Helper utilities for building and registering qubit-rotation and displacement
-pulses on a PulseOperationManager.  No dependency on ``qubox_v2_legacy``.
+pulses on a PulseOperationManager.
 
-Migrated from ``qubox_v2_legacy.tools.generators`` with the following changes:
-- ``from ..pulses.manager import PulseOperationManager`` removed (duck-typed).
-- ``from ..core.types import MAX_AMPLITUDE`` replaced by the constant below.
+Notes:
+- ``PulseOperationManager`` is duck-typed (no concrete import required).
+- ``MAX_AMPLITUDE`` is defined as a local constant below.
 """
 
 from __future__ import annotations

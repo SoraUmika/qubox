@@ -1,6 +1,5 @@
 """qubox.calibration.history — calibration snapshot utilities.
 
-Migrated from ``qubox_v2_legacy.calibration.history``.
 No external dependencies beyond the standard library and Pydantic.
 """
 from __future__ import annotations

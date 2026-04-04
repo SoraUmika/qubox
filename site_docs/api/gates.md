@@ -38,27 +38,24 @@ circuit.add(QuantumGate("measure", target="resonator"))
 
 | Module | Content |
 |--------|---------|
-| `models.py` | `GateDefinition`, `GateSet` |
-| `hardware.py` | Hardware-specific gate implementations |
-| `fidelity.py` | Gate fidelity estimation, RB analysis |
-| `decomposition.py` | Gate decomposition and synthesis |
+| `hardware/__init__.py` | Runtime hardware gate exports |
+| `hardware/qubit_rotation.py` | `QubitRotationHardware` |
+| `hardware/displacement.py` | `DisplacementHardware` |
+| `hardware/sqr.py` | `SQRHardware` |
+| `hardware/snap.py` | `SNAPHardware` |
+| `hardware_base.py` | `GateHardware` ABC |
 
-## Gate Synthesis (`qubox.compile`)
+## Scope Boundary
 
-Compile high-level gates into hardware-native pulse sequences:
+`qubox` no longer ships the standalone `qubox.compile` gate-synthesis package
+or the numerical cQED simulation stack. Those research-oriented workflows are
+being split to `cqed_sim`. `qubox` still owns circuit construction,
+ControlProgram realization, QUA compilation, and QM-hosted validation of the
+compiled program.
 
-```python
-from qubox.compile import synthesize
-
-# Decompose into native gate set
-native_circuit = synthesize(circuit, gate_set="clifford")
-```
-
-| Module | Content |
-|--------|---------|
-| `synthesis.py` | Gate → pulse sequence compilation |
-| `ansatz.py` | Variational ansatz optimization |
-| `gpu_accel.py` | GPU-accelerated gate synthesis |
+The older gate-model, gate-sequence, fidelity, and noise helpers were removed
+from `qubox.gates`; the active package now contains only the runtime hardware
+gate implementations required by `qubox` itself.
 
 ## Circuit Compilation Pipeline
 

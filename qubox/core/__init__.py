@@ -24,6 +24,15 @@ from .config import (
     ExternalLOEntry,
     QuboxExtras,
 )
+from .protocols import (
+    HardwareController,
+    ProgramRunner,
+    ConfigEngine,
+    PulseManager,
+    DeviceController,
+    Experiment,
+    SessionProtocol,
+)
 from .experiment_context import ExperimentContext
 from .hardware_definition import HardwareDefinition
 from .device_metadata import DeviceMetadata
@@ -90,6 +99,14 @@ __all__ = [
     "HardwareConfig",
     "ExternalLOEntry",
     "QuboxExtras",
+    # protocols
+    "HardwareController",
+    "ProgramRunner",
+    "ConfigEngine",
+    "PulseManager",
+    "DeviceController",
+    "Experiment",
+    "SessionProtocol",
     # context & hardware
     "ExperimentContext",
     "HardwareDefinition",

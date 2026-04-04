@@ -1,4 +1,3 @@
-# qubox_v2/core/logging.py
 """
 Unified logging configuration for qubox and qm loggers.
 """

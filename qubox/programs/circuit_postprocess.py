@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from .circuit_runner import MeasurementSchema
+from .circuit_ir import MeasurementSchema
 from .measurement import StateRule, derive_state
 
 

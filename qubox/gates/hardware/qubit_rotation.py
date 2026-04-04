@@ -1,5 +1,4 @@
-﻿# qubox_v2/gates/hardware/qubit_rotation.py
-from __future__ import annotations
+﻿from __future__ import annotations
 from dataclasses import dataclass, field
 import numpy as np
 

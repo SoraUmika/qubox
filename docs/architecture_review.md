@@ -1,5 +1,10 @@
 # Comprehensive Structural Survey — qubox_v2
 
+> **Historical document (2026-03-02).** This surveys the `qubox_v2_legacy`
+> codebase which has since been fully eliminated and merged into `qubox`.
+> For the current architecture, see [API Reference](../API_REFERENCE.md)
+> and [Architecture — Package Map](../site_docs/architecture/package-map.md).
+
 **Date**: 2026-03-02  
 **Scope**: Full read-only analysis of the `qubox_v2_legacy` repository  
 **Version**: qubox_v2_legacy 2.0.0

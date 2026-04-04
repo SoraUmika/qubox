@@ -1,4 +1,3 @@
-# qubox_v2/pulses/integration_weights.py
 """Integration weight management for readout pulses.
 
 Extracted from PulseOperationManager to provide focused,

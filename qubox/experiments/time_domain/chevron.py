@@ -27,7 +27,7 @@ class TimeRabiChevron(ExperimentBase):
     ) -> ProgramBuildResult:
         attr = self.attr
         dfs = np.arange(-if_span / 2, if_span / 2 + 0.1, df, dtype=int)
-        pulse_clks = create_clks_array(4, max_pulse_duration, dt, time_per_clk=4)
+        pulse_clks = create_clks_array(16, max_pulse_duration, dt, time_per_clk=4)
         qb_therm = self.resolve_override_or_attr(
             value=qb_therm_clks,
             attr_name="qb_therm_clks",

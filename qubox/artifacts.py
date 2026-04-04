@@ -1,7 +1,6 @@
 """qubox.artifacts — build-hash keyed artifact storage and config snapshots.
 
-Migrated from ``qubox_v2_legacy.core.artifact_manager`` and
-``qubox_v2_legacy.core.artifacts``.  All qubox_v2_legacy imports removed.
+Consolidates artifact management and storage utilities.
 
 Public API
 ----------
@@ -86,7 +85,7 @@ class ArtifactManager:
         return d
 
     def save_session_state(self, state_dict: dict[str, Any]) -> Path:
-        """Save a :class:`~qubox.session.state.SessionState` snapshot."""
+        """Save a :class:`~qubox.core.session_state.SessionState` snapshot."""
         path = self.root / "session_state.json"
         self._write_json(path, state_dict)
         _logger.info("Session state saved: %s", path)

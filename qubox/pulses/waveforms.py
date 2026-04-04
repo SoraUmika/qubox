@@ -1,4 +1,3 @@
-# qubox_v2/pulses/waveforms.py
 """Waveform factory functions for creating QM-compatible waveform samples.
 
 This module provides pure functions for generating waveform envelopes.

@@ -1,4 +1,3 @@
-# qubox_v2/verification/schema_checks.py
 """Schema validation tests for all config files.
 
 Verifies that:
@@ -11,7 +10,7 @@ See docs/SCHEMA_VERSIONING.md for the specification.
 
 Usage
 -----
->>> from qubox_v2.verification.schema_checks import run_schema_checks
+>>> from qubox.verification.schema_checks import run_schema_checks
 >>> results = run_schema_checks("seq_1_device/config")
 >>> assert all(r.valid for r in results)
 """

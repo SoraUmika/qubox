@@ -34,11 +34,12 @@ from ..programs import api as cQED_programs
 from qubox_tools.algorithms import post_process as pp
 from qubox_tools.data.containers import Output
 from ..core.logging import get_logger
-from ..core.persistence_policy import sanitize_mapping_for_json
+from ..core.persistence import sanitize_mapping_for_json
 from ..hardware.program_runner import RunResult
 
 if TYPE_CHECKING:
     from ..core.device_metadata import DeviceMetadata
+    from ..core.protocols import SessionProtocol
     from ..devices.device_manager import DeviceManager
     from ..pulses.manager import PulseOperationManager
 
@@ -163,7 +164,7 @@ class ExperimentBase:
         ``ExperimentRunner``.
     """
 
-    def __init__(self, ctx: Any) -> None:
+    def __init__(self, ctx: SessionProtocol | Any) -> None:
         if ctx is None:
             raise ValueError(
                 "Experiment context is not set. Pass a SessionManager or "
@@ -219,21 +220,136 @@ class ExperimentBase:
         return getattr(self._ctx, "device_manager", None)
 
     @property
-    def measure_macro(self):
-        """Access the measurement macro singleton."""
-        from ..programs.macros.measure import measureMacro
-        return measureMacro
-
-    @property
     def readout_handle(self):
-        """Build a ReadoutHandle from the current measureMacro state.
+        """Build a binding-backed ReadoutHandle for the current experiment context.
 
         Returns a frozen, immutable snapshot of the current readout
-        configuration.  Pass this to builder functions instead of
+        configuration. Pass this to builder functions instead of
         letting them read from the singleton.
         """
+        return self._build_readout_handle()
+
+    @staticmethod
+    def _normalize_readout_weight_sets(weights: Any) -> tuple[tuple[str, ...], ...] | None:
+        if weights is None:
+            return None
+        iterable = weights if isinstance(weights, (list, tuple)) else [weights]
+        normalized: list[tuple[str, ...]] = []
+        for spec in iterable:
+            if isinstance(spec, str):
+                normalized.append((spec,))
+                continue
+            if isinstance(spec, (list, tuple)):
+                values = tuple(str(item) for item in spec if item is not None)
+                if values:
+                    normalized.append(values)
+        return tuple(normalized) or None
+
+    @staticmethod
+    def _weight_keys_from_sets(weight_sets: tuple[tuple[str, ...], ...] | None) -> tuple[str, ...]:
+        if not weight_sets:
+            return ("cos", "sin", "minus_sin")
+        ordered: list[str] = []
+        for spec in weight_sets[:2]:
+            for item in spec:
+                if item not in ordered:
+                    ordered.append(item)
+        return tuple(ordered or ("cos", "sin", "minus_sin"))
+
+    def _build_readout_handle(
+        self,
+        *,
+        element: str | None = None,
+        operation: str | None = None,
+        drive_frequency: float | None = None,
+        weights: Any = None,
+        weight_length: int | None = None,
+        pulse_op: Any = None,
+        gain: float | None = None,
+    ):
         from ..core.bindings import ReadoutHandle
-        return ReadoutHandle.from_measure_macro()
+
+        resolved_element = element or getattr(self.attr, "ro_el", None) or "resonator"
+
+        resolved_operation = operation
+        if resolved_operation is None:
+            bindings = self._bindings_or_none
+            if bindings is not None and getattr(bindings.readout, "active_op", None):
+                resolved_operation = bindings.readout.active_op
+            else:
+                resolved_operation = "readout"
+
+        session_builder = getattr(self._ctx, "readout_handle", None)
+        if callable(session_builder):
+            base_handle = session_builder(alias=resolved_element, operation=resolved_operation)
+        else:
+            from ..core.bindings import ReadoutCal
+
+            bindings = self.bindings
+            rb = bindings.readout
+            base_cal = ReadoutCal.from_readout_binding(rb)
+            base_handle = ReadoutHandle(
+                binding=rb,
+                cal=base_cal,
+                element=resolved_element,
+                operation=resolved_operation,
+                gain=rb.gain,
+                demod_weight_sets=tuple(
+                    tuple(spec) if isinstance(spec, (list, tuple)) else (str(spec),)
+                    for spec in (rb.demod_weight_sets or ())
+                ),
+            )
+
+        resolved_pulse = pulse_op or getattr(base_handle.binding, "pulse_op", None)
+        if resolved_pulse is None or resolved_operation != getattr(base_handle, "operation", None):
+            candidate = self.pulse_mgr.get_pulseOp_by_element_op(resolved_element, resolved_operation, strict=False)
+            if candidate is not None:
+                resolved_pulse = candidate
+
+        weight_sets = self._normalize_readout_weight_sets(weights)
+        if weight_sets is None:
+            weight_sets = self._normalize_readout_weight_sets(base_handle.demod_weight_sets)
+        if weight_sets is None:
+            weight_sets = (("cos", "sin"), ("minus_sin", "cos"))
+
+        resolved_drive_frequency = drive_frequency
+        if resolved_drive_frequency is None:
+            current_drive_frequency = getattr(base_handle.cal, "drive_frequency", None)
+            if isinstance(current_drive_frequency, (int, float, np.floating)) and np.isfinite(current_drive_frequency):
+                resolved_drive_frequency = float(current_drive_frequency)
+            else:
+                resolved_drive_frequency = self.get_readout_frequency()
+
+        resolved_gain = gain if gain is not None else getattr(base_handle, "gain", None)
+        bound_weights = [list(spec) if len(spec) > 1 else spec[0] for spec in weight_sets]
+        binding = replace(
+            base_handle.binding,
+            pulse_op=resolved_pulse,
+            active_op=resolved_operation,
+            demod_weight_sets=bound_weights,
+            drive_frequency=float(resolved_drive_frequency),
+            gain=resolved_gain,
+        )
+        cal = replace(
+            base_handle.cal,
+            drive_frequency=float(resolved_drive_frequency),
+            weight_keys=self._weight_keys_from_sets(weight_sets),
+            weight_length=(
+                weight_length
+                or getattr(base_handle.cal, "weight_length", None)
+                or getattr(resolved_pulse, "length", None)
+            ),
+        )
+
+        return replace(
+            base_handle,
+            binding=binding,
+            cal=cal,
+            element=resolved_element,
+            operation=resolved_operation,
+            gain=resolved_gain,
+            demod_weight_sets=weight_sets,
+        )
 
     @property
     def bindings(self):
@@ -457,8 +573,7 @@ class ExperimentBase:
         Resolution order for readout frequency:
           0. ``CalibrationStore`` resonator frequency (or IF+LO reconstruction)
           1. ``bindings.readout.drive_frequency`` (binding-driven path)
-          2. ``measureMacro._drive_frequency`` (singleton compat)
-          3. ``attr.ro_fq`` (attributes fallback)
+          2. ``attr.ro_fq`` (attributes fallback)
         """
         ro_fq = self.get_readout_frequency()
         self.hw.set_element_fq(self.attr.ro_el, float(ro_fq))
@@ -682,6 +797,22 @@ class ExperimentBase:
         # correct for both execution and simulation.
         for element, freq in build.resolved_frequencies.items():
             self.hw.set_element_fq(element, float(freq))
+
+        # Capture calibration snapshot for reproducibility if not already set.
+        if build.calibration_snapshot is None:
+            try:
+                from ..calibration.models import CalibrationSnapshot
+                cal = getattr(self._ctx, "calibration", None)
+                if cal is not None and hasattr(cal, "to_dict"):
+                    snapshot = CalibrationSnapshot(
+                        source_path=str(getattr(cal, "path", "<in-memory>")),
+                        data=dict(cal.to_dict()),
+                        version=str(cal.to_dict().get("version", "")),
+                    )
+                    build = replace(build, calibration_snapshot=snapshot)
+            except Exception:
+                pass  # Don't fail the build if snapshot capture fails
+
         self._last_build = build
         return build
 
@@ -965,9 +1096,6 @@ class ExperimentBase:
     def get_confusion_matrix(self, element: str | None = None):
         """Return the readout confusion matrix, preferring bindings then CalibrationStore.
 
-        Falls back to ``measureMacro._ro_quality_params`` if no other source
-        provides a confusion matrix.
-
         Parameters
         ----------
         element : str or None
@@ -996,5 +1124,11 @@ class ExperimentBase:
             if rq is not None and rq.confusion_matrix is not None:
                 return _np.asarray(rq.confusion_matrix)
 
-        # 3. Fallback to measureMacro singleton
-        return self.measure_macro._ro_quality_params.get("confusion_matrix")
+        # 3. Fallback to the explicit readout snapshot before consulting compat state.
+        try:
+            cm = getattr(self.readout_handle.cal, "confusion_matrix", None)
+            if cm is not None:
+                return _np.asarray(cm)
+        except Exception:
+            pass
+        return None

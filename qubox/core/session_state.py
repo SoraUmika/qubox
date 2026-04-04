@@ -1,4 +1,3 @@
-# qubox_v2/core/session_state.py
 """Immutable runtime snapshot of session configuration.
 
 SessionState is constructed once during SessionManager.open() and provides

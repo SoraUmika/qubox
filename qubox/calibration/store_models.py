@@ -1,7 +1,6 @@
 """qubox.calibration.store_models — Pydantic v2 calibration data models.
 
-Migrated from ``qubox_v2_legacy.calibration.models`` with no changes to
-logic.  All models are standalone (no qubox_v2_legacy imports).
+All models are standalone Pydantic v2 models with no legacy dependencies.
 """
 from __future__ import annotations
 

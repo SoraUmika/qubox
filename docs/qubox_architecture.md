@@ -1,5 +1,10 @@
 # qubox Architecture Overview
 
+> **Historical document (2026-03-13).** This was the original facade-era
+> architecture sketch. For the current architecture, see
+> [API Reference](../API_REFERENCE.md) and
+> [Architecture — Package Map](../site_docs/architecture/package-map.md).
+
 Date: 2026-03-13
 
 ## Public API
@@ -55,11 +60,9 @@ gate-sequence thinking, but it is not the only top-level model.
 
 ## Backend Policy
 
-New production-facing code should enter the QM stack through the `qubox`
-runtime adapter, not by directly choosing between multiple historical compiler
-paths. Internally the adapter still delegates some work to stable `qubox_v2_legacy`
-experiment classes and the existing `compile_v2` path while the migration is
-completed.
+New production-facing code enters the QM stack through the `qubox.backends.qm`
+runtime adapter. The adapter delegates to the experiment classes and compiler
+path under `qubox.programs`.
 
 ## Calibration Policy
 

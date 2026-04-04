@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(powershell.exe -Command \"& ''E:\\\\qubox\\\\.venv\\\\Scripts\\\\python.exe'' -m pip list 2>&1 | Select-Object -First 5\")"
+      "Bash(powershell.exe -Command \"& ''E:\\\\qubox\\\\.venv\\\\Scripts\\\\python.exe'' -m pip list 2>&1 | Select-Object -First 5\")",
+      "Bash(echo \"exit: $?\")"
     ]
   }
 }

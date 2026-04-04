@@ -48,7 +48,7 @@ from qm.qua import *
 from qubox.experiments.session import SessionManager
 from qubox.hardware.config_engine import ConfigEngine
 from qubox.pulses.manager import PulseOperationManager
-from qubox.programs.macros.measure import measureMacro
+from qubox.core.measurement_config import MeasurementConfig
 
 # ── Experiment classes (via notebook surface) ─────────────────────────────────
 from qubox.notebook import (
@@ -90,7 +90,7 @@ from qubox.notebook import (
 )
 
 # continuous_wave is a low-level QUA builder, not an experiment class
-from qubox.legacy.programs.builders.utility import continuous_wave as _cw_builder
+from qubox.programs.builders.utility import continuous_wave as _cw_builder
 
 # ── Configuration ───────────────────────────────────────────────────────
 SAMPLE_ID = "post_cavity_sample_A"
@@ -225,7 +225,7 @@ for el in sorted(legacy_el_set - new_el_set):
 # ═════════════════════════════════════════════════════════════════════════
 print("\n[2b] Registering displacement ops (disp_n0..n2) on storage element...")
 try:
-    from qubox.legacy.tools.generators import ensure_displacement_ops
+    from qubox.tools.generators import ensure_displacement_ops
     ensure_displacement_ops(
         session.pulse_mgr,
         element="storage",
@@ -354,16 +354,22 @@ try:
 except Exception as e:
     print(f"  Warning: calibration injection failed: {e}")
 
-# Set measure macro discrimination threshold (needed by AllXY, QubitStateTomography)
-print("  Setting measureMacro discrimination defaults...")
-measureMacro._ro_disc_params["threshold"] = 0.0
-measureMacro._ro_disc_params["angle"] = 0.0
-measureMacro._ro_disc_params["fidelity"] = 0.99
-measureMacro._ro_disc_params["rot_mu_g"] = 0.0 + 0.0j
-measureMacro._ro_disc_params["rot_mu_e"] = 1.0 + 0.0j
-measureMacro._ro_disc_params["sigma_g"] = 0.1
-measureMacro._ro_disc_params["sigma_e"] = 0.1
-print("  -> measureMacro._ro_disc_params set")
+# Seed explicit discrimination defaults (needed by AllXY, QubitStateTomography)
+print("  Seeding explicit readout discrimination defaults...")
+session._apply_measurement_config(MeasurementConfig(
+    element=getattr(attr, "ro_el", "resonator"),
+    operation="readout",
+    drive_frequency=float(getattr(attr, "ro_fq", 0.0) or 0.0),
+    threshold=0.0,
+    angle=0.0,
+    fidelity=0.99,
+    rot_mu_g=0.0 + 0.0j,
+    rot_mu_e=1.0 + 0.0j,
+    sigma_g=0.1,
+    sigma_e=0.1,
+    source="verify_compilation",
+))
+print("  -> explicit readout discrimination defaults set")
 
 # Inject storage frequency calibration for StorageWignerTomography
 print("  Setting storage frequency calibration...")
@@ -877,8 +883,8 @@ if placeholder_pulses_created:
         print(f"    - {p}")
 
 print("\n  ARCHITECTURAL GAPS:")
-print("    - All experiment classes proxy to qubox.legacy via _LEGACY_ATTR_MAP")
-print("    - measureMacro is a class-singleton shared between legacy and new paths")
+print("    - All experiment classes proxy to qubox.experiments via _LEGACY_ATTR_MAP")
+print("    - Readout configuration is session-scoped; no global measurement singleton remains")
 print("    - No native (non-legacy) QUA program builders exist yet in qubox v3")
 print("    - Element naming: legacy 'qubit' -> new 'transmon', 'readout_gf' -> 'resonator_gf'")
 

@@ -1,4 +1,3 @@
-# qubox_v2/hardware/program_runner.py
 """
 ProgramRunner: execute and simulate QUA programs.
 

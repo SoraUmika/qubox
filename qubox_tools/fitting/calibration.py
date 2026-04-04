@@ -1,11 +1,9 @@
-# Calibration analysis algorithms (originally qubox_v2_legacy/analysis/calibration_algorithms.py)
+# Calibration analysis algorithms (qubox_tools.fitting.calibration)
 """Calibration analysis algorithms — pure fitting and optimisation routines.
 
 These functions accept experimental data, perform fitting / optimisation,
 and return typed calibration models ready for storage.  They have no
 dependencies on QUA, experiment execution, or hardware.
-
-Canonical home for functions previously in ``qubox_v2_legacy.calibration.algorithms``.
 """
 from __future__ import annotations
 

@@ -12,7 +12,7 @@ from qubox_tools.algorithms import post_process as pp
 from qubox_tools.plotting.cqed import plot_wigner
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
-from ...programs.measurement import try_build_readout_snapshot_from_macro
+from ...programs.measurement import build_readout_snapshot_from_handle
 
 
 class StorageWignerTomography(ExperimentBase):
@@ -91,7 +91,7 @@ class StorageWignerTomography(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.storage_wigner_tomography",
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
             sweep_axes={"x_vals": x_arr, "p_vals": p_arr},
         )
 
@@ -244,7 +244,7 @@ class SNAPOptimization(ExperimentBase):
             },
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.SQR_state_tomography",
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
             sweep_axes={"fock_probe_fqs": fock_probe},
         )
 

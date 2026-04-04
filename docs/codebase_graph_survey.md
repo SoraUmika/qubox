@@ -1,5 +1,10 @@
 # qubox_v2_legacy — Codebase Architecture Survey
 
+> **Historical document (2026-03-07).** This surveys the `qubox_v2_legacy`
+> codebase which has since been fully eliminated and merged into `qubox`.
+> For the current architecture, see [API Reference](../API_REFERENCE.md)
+> and [Architecture — Package Map](../site_docs/architecture/package-map.md).
+
 > **Generated:** 2026-03-07  
 > **Type:** Read-only structural reconnaissance  
 > **Scope:** Full `qubox_v2_legacy/` package (183 Python files across 20 packages)

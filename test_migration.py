@@ -78,27 +78,19 @@ check("devices (manager + resolver)", lambda: (
 ))
 
 # --- Notebook import surface ---
-check("notebook (full surface)", lambda: (
+check("notebook (current surfaces)", lambda: (
     exec("""
 from qubox.notebook import (
-    QubitSpectroscopy, PowerRabi, measureMacro, RunResult,
-    CalibrationStore, SampleRegistry, HardwareDefinition,
-    readout_mod, gates_mod
+    QubitSpectroscopy, PowerRabi, RunResult,
+    CalibrationOrchestrator, HardwareDefinition, QuboxSimulationConfig
 )
+from qubox.notebook.advanced import CalibrationStore, SampleRegistry
 """)
 ))
 
 # --- Gates ---
-check("gates.contexts", lambda: (
-    __import__("qubox.gates.contexts", fromlist=["ModelContext", "NoiseConfig"])
-))
-check("gates.cache", lambda: (
-    __import__("qubox.gates.cache", fromlist=["ModelCache"])
-))
-
-# --- Compile ---
-check("compile.api", lambda: (
-    __import__("qubox.compile.api", fromlist=["compile_api"])
+check("gates.hardware", lambda: (
+    __import__("qubox.gates", fromlist=["QubitRotationHardware", "DisplacementHardware", "SQRHardware", "SNAPHardware"])
 ))
 
 # --- Verification ---
@@ -106,9 +98,9 @@ check("verification.waveform_regression", lambda: (
     __import__("qubox.verification.waveform_regression", fromlist=["run_all_checks"])
 ))
 
-# --- Analysis ---
-check("analysis (cQED_attributes)", lambda: (
-    __import__("qubox.analysis.cQED_attributes", fromlist=["cQED_attributes"])
+# --- Core metadata replacement ---
+check("core.device_metadata", lambda: (
+    __import__("qubox.core.device_metadata", fromlist=["DeviceMetadata"])
 ))
 
 # --- Summary ---

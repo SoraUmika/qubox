@@ -1,4 +1,3 @@
-# qubox_v2/calibration/algorithms.py
 """Calibration analysis algorithms — backward-compatibility re-exports.
 
 Canonical implementations have moved to

@@ -75,7 +75,7 @@ class sequenceMacros:
                 play(yn90, qb_el)  # Ry(-pi/2)
             elif axis == "y":
                 play(x90, qb_el)   # Rx(+pi/2) (your convention)
-            # align qubit with readout element timing like measureMacro does
+            # Align qubit and readout timing before the tagged pulse.
             align(qb_el, readout.element)
 
             # 2) Tag (ON) or Dummy (OFF) at the SAME frequency and SAME duration

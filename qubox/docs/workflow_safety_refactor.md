@@ -115,19 +115,19 @@ and pulse parameters.  Drift between `cQED_attributes` and
 
 ### Problem
 Measurement discrimination/quality parameters are scattered across
-`measureMacro` class-variables, `CalibrationStore` records, and
-`cQED_attributes` fields.  Mutation of the `measureMacro` singleton is a
-hidden side effect.
+session-scoped readout bindings, `CalibrationStore` records, and
+`cQED_attributes` fields. Hidden mutation of readout configuration was a
+source of order-dependent behavior.
 
 ### Changes
 
 | File | Change |
 |------|--------|
-| `core/measurement_config.py` (NEW) | Frozen `@dataclass MeasurementConfig` with all discrimination and quality parameters.  Factory methods: `from_calibration_store()`, `from_measure_macro_snapshot()`.  Reverse-direction: `apply_to_measure_macro()` (with `DeprecationWarning`).  `to_dict()` for serialisation. |
+| `core/measurement_config.py` (NEW) | Frozen `@dataclass MeasurementConfig` with all discrimination and quality parameters. Factory methods include `from_calibration_store()`, `from_readout_handle()`, and `from_dict()` for legacy payload loading. `to_dict()` provides explicit serialisation. |
 
 ### Migration
 - Build `MeasurementConfig` from the store at session start, then pass
-  it to experiments rather than relying on the `measureMacro` singleton.
+  it to experiments rather than relying on hidden global measurement state.
 
 ---
 

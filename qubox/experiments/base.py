@@ -37,7 +37,7 @@ from ..devices.device_manager import DeviceManager
 from ..core.device_metadata import DeviceMetadata
 from qubox_tools.data.containers import Output
 from qubox_tools.algorithms.post_selection import PostSelectionConfig
-from ..core.persistence_policy import split_output_for_persistence
+from ..core.persistence import split_output_for_persistence
 
 _logger = get_logger(__name__)
 

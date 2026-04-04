@@ -115,5 +115,15 @@ class Sequence:
             lines.append(operation.to_text_line(index=index))
         return "\n".join(lines) + "\n"
 
+    def to_control_program(
+        self,
+        *,
+        sweep: SweepPlan | None = None,
+        acquisition: AcquisitionSpec | None = None,
+    ) -> ControlProgram:
+        from ..control.adapters import sequence_to_control_program
+
+        return sequence_to_control_program(self, sweep=sweep, acquisition=acquisition)
+
     def inspect(self) -> str:
         return self.to_text()

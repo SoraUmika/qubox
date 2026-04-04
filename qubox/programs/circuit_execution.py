@@ -5,7 +5,8 @@ from typing import Any
 
 from ..core.logging import get_logger
 from ..experiments.result import ProgramBuildResult
-from .circuit_runner import QuantumCircuit, CircuitRunner
+from .circuit_compiler import CircuitCompiler
+from .circuit_ir import QuantumCircuit
 
 _logger = get_logger(__name__)
 
@@ -68,8 +69,8 @@ def run_compiled_circuit(
             f"Only {SAFE_OPX_CLUSTER!r} is allowed."
         )
 
-    compiler = CircuitRunner(session)
-    build = compiler.compile_program(circuit, n_shots=n_shots)
+    compiler = CircuitCompiler(session)
+    build = compiler.compile(circuit, n_shots=n_shots)
     diagram_text = circuit.to_diagram_text()
     cluster_candidates = _resolve_cluster_candidates(session)
     connection = {

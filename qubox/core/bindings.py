@@ -1,4 +1,3 @@
-# qubox_v2/core/bindings.py
 """Binding-driven API: physical channel identity + experiment bindings.
 
 This module replaces the implicit element-name coupling that previously
@@ -30,7 +29,7 @@ from __future__ import annotations
 
 import logging
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -141,8 +140,8 @@ class ReadoutBinding:
     Encapsulates everything ``measure_with_binding`` needs: the drive output,
     the acquisition input, and all DSP configuration.
 
-    The ``discrimination`` and ``quality`` dicts replace the class-level
-    ``measureMacro._ro_disc_params`` / ``_ro_quality_params`` singletons.
+    The ``discrimination`` and ``quality`` dicts hold the session-owned
+    readout DSP and quality state used at build and run time.
     """
 
     drive_out: OutputBinding
@@ -157,7 +156,7 @@ class ReadoutBinding:
         default_factory=lambda: [["cos", "sin"], ["minus_sin", "cos"]]
     )
 
-    # Discrimination / DSP state (replaces measureMacro class-level state)
+    # Discrimination / DSP state for explicit readout configuration
     discrimination: dict[str, Any] = field(default_factory=lambda: {
         "threshold": None,
         "angle": None,
@@ -192,12 +191,18 @@ class ReadoutBinding:
         """Canonical key for the drive output."""
         return self.drive_out.channel.canonical_id
 
-    def sync_from_calibration(self, cal_store: Any) -> None:
+    def sync_from_calibration(self, cal_store: Any, *, lookup_keys: tuple[str, ...] | list[str] | None = None) -> None:
         """Populate discrimination and quality dicts from a CalibrationStore.
 
         Direction: CalibrationStore → ReadoutBinding (never reverse).
         """
-        disc = cal_store.get_discrimination(self.physical_id)
+        disc = _lookup_calibration_entry(
+            cal_store,
+            "get_discrimination",
+            lookup_keys,
+            self.physical_id,
+            self.drive_channel_id,
+        )
         if disc is not None:
             dp = self.discrimination
             if disc.threshold is not None:
@@ -223,7 +228,13 @@ class ReadoutBinding:
             if hasattr(disc, "sigma_e") and disc.sigma_e is not None:
                 dp["sigma_e"] = float(disc.sigma_e)
 
-        quality_entry = cal_store.get_readout_quality(self.physical_id)
+        quality_entry = _lookup_calibration_entry(
+            cal_store,
+            "get_readout_quality",
+            lookup_keys,
+            self.physical_id,
+            self.drive_channel_id,
+        )
         if quality_entry is not None:
             qp = self.quality
             for key in ("alpha", "beta", "F", "Q", "V", "t01", "t10"):
@@ -297,6 +308,56 @@ def _tuple_matrix(
         return tuple(tuple(float(x) for x in row) for row in m)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_lookup_keys(*values: Any) -> tuple[str, ...]:
+    keys: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value is None:
+            continue
+        candidates = value if isinstance(value, (list, tuple, set)) else (value,)
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            key = str(candidate)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            keys.append(key)
+    return tuple(keys)
+
+
+def _lookup_calibration_entry(store: Any, getter_name: str, *keys: Any) -> Any:
+    getter = getattr(store, getter_name)
+    for key in _coerce_lookup_keys(*keys):
+        entry = getter(key)
+        if entry is not None:
+            return entry
+    return None
+
+
+def _weight_keys_from_demod_weight_sets(weight_sets: Any) -> tuple[str, ...]:
+    normalized: list[tuple[str, ...]] = []
+    for spec in weight_sets or ():
+        if isinstance(spec, str):
+            normalized.append((spec,))
+            continue
+        if isinstance(spec, (list, tuple)):
+            values = tuple(str(item) for item in spec if item is not None)
+            if values:
+                normalized.append(values)
+
+    if not normalized:
+        return ("cos", "sin", "minus_sin")
+
+    ordered: list[str] = []
+    for spec in normalized[:2]:
+        for item in spec:
+            if item not in ordered:
+                ordered.append(item)
+
+    return tuple(ordered or ("cos", "sin", "minus_sin"))
 
 
 @dataclass(frozen=True)
@@ -391,6 +452,9 @@ class ReadoutCal:
     # Quality metrics (set by ReadoutButterflyMeasurement)
     confusion_matrix: tuple[tuple[float, ...], ...] | None = None
     fidelity: float | None = None
+    fidelity_definition: str | None = None
+    sigma_g: float | None = None
+    sigma_e: float | None = None
 
     # Post-selection
     post_select_threshold: float | None = None
@@ -400,7 +464,7 @@ class ReadoutCal:
     def from_calibration_store(
         cls,
         store: Any,
-        channel_id: str,
+        channel_id: str | tuple[str, ...] | list[str],
         *,
         drive_freq: float,
     ) -> "ReadoutCal":
@@ -415,8 +479,13 @@ class ReadoutCal:
         drive_freq : float
             RF drive frequency in Hz.
         """
-        disc = store.get_discrimination(channel_id)
-        qual = store.get_readout_quality(channel_id)
+        disc = _lookup_calibration_entry(store, "get_discrimination", channel_id)
+        qual = _lookup_calibration_entry(store, "get_readout_quality", channel_id)
+        fidelity = getattr(qual, "fidelity", None) if qual else None
+        if fidelity is None and qual is not None:
+            fidelity = getattr(qual, "F", None)
+        if fidelity is None and disc is not None:
+            fidelity = getattr(disc, "fidelity", None)
         return cls(
             drive_frequency=drive_freq,
             threshold=getattr(disc, "threshold", None) if disc else None,
@@ -424,7 +493,10 @@ class ReadoutCal:
             confusion_matrix=_tuple_matrix(
                 getattr(qual, "confusion_matrix", None) if qual else None
             ),
-            fidelity=getattr(qual, "fidelity", None) if qual else None,
+            fidelity=fidelity,
+            fidelity_definition=getattr(disc, "fidelity_definition", None) if disc else None,
+            sigma_g=getattr(disc, "sigma_g", None) if disc else None,
+            sigma_e=getattr(disc, "sigma_e", None) if disc else None,
         )
 
     @classmethod
@@ -432,12 +504,24 @@ class ReadoutCal:
         """Extract calibration state from an existing ReadoutBinding."""
         disc = rb.discrimination or {}
         qual = rb.quality or {}
+        pulse_op = getattr(rb, "pulse_op", None)
+        weight_length = getattr(pulse_op, "length", None)
+        if weight_length is None:
+            weight_length = getattr(rb.acquire_in, "weight_length", None)
+        fidelity = disc.get("fidelity")
+        if fidelity is None:
+            fidelity = qual.get("fidelity") or qual.get("F")
         return cls(
             drive_frequency=rb.drive_frequency or 0.0,
+            weight_keys=_weight_keys_from_demod_weight_sets(rb.demod_weight_sets),
+            weight_length=weight_length,
             threshold=disc.get("threshold"),
             rotation_angle=disc.get("angle"),
             confusion_matrix=_tuple_matrix(qual.get("confusion_matrix")),
-            fidelity=qual.get("fidelity") or qual.get("F"),
+            fidelity=fidelity,
+            fidelity_definition=disc.get("fidelity_definition"),
+            sigma_g=disc.get("sigma_g"),
+            sigma_e=disc.get("sigma_e"),
         )
 
     def with_discrimination(
@@ -449,6 +533,28 @@ class ReadoutCal:
         """Return a new ReadoutCal with updated discrimination params."""
         from dataclasses import replace as _replace
         return _replace(self, threshold=threshold, rotation_angle=rotation_angle)
+
+
+def _merge_readout_cal(base: ReadoutCal, overlay: ReadoutCal, *, drive_frequency: float) -> ReadoutCal:
+    return replace(
+        base,
+        drive_frequency=float(drive_frequency),
+        threshold=overlay.threshold if overlay.threshold is not None else base.threshold,
+        rotation_angle=overlay.rotation_angle if overlay.rotation_angle is not None else base.rotation_angle,
+        confusion_matrix=overlay.confusion_matrix if overlay.confusion_matrix is not None else base.confusion_matrix,
+        fidelity=overlay.fidelity if overlay.fidelity is not None else base.fidelity,
+        fidelity_definition=(
+            overlay.fidelity_definition if overlay.fidelity_definition is not None else base.fidelity_definition
+        ),
+        sigma_g=overlay.sigma_g if overlay.sigma_g is not None else base.sigma_g,
+        sigma_e=overlay.sigma_e if overlay.sigma_e is not None else base.sigma_e,
+        post_select_threshold=(
+            overlay.post_select_threshold if overlay.post_select_threshold is not None else base.post_select_threshold
+        ),
+        post_select_max_retries=(
+            overlay.post_select_max_retries if overlay.post_select_max_retries is not None else base.post_select_max_retries
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -498,59 +604,6 @@ class ReadoutHandle:
     def threshold(self) -> float | None:
         """Discrimination threshold shortcut."""
         return self.cal.threshold
-
-    @classmethod
-    def from_measure_macro(cls) -> "ReadoutHandle":
-        """Build a ReadoutHandle from the current measureMacro singleton state.
-
-        This is the bridge that allows gradual migration: call this once
-        at the start of program building to capture the singleton state
-        into an immutable handle, then pass the handle to all builders.
-        """
-        from ..programs.macros.measure import measureMacro
-
-        # Build a minimal ReadoutBinding from singleton state
-        rb = ReadoutBinding(
-            drive_out=OutputBinding(
-                channel=ChannelRef("unknown", "RF_out", 0),
-            ),
-            acquire_in=InputBinding(
-                channel=ChannelRef("unknown", "RF_in", 0),
-            ),
-            pulse_op=measureMacro._pulse_op,
-            active_op=measureMacro._active_op,
-            demod_weight_sets=list(measureMacro._demod_weight_sets),
-            discrimination=dict(measureMacro._ro_disc_params),
-            quality=dict(measureMacro._ro_quality_params),
-            drive_frequency=measureMacro._drive_frequency,
-            gain=measureMacro._gain,
-        )
-
-        cal = ReadoutCal(
-            drive_frequency=measureMacro._drive_frequency or 0.0,
-            threshold=measureMacro._ro_disc_params.get("threshold"),
-            rotation_angle=measureMacro._ro_disc_params.get("angle"),
-            confusion_matrix=_tuple_matrix(
-                measureMacro._ro_quality_params.get("confusion_matrix")
-            ),
-            fidelity=measureMacro._ro_disc_params.get("fidelity"),
-        )
-
-        # Build weight sets tuple
-        weight_sets = tuple(
-            tuple(w) if isinstance(w, (list, tuple)) else (w,)
-            for w in measureMacro._demod_weight_sets
-        )
-
-        return cls(
-            binding=rb,
-            cal=cal,
-            element=measureMacro.active_element(),
-            operation=measureMacro.active_op(),
-            gain=measureMacro._gain,
-            demod_weight_sets=weight_sets,
-        )
-
 
 @dataclass(frozen=True)
 class ElementFreq:

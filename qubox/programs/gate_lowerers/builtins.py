@@ -77,6 +77,22 @@ class FrameUpdateLowerer:
         ctx._lower_frame_update(gate, targets=targets, resolved_params=resolved_params)
 
 
+class BarrierLowerer:
+    """Lowers ``align`` and ``barrier`` gates."""
+
+    def __call__(
+        self,
+        ctx: Any,
+        gate: Any,
+        *,
+        gate_index: int,
+        targets: tuple[str, ...],
+        measurements: dict[str, Any],
+        resolved_params: dict[str, Any],
+    ) -> None:
+        ctx._lower_barrier(gate, targets=targets, resolved_params=resolved_params)
+
+
 # ---------------------------------------------------------------------------
 # Play-pulse lowerer
 # ---------------------------------------------------------------------------
@@ -181,6 +197,7 @@ def build_default_registry() -> dict[str, Any]:
     measure = MeasurementLowerer()
     idle = IdleLowerer()
     frame = FrameUpdateLowerer()
+    barrier = BarrierLowerer()
     play = PlayPulseLowerer()
     rotation = QubitRotationLowerer()
     displacement = DisplacementLowerer()
@@ -191,6 +208,8 @@ def build_default_registry() -> dict[str, Any]:
         "measure_iq": measure,
         "idle": idle,
         "wait": idle,
+        "align": barrier,
+        "barrier": barrier,
         "frame_update": frame,
         "play": play,
         "play_pulse": play,

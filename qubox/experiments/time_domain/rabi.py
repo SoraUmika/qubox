@@ -15,8 +15,7 @@ from qubox_tools.algorithms.transforms import project_complex_to_line_real
 from ...hardware.program_runner import RunResult
 from ...programs import api as cQED_programs
 from ...programs.circuit_runner import CircuitRunner, make_power_rabi_circuit
-from ...programs.macros.measure import measureMacro
-from ...programs.measurement import try_build_readout_snapshot_from_macro
+from ...programs.measurement import build_readout_snapshot_from_handle
 from ...pulses.manager import MAX_AMPLITUDE
 
 
@@ -81,7 +80,7 @@ class TemporalRabi(ExperimentBase):
             bindings_snapshot=self._serialize_bindings(),
             builder_function="cQED_programs.temporal_rabi",
             sweep_axes={"pulse_durations": pulse_clks * 4},
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
         )
 
     def run(
@@ -306,7 +305,7 @@ class PowerRabi(ExperimentBase):
             bindings_snapshot=self._serialize_bindings(),
             builder_function=builder_function,
             sweep_axes={"gains": gains},
-            measure_macro_state=try_build_readout_snapshot_from_macro(),
+            readout_state=build_readout_snapshot_from_handle(self.readout_handle),
         )
 
     def run(

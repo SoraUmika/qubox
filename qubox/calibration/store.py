@@ -1,7 +1,6 @@
 """qubox.calibration.store — JSON-backed calibration data store.
 
-Migrated from ``qubox_v2_legacy.calibration.store``.  All qubox_v2_legacy
-imports have been replaced; this module depends only on the qubox package.
+This module depends only on the qubox package.
 
 Usage::
 

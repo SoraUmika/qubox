@@ -1,4 +1,3 @@
-# qubox_v2/verification/waveform_regression.py
 """Waveform generation determinism and regression tests.
 
 Tests that PulseFactory produces deterministic, correct waveforms for all
@@ -9,7 +8,7 @@ See docs/VERIFICATION_STRATEGY.md for the full specification.
 
 Usage
 -----
->>> from qubox_v2.verification.waveform_regression import run_all_checks
+>>> from qubox.verification.waveform_regression import run_all_checks
 >>> results = run_all_checks()
 >>> assert all(r.passed for r in results)
 """
