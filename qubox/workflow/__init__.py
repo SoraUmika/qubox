@@ -12,6 +12,7 @@ from .stages import (
     WorkflowConfig,
     build_workflow_config,
     get_stage_checkpoint_path,
+    load_legacy_reference,
     load_stage_checkpoint,
     save_stage_checkpoint,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "fit_center_inside_window",
     "fit_quality_gate",
     "get_stage_checkpoint_path",
+    "load_legacy_reference",
     "load_stage_checkpoint",
     "preview_or_apply_patch_ops",
     "save_stage_checkpoint",

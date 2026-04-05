@@ -1,30 +1,17 @@
 from __future__ import annotations
-"""config_builder.py
+"""Typed helper classes for building QM configuration dictionaries.
 
-Typed helper classes and a fluent ``ConfigBuilder`` to assemble Quantumâ€‘Machines
-configuration dictionaries in code, *then* dump / load them to JSON.
-
-This file is fully selfâ€‘contained; no external project imports are required.
-
-Features:
-  â€¢ Build a config programmatically via fluent API or minimal factory.
-  â€¢ Call ``builder.to_json(path)`` / ``ConfigBuilder.from_json(path)``.
-  â€¢ Call ``builder.to_dict()`` to hand straight to QuantumMachinesManager.
-  â€¢ Roundâ€‘trip JSON validation (minimal and real configs).
-
-Usage:
-  python config_builder.py [config.json]
-
-If no argument is given, exercises the minimal example.
+``ConfigBuilder`` is a compatibility utility for assembling Quantum Machines
+configuration payloads in code and serializing them to JSON or split source
+files. It is not part of the main qubox runtime path, but it is still kept as
+an importable helper for older tooling and ad hoc configuration generation.
 """
 
-import json
-from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Optional, Literal, Any
 import importlib.util
 import json
-import yaml
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 
 __all__ = [
@@ -40,7 +27,7 @@ class ConfigSettings:
     TIME_PER_CLOCK_CYCLE = 4
 
 # -----------------------------------------------------------------------------
-# â”€â”€â”€ Dataclasses for the domain model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Dataclasses for the domain model
 # -----------------------------------------------------------------------------
 
 @dataclass
@@ -134,17 +121,13 @@ class OctavePort:
                              "RF_inputs": self.rf_inputs,
                              "connectivity": self.connectivity}}
 
-def _import_module_from_path(path: Path):
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    mod  = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
 # -----------------------------------------------------------------------------
-# â”€â”€â”€ ConfigBuilder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ConfigBuilder
 # -----------------------------------------------------------------------------
 
 class ConfigBuilder:
+    """Compatibility builder for QM configuration payloads."""
+
     _VERSION = 1
 
     def __init__(self):
@@ -158,7 +141,7 @@ class ConfigBuilder:
 
     @classmethod
     def minimal_config(cls) -> ConfigBuilder:
-        """Factory: returns a builder preâ€‘populated with the minimal example."""
+        """Return a builder pre-populated with a minimal resonator example."""
         b = cls()
         # controller & octave
         b.add_controller(Controller("con1", {1: {"offset": 0.0}, 2: {"offset": 0.0}}, {1: {}}, {1: {"offset": 0.0}}))
@@ -235,7 +218,8 @@ class ConfigBuilder:
         return self
 
     def to_dict(self) -> Dict[str,Any]:
-        cfg: Dict[str,Any] = {"version": self._VERSION}
+        """Return a live QM config payload, omitting the deprecated top-level version field."""
+        cfg: Dict[str,Any] = {}
         cfg["controllers"] = {};
         cfg["octaves"] = {};
         for c in self.controllers.values(): cfg["controllers"].update(c.as_dict())
@@ -252,10 +236,6 @@ class ConfigBuilder:
 
     def pprint(self) -> None:
         import pprint; pprint.pp(self.to_dict(), sort_dicts=False)
-
-    def to_json(self, path: str, **kw) -> None:
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(self.to_dict(), f, indent=4, **kw)
 
     def to_split_sources(
         self,
@@ -366,7 +346,7 @@ class ConfigBuilder:
 
         # elements
         for name, el in hw.get("elements", {}).items():
-            # numeric-string â†’ int for digitalInputs keys; leave others
+            # numeric-string -> int for digitalInputs keys; leave others
             digital_inputs = coerce_numeric_keys(el.get("digitalInputs", {}))
 
             # ensure all RF port channels are ints
@@ -391,7 +371,7 @@ class ConfigBuilder:
 
         # --- load pulses.py module ---
         spec = importlib.util.spec_from_file_location("pulses", Path(pulses_py_path))
-        mod  = importlib.util.module_from_spec(spec)
+        mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
         for nm, wf in getattr(mod, "WAVEFORMS", {}).items():
@@ -420,9 +400,6 @@ class ConfigBuilder:
                 b.map_operation(el_n, op, pulse)
 
         return b
-
-    
-    # Keep original to_json for backward compatibility
     def to_json(self, path: str, **kw) -> None:
         """Dump the full combined config to a single JSON file."""
         with open(path, 'w', encoding='utf-8') as f:
@@ -484,19 +461,5 @@ class ConfigBuilder:
 
         # restore any digital waveforms override
         b.digital_waveforms = d.get("digital_waveforms", b.digital_waveforms)
-        # *** missing return ***
         return b
-
-
-
-if __name__ == "__main__":
-
-    from qm.qua import *
-    from qm.octave import *
-    from qm import QuantumMachinesManager
-
-    builder = ConfigBuilder.from_json("data/seq_1_device/config.json")
-    config_dict = builder.to_dict()
-    qmm = QuantumMachinesManager(host="10.157.36.68", cluster_name="Cluster_2", octave_calibration_db_path="./")
-    qm = qmm.open_qm(config_dict)
 

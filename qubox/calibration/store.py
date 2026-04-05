@@ -142,7 +142,17 @@ class CalibrationStore:
         if self._path.exists():
             _logger.info("Loading calibration from %s", self._path)
             with open(self._path, "r", encoding="utf-8") as f:
-                raw = json.load(f)
+                try:
+                    raw = json.load(f)
+                except json.JSONDecodeError as e:
+                    raise ValueError(
+                        f"Malformed calibration JSON at {self._path}: {e}"
+                    ) from e
+            if not isinstance(raw, dict):
+                raise ValueError(
+                    f"Calibration file {self._path} must contain a JSON object, "
+                    f"got {type(raw).__name__}"
+                )
             version_str = str(raw.get("version", ""))
             if version_str not in _SUPPORTED_CALIBRATION_VERSIONS:
                 raise ValueError(

@@ -116,6 +116,13 @@ def _prog_flag(prog, name: str, default=None):
     return getattr(prog, name, default)
 
 
+def _format_runtime_errors(stage: str, errors: list[str]) -> str:
+    preview = "; ".join(errors[:3])
+    if len(errors) > 3:
+        preview = f"{preview}; ... ({len(errors)} total)"
+    return f"{stage} failed: {preview}"
+
+
 class ProgramRunner:
     """
     Execute or simulate QUA programs.
@@ -197,6 +204,7 @@ class ProgramRunner:
         use_queue: bool = False,
         queue_to_start: bool = False,
         queue_only: bool = False,
+        allow_partial_results: bool = False,
         timeout_sec: float | None = None,
         **kwargs,
     ) -> RunResult:
@@ -226,6 +234,7 @@ class ProgramRunner:
         out = Output()
         sim_samples = None
         pending = None
+        fetch_errors: list[str] = []
 
         try:
             with self._pump_on():
@@ -274,6 +283,7 @@ class ProgramRunner:
                     try:
                         out[name] = handle.fetch_all()
                     except Exception as e:
+                        fetch_errors.append(f"handle={name!r}: {e}")
                         _logger.error("Fetch failed for handle '%s': %s", name, e)
 
         finally:
@@ -281,14 +291,22 @@ class ProgramRunner:
                 with contextlib.suppress(Exception):
                     self.halt_job()
 
+        if fetch_errors and not allow_partial_results:
+            raise JobError(_format_runtime_errors("Result fetch", fetch_errors))
+
         # Processing
         procs = processors or self.processors
+        processor_errors: list[str] = []
         if procs:
             for proc in procs:
                 try:
                     out = proc(out, **kwargs)
                 except Exception as e:
+                    processor_errors.append(f"processor={getattr(proc, '__name__', repr(proc))}: {e}")
                     _logger.error("Processor %s failed: %s", getattr(proc, "__name__", repr(proc)), e)
+
+        if processor_errors and not allow_partial_results:
+            raise JobError(_format_runtime_errors("Post-processing", processor_errors))
 
         meta = {"n_total": int(n_total)}
         if use_queue:
@@ -298,6 +316,12 @@ class ProgramRunner:
                 "time_added": getattr(pending, "time_added", None) if pending else None,
                 "user_added": getattr(pending, "user_added", None) if pending else None,
             })
+        if fetch_errors:
+            meta["fetch_errors"] = list(fetch_errors)
+        if processor_errors:
+            meta["processor_errors"] = list(processor_errors)
+        if allow_partial_results:
+            meta["allow_partial_results"] = True
         return RunResult(mode=ExecMode.HARDWARE, output=out, sim_samples=sim_samples, metadata=meta)
 
     def halt_job(self) -> None:
@@ -630,9 +654,10 @@ class ProgramRunner:
         except Exception:
             return 0
 
-    def _collect_output_from_job(self, job, *, print_report: bool):
+    def _collect_output_from_job(self, job, *, print_report: bool, allow_partial_results: bool = False):
         from qubox_tools.data.containers import Output
         out = Output()
+        fetch_errors: list[str] = []
         if print_report:
             with contextlib.suppress(Exception):
                 report = job.execution_report()
@@ -642,5 +667,8 @@ class ProgramRunner:
             try:
                 out[name] = handle.fetch_all()
             except Exception as e:
+                fetch_errors.append(f"handle={name!r}: {e}")
                 _logger.error("Fetch failed for handle '%s': %s", name, e)
+        if fetch_errors and not allow_partial_results:
+            raise JobError(_format_runtime_errors("Result fetch", fetch_errors))
         return out

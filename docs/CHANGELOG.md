@@ -31,6 +31,380 @@ Each entry must include:
 
 ## Entries
 
+### 2026-04-05 — Final Hardening Follow-Up: Public JSON Loaders
+
+**Classification: Moderate**
+
+**Summary:**
+
+Completed one more targeted hardening pass after the broader robustness sweep.
+
+1. **`qubox/hardware/config_engine.py`**: Fixed the malformed constructor type hint
+  for `hardware_extras_keys` to `set[str] | None`.
+2. **`qubox/notebook/runtime.py`**: Hardened notebook bootstrap loading so malformed
+  JSON raises a file-specific `ValueError` and non-object payloads are rejected.
+3. **`qubox/workflow/stages.py`**: Hardened both `load_legacy_reference()` and
+  `load_stage_checkpoint()` with explicit `JSONDecodeError` handling and JSON-object
+  validation.
+4. **`qubox/devices/registry.py`**: Hardened `load_sample_info()` so corrupted
+  `sample.json` files raise clear, path-specific errors instead of raw decode failures.
+
+**Files affected:**
+- `qubox/hardware/config_engine.py`
+- `qubox/notebook/runtime.py`
+- `qubox/workflow/stages.py`
+- `qubox/devices/registry.py`
+
+---
+
+### 2026-04-05 — Robustness Hardening: JSON Safety, Session Guard, Type Modernization
+
+**Classification: Moderate**
+
+**Summary:**
+
+Final extensive pass for inconsistencies and robustness improvements across the codebase.
+
+1. **`qubox/calibration/store.py`**: Wrapped `json.load()` in `_load_or_create()` with
+   `try/except json.JSONDecodeError` and added `isinstance(raw, dict)` check. Malformed
+   calibration files now raise a clear `ValueError` instead of crashing with `AttributeError`.
+2. **`qubox/calibration/patch_rules.py`**: Replaced bare `except Exception: pass` in
+   `build_default_rules()` with `except Exception:` that logs at DEBUG level with
+   `exc_info=True`. Added `logging` import and module-level `_logger`.
+3. **`qubox/core/hardware_definition.py`**: Narrowed two bare `except Exception:` blocks
+   in `seed_cqed_params()` and `save_devices()` merge paths to
+   `except (json.JSONDecodeError, OSError)` with `_logger.warning()`.
+4. **`qubox/core/config.py`**: Wrapped `json.loads()` in `HardwareConfig.from_json()` with
+   `try/except json.JSONDecodeError`, raising `ValueError` with file path context.
+5. **`qubox/hardware/config_engine.py`**: Wrapped `json.loads()` in
+   `_load_hardware()` with `try/except json.JSONDecodeError` raising `ValueError`.
+   Modernized type annotations: `Optional[X]` → `X | None`, `Dict[K,V]` → `dict[K,V]`,
+   `Set[X]` → `set[X]`.
+6. **`qubox/hardware/controller.py`**: Modernized all type annotations from
+   `Optional[Union[X, Y]]` / `Dict[K,V]` / `List[X]` to PEP 604/585 syntax (`X | Y | None`,
+   `dict[K,V]`, `list[X]`). Removed unused `Dict`, `List`, `Optional`, `Union` imports.
+7. **`qubox/session/session.py`**: Added use-after-close guard. Session now tracks `_closed`
+   flag; `close()` sets it; all hardware-accessing properties (`backend`, `hardware`,
+   `config_engine`, `calibration`, `pulse_mgr`, `runner`, `devices`, `orchestrator`,
+   `simulation_mode`) and `connect()` raise `RuntimeError` if accessed after close.
+
+**Files affected:**
+- `qubox/calibration/store.py`
+- `qubox/calibration/patch_rules.py`
+- `qubox/core/hardware_definition.py`
+- `qubox/core/config.py`
+- `qubox/hardware/config_engine.py`
+- `qubox/hardware/controller.py`
+- `qubox/session/session.py`
+
+---
+
+### 2026-04-05 — Codebase Consistency And Safety Hardening Pass
+
+**Classification: Moderate**
+
+**Summary:**
+
+Fixed inconsistencies and safety issues identified by a full codebase audit:
+
+1. **`qubox/core/logging.py`**: Added missing `from __future__ import annotations`;
+   replaced `Union[int, str]` with `int | str`; removed unused `typing` imports.
+2. **`qubox/experiments/cavity/fock.py`**: Fixed 3 error messages referencing removed
+   `qubox_v2.tools.generators` → `qubox.tools.generators`.
+3. **`qubox/hardware/controller.py`**: Replaced 2 bare `suppress(Exception)` blocks in
+   `close()` and calibration error path with explicit `try/except` that logs warnings.
+   Prevents silent hardware-state errors during shutdown.
+4. **`tools/build_context_notebook.py`**: Replaced `eval(name)` with safe `locals().get()`
+   registry lookup for calibration state machine collection.
+5. **`qubox_lab_mcp/server.py`**: Added warning log when MCP HTTP server binds to
+   non-loopback address.
+
+**Files affected:**
+- `qubox/core/logging.py`
+- `qubox/experiments/cavity/fock.py`
+- `qubox/hardware/controller.py`
+- `tools/build_context_notebook.py`
+- `qubox_lab_mcp/server.py`
+
+---
+
+### 2026-04-05 — Documentation Sync: API Reference And Site Docs
+
+**Classification: Minor**
+
+**Summary:**
+
+Updated API_REFERENCE.md and site_docs/ to match the current repository state
+after the recent cleanup sessions:
+
+1. **API_REFERENCE.md**: Updated `notebook.workflow` description from "compatibility wrapper"
+   to "re-exports portable primitives and adds shared-session notebook helpers". Updated date.
+2. **site_docs/guides/migration.md**: Corrected guidance that directed users to non-existent
+   `qubox.legacy.*` imports. Updated overview and breaking-changes table to reflect both
+   `qubox_v2_legacy` and `qubox.legacy` are fully removed.
+3. **site_docs/guides/index.md**: Changed migration guide description from referencing
+   `qubox_v2_legacy` to "legacy codebases".
+4. **site_docs/api/notebook.md**: Replaced fabricated function names (`nb_save_checkpoint`,
+   `nb_fit_gate`, `nb_preview_patch`) with actual exports from `qubox.notebook.workflow`.
+5. **site_docs/api/session.md**: Fixed experiment domain table — replaced non-existent
+   `session.exp.cavity` and `session.exp.spa` with actual accessors (`readout`, `storage`, `reset`).
+6. **site_docs/api/experiments/spa.md**: Added note that SPA experiments are standalone classes,
+   not yet exposed through `session.exp`.
+7. **site_docs/changelog.md**: Added entries for the April 2026 cleanup and hardening work.
+
+**Files affected:**
+- `API_REFERENCE.md`
+- `site_docs/guides/migration.md`
+- `site_docs/guides/index.md`
+- `site_docs/api/notebook.md`
+- `site_docs/api/session.md`
+- `site_docs/api/experiments/spa.md`
+- `site_docs/changelog.md`
+
+---
+
+### 2026-04-05 — Repository Naming And Guidance Cleanup
+
+**Classification: Minor**
+
+**Summary:**
+
+Cleaned up stale naming, misleading guidance, and undated compatibility paths across the repository:
+
+1. **Agent instruction files** (`.cursorrules`, `.clinerules`, `.windsurfrules`): Replaced stale guidance directing agents to non-existent `qubox/legacy/` and `qubox.legacy.*` imports with correct "do not exist" messaging. Fixed Python version from `3.12.13` to `3.12.10`.
+2. **Module docstrings**: Updated 13 source files that still had `qubox_v2.*` module docstrings and usage examples to use correct `qubox.*` paths.
+3. **Notebook workflow**: Replaced misleading `.. deprecated::` directive in `qubox/notebook/workflow.py` with a `.. note::` directive — the module is the active notebook workflow surface, not deprecated.
+4. **Temporary compatibility paths**: Added `(added 2026-03)` date stamps to undated `allow_default_state_prep` compatibility paths in `qubox/experiments/cavity/fock.py` and `storage.py`.
+5. **Logger mapping**: Added dated comment and removal guidance to the `qubox_v2.*` logger name mapping in `qubox/core/logging.py`.
+
+**Files affected:**
+- `.cursorrules`, `.clinerules`, `.windsurfrules`
+- `qubox/programs/spectroscopy.py`, `readout.py`, `calibration.py`, `cavity.py`, `time_domain.py`, `tomography.py`
+- `qubox/programs/builders/__init__.py`
+- `qubox/experiments/experiment_base.py`, `result.py`, `configs.py`
+- `qubox/calibration/algorithms.py`, `pulse_train_tomo.py`
+- `qubox/core/hardware_definition.py`, `logging.py`
+- `qubox/notebook/workflow.py`
+- `qubox/experiments/cavity/fock.py`, `storage.py`
+
+---
+
+### 2026-04-05 — Stop Tracking Generated Docs And Validation Outputs
+
+**Classification: Minor**
+
+**Summary:**
+
+Stopped tracking two generated outputs that were creating routine repository
+noise: the built MkDocs HTML tree under `site/` and the local hosted-simulator
+report at `tools/simulation_validation_report.json`. Both outputs remain
+regenerable locally, but they are now treated as disposable artifacts instead
+of source-controlled content.
+
+**Files affected:**
+
+- `.gitignore`
+- `docs/CHANGELOG.md`
+- `site/`
+- `tools/simulation_validation_report.json`
+
+### 2026-04-05 — Trim Repository Hygiene Noise
+
+**Classification: Minor**
+
+**Summary:**
+
+Reduced several remaining repository-noise hotspots by cleaning the legacy
+`ConfigBuilder` compatibility module header/import clutter, exporting
+`load_legacy_reference()` on the canonical `qubox.workflow` surface so the
+portable workflow API is more self-contained, moving the one-off import-surface
+verification script out of the repo root into `tools/`, and dropping clearly
+generated local artifacts from version control (`test_output.txt` and
+`qubox.egg-info/`).
+
+**Files affected:**
+
+- `.gitignore`
+- `API_REFERENCE.md`
+- `qubox/experiments/config_builder.py`
+- `qubox/workflow/__init__.py`
+- `tests/test_qubox_public_api.py`
+- `tools/validate_import_surface.py`
+- `docs/CHANGELOG.md`
+
+### 2026-04-04 — Remove Repo-Owned Deprecation Emitters
+
+**Classification: Moderate**
+
+**Summary:**
+
+Removed the deprecated top-level `version` field from the live QM config paths
+so qubox no longer feeds a deprecated QUA config key into the QM SDK, turned
+`CircuitRunner.compile()` into a supported compatibility shim instead of a
+runtime `DeprecationWarning`, and promoted the legacy `arbitrary_blob` pulse
+shape to a supported compatibility format by removing its deprecation warning.
+Added regression tests covering the config-engine path, the legacy
+`ConfigBuilder` path, and the pulse-factory compatibility case.
+
+**Files affected:**
+
+- `qubox/hardware/config_engine.py`
+- `qubox/experiments/config_builder.py`
+- `qubox/programs/circuit_runner.py`
+- `qubox/pulses/factory.py`
+- `qubox/tests/test_parameter_resolution_policy.py`
+- `tests/test_connection_policy.py`
+- `docs/CHANGELOG.md`
+
+### 2026-04-04 — Clean Up Test And Validation Warning Noise
+
+**Classification: Minor**
+
+**Summary:**
+
+Removed warning noise from the broad validation loop by fixing the custom
+module-loading helpers used in refactor-safety tests so they no longer trigger
+import-spec deprecation warnings, making the legacy `CircuitRunner.compile()`
+warning explicit in its regression test, suppressing the non-fatal covariance
+warning in `fit_number_splitting()` when the fit still succeeds, and filtering
+known third-party QM/Marshmallow deprecations in pytest and the hosted
+standard-experiment simulator validation tool.
+
+**Files affected:**
+
+- `qubox/tests/test_workflow_safety_refactor.py`
+- `qubox/tests/test_calibration_fixes.py`
+- `qubox/tests/test_parameter_resolution_policy.py`
+- `qubox_tools/fitting/calibration.py`
+- `pyproject.toml`
+- `tools/validate_standard_experiments_simulation.py`
+- `docs/CHANGELOG.md`
+
+### 2026-04-04 — Restore Notebook Compatibility Tests And Trim AllXY Validation Cost
+
+**Classification: Moderate**
+
+**Summary:**
+
+Reconciled notebook compatibility drift by letting notebook runtime helpers
+accept both the modern `session.hardware` surface and the older `session.hw`
+alias, updated the notebook workflow tests to patch the portable workflow
+modules they now wrap, replaced a stale hardcoded adapter-registry count check
+with an assertion against the required standard-template set, and reduced the
+standard simulator validation cost for `calibration.all_xy` to a small
+representative subset so the trust gate stays aligned with the repo's quick
+validation policy.
+
+**Files affected:**
+
+- `qubox/notebook/runtime.py`
+- `tests/test_notebook_workflow.py`
+- `tests/test_standard_experiments.py`
+- `tools/validate_standard_experiments_simulation.py`
+- `docs/CHANGELOG.md`
+
+### 2026-04-04 — Add Bounded QM Reachability Preflight Before Open
+
+**Classification: Moderate**
+
+**Summary:**
+
+Added a bounded TCP reachability preflight to `HardwareController.open_qm()`
+using the QM manager's resolved host and port before attempting the live
+`open_qm` RPC. This prevents the controller from entering the slower QM open
+path when the endpoint is already unreachable and turns that case into an
+immediate `ConnectionError` with the target endpoint in the message.
+
+**Files affected:**
+
+- `qubox/hardware/controller.py`
+- `tests/test_connection_policy.py`
+- `docs/CHANGELOG.md`
+
+### 2026-04-04 — Consolidate Preflight Checks And Harden Session Teardown
+
+**Classification: Moderate**
+
+**Summary:**
+
+Removed the duplicated standalone `qubox.preflight` implementation so the
+public import path now re-exports the single `qubox.core.preflight`
+implementation, preventing future safety-check drift. Also hardened
+`SessionManager.close()` so shutdown keeps attempting later persistence steps
+after an earlier save failure and records a structured teardown report instead
+of leaving calibration save as the lone unguarded step.
+
+**Files affected:**
+
+- `qubox/experiments/session.py`
+- `qubox/preflight.py`
+- `tests/test_connection_policy.py`
+- `docs/CHANGELOG.md`
+
+### 2026-04-04 — Harden Runtime Failure Handling And Patch Validation
+
+**Classification: Moderate**
+
+**Summary:**
+
+Hardened several runtime and calibration safety paths that previously allowed
+silent or partially applied failures. `ProgramRunner` and `QueueManager` now
+fail closed on result-fetch and processor errors unless partial results are
+explicitly allowed, compiled-circuit execution now routes through the canonical
+session runner and the repository-standard `Cluster_2` flow, calibration patch
+preview/apply now validates patch operations before mutation and rejects
+unknown ops, `ExperimentRunner.run()` no longer accepts ignored simulation-mode
+flags, and the persistence verifier no longer enables pickle when reading `.npz`
+artifacts.
+
+**Files affected:**
+
+- `qubox/hardware/program_runner.py`
+- `qubox/hardware/queue_manager.py`
+- `qubox/programs/circuit_execution.py`
+- `qubox/calibration/orchestrator.py`
+- `qubox/experiments/base.py`
+- `qubox/verification/persistence_verifier.py`
+- `tests/gate_architecture/conftest.py`
+- `tests/gate_architecture/test_gate_architecture.py`
+- `tests/test_connection_policy.py`
+- `qubox/tests/test_calibration_fixes.py`
+- `docs/CHANGELOG.md`
+
+### 2026-04-04 — Harden Session Host Resolution And Reconcile Architecture Docs
+
+**Classification: Moderate**
+
+**Summary:**
+
+Removed the unsafe implicit `localhost` fallback from the session bootstrap
+path so both `SessionManager` and `ExperimentRunner` now require a QOP host
+either explicitly or via persisted `hardware.json` extras. Reduced core-layer
+type coupling by switching the internal artifacts and preflight helpers to the
+shared `SessionProtocol`, cleaned central runtime docstrings and autotune
+journal `code_path` metadata to use the current `qubox.*` namespace, and
+updated the architecture/API docs to match the live package layout and
+simulation-mode behavior.
+
+**Files affected:**
+
+- `qubox/core/utils.py`
+- `qubox/experiments/session.py`
+- `qubox/experiments/base.py`
+- `qubox/core/artifacts.py`
+- `qubox/core/preflight.py`
+- `qubox/artifacts.py`
+- `qubox/preflight.py`
+- `qubox/autotune/run_post_cavity_autotune_v1_1.py`
+- `README.md`
+- `API_REFERENCE.md`
+- `site_docs/architecture/package-map.md`
+- `site_docs/architecture/execution-flow.md`
+- `qubox/docs/API_REFERENCE.md`
+- `qubox/docs/ARCHITECTURE.md`
+- `docs/CHANGELOG.md`
+- `tests/test_connection_policy.py`
+
 ### 2026-04-04 — Documentation Cleanup Pass
 
 **Classification: Minor**

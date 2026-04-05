@@ -5,6 +5,9 @@ from pathlib import Path
 import numpy as np
 
 from qubox.notebook import workflow as notebook_workflow
+from qubox.workflow import calibration_helpers as workflow_calibration_helpers
+from qubox.workflow import pulse_seeding as workflow_pulse_seeding
+from qubox.workflow import stages as workflow_stages
 
 
 class FakeRegistry:
@@ -16,7 +19,7 @@ class FakeRegistry:
 
 
 def test_save_stage_checkpoint_serializes_numpy_scalars(monkeypatch, tmp_path):
-    monkeypatch.setattr(notebook_workflow, "SampleRegistry", FakeRegistry)
+    monkeypatch.setattr(workflow_stages, "SampleRegistry", FakeRegistry)
 
     path = notebook_workflow.save_stage_checkpoint(
         registry_base=tmp_path,
@@ -57,7 +60,7 @@ def test_preview_or_apply_patch_ops_calls_orchestrator(monkeypatch):
                 "sync_ok": True,
             }
 
-    monkeypatch.setattr(notebook_workflow, "CalibrationOrchestrator", FakeOrchestrator)
+    monkeypatch.setattr(workflow_calibration_helpers, "CalibrationOrchestrator", FakeOrchestrator)
 
     patch, preview, apply_result = notebook_workflow.preview_or_apply_patch_ops(
         object(),
@@ -99,9 +102,13 @@ def test_ensure_primitive_rotations_registers_missing_ops(monkeypatch):
         def burn_pulses(self, include_volatile=True):
             self.burn_calls.append(include_volatile)
 
-    monkeypatch.setattr(notebook_workflow, "drag_gaussian_pulse_waveforms", lambda **_kwargs: ([0.1, 0.2], [0.0, 0.0]))
     monkeypatch.setattr(
-        notebook_workflow,
+        workflow_pulse_seeding,
+        "drag_gaussian_pulse_waveforms",
+        lambda **_kwargs: ([0.1, 0.2], [0.0, 0.0]),
+    )
+    monkeypatch.setattr(
+        workflow_pulse_seeding,
         "register_rotations_from_ref_iq",
         lambda *_args, **_kwargs: ["ref_r180", "x180", "x90"],
     )

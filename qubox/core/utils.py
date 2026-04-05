@@ -7,7 +7,7 @@ import contextlib
 import json
 import time
 from copy import deepcopy
-from typing import Any, Callable, Dict, Set
+from typing import Any, Callable, Dict, Mapping, Set
 
 import numpy as np
 
@@ -82,6 +82,23 @@ def require(cond: bool, msg: str, exc_type: type = RuntimeError) -> None:
     """Compact guard: raise *exc_type(msg)* if *cond* is False."""
     if not cond:
         raise exc_type(msg)
+
+
+def resolve_qop_host(explicit_host: str | None, hardware_extras: Mapping[str, Any] | None) -> str | None:
+    """Return the configured QOP host or ``None`` if no host is configured."""
+    if explicit_host is not None:
+        host_text = str(explicit_host).strip()
+        if host_text:
+            return host_text
+
+    if isinstance(hardware_extras, Mapping):
+        configured = hardware_extras.get("qop_ip")
+        if configured is not None:
+            host_text = str(configured).strip()
+            if host_text:
+                return host_text
+
+    return None
 
 
 # ---------------------------------------------------------------------------

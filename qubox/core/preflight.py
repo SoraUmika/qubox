@@ -1,5 +1,5 @@
-"""qubox_v2.core.preflight
-===========================
+"""qubox.core.preflight
+======================
 Pre-flight validation for experiment sessions.
 
 Call ``preflight_check(session)`` after ``session.open()`` and before
@@ -7,20 +7,29 @@ running experiments to catch common configuration problems early.
 
 Example::
 
-    with SessionManager("./cooldown", qop_ip="10.0.0.1") as session:
+    session = Session.open(
+        sample_id="sampleA",
+        cooldown_id="cd_2026_04",
+        registry_base="E:/qubox",
+        qop_ip="10.157.36.68",
+        cluster_name="Cluster_2",
+        simulation_mode=False,
+    )
+    try:
         report = preflight_check(session)
         if not report["all_ok"]:
             for err in report["errors"]:
                 print("PREFLIGHT FAIL:", err)
+    finally:
+        session.close()
 """
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from ..experiments.session import SessionManager
+from .protocols import SessionProtocol
 
 _logger = logging.getLogger(__name__)
 
@@ -31,7 +40,7 @@ _BASELINE_OPS = ("const",)
 
 
 def preflight_check(
-    session: "SessionManager",
+    session: SessionProtocol,
     *,
     require_elements: list[str] | None = None,
     require_ops: dict[str, list[str]] | None = None,
@@ -44,8 +53,8 @@ def preflight_check(
 
     Parameters
     ----------
-    session : SessionManager
-        An already-opened session.
+    session : SessionProtocol
+        An already-opened session exposing the standard qubox session surface.
     require_elements : list[str], optional
         Elements that MUST exist in the QM config.  Defaults to
         ``["qubit", "readout"]``.

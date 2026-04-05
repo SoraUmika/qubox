@@ -1,7 +1,7 @@
 # qubox API Reference
 
 **Version:** 3.0.0  
-**Date:** 2026-04-04  
+**Date:** 2026-04-05  
 **Status:** Reconciled to the live repository state
 
 This document is the canonical API reference for the active `qubox` package.
@@ -63,7 +63,6 @@ Notes on the live layout:
 - `SampleRegistry` lives in `qubox.devices.registry` (re-exported by `qubox.devices`).
 - `ExperimentContext` lives in `qubox.core.experiment_context`.
 - `SessionState` lives in `qubox.core.session_state`.
-- `qubox/gui/` and `qubox/migration/` are empty directory stubs with no code.
 
 ---
 
@@ -109,6 +108,9 @@ Key parameters:
 Current behavior:
 
 - `simulation_mode` defaults to `True`.
+- `Session.open(...)` requires a QOP host either via the explicit `qop_ip`
+  argument or via persisted `hardware.json` extras; it will not silently fall
+  back to `localhost`.
 - In simulation mode, the QMM connection is still established.
 - Real hardware execution is intentionally blocked in simulation mode.
 - `connect=False` defers `SessionManager.open()`.
@@ -374,12 +376,17 @@ notebooks and automation:
 - `WorkflowConfig`
 - `build_workflow_config(...)`
 - `get_stage_checkpoint_path(...)`
+- `load_legacy_reference(...)`
 - `load_stage_checkpoint(...)`
 - `save_stage_checkpoint(...)`
 - `preview_or_apply_patch_ops(...)`
 - `fit_center_inside_window(...)`
 - `fit_quality_gate(...)`
 - `ensure_primitive_rotations(...)`
+
+`qubox.notebook.workflow` re-exports these portable primitives and adds
+shared-session notebook helpers (see `NotebookWorkflowConfig`,
+`open_notebook_stage`).
 
 ### 8.2 `session.workflow`
 

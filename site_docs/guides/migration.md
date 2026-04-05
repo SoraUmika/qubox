@@ -4,20 +4,20 @@ Migrating from the legacy `qubox_v2_legacy` codebase to qubox v3.
 
 ## Overview
 
-qubox v3 replaces the legacy `qubox_v2_legacy` package with a restructured, modular
-architecture. The migration is incremental — one experiment at a time.
+qubox v3 replaced the legacy `qubox_v2_legacy` package with a restructured, modular
+architecture. Both `qubox_v2_legacy` and `qubox.legacy` have been fully removed.
+All code now lives under `qubox`, `qubox_tools`, or `qubox_lab_mcp`.
 
 ## Import Changes
 
 ### Package Rename
 
 ```python
-# OLD — do not use
-from qubox_v2_legacy.experiments import QubitSpectroscopy
+# OLD — do not use (both packages have been removed)
+# from qubox_v2_legacy.experiments import QubitSpectroscopy
+# from qubox.legacy.experiments import QubitSpectroscopy
 
-# NEW
-from qubox.legacy.experiments import QubitSpectroscopy
-# or via the public API
+# CURRENT — use the canonical qubox surface
 from qubox.experiments import QubitSpectroscopy
 ```
 
@@ -106,7 +106,8 @@ from qubox.workflow import save_stage_checkpoint
 
 | Change | Action Required |
 |--------|----------------|
-| `qubox_v2_legacy` → `qubox.legacy` | Update imports |
+| `qubox_v2_legacy` removed | Import from `qubox.*` directly |
+| `qubox.legacy` removed | Import from `qubox.*` directly |
 | `qubox.analysis` → `qubox_tools` | Update imports |
 | `cQED_attributes` → `DeviceMetadata` | Use `session.metadata` |
 | `PulseOp` location changed | Import from `qubox.core.pulse_op` |

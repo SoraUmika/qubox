@@ -1,10 +1,10 @@
-"""qubox_v2.programs.spectroscopy
-=================================
+"""qubox.programs.spectroscopy
+================================
 Spectroscopy QUA program factories.
 
 Imports spectroscopy-related functions from ``builders`` sub-modules::
 
-    from qubox_v2.programs.spectroscopy import resonator_spectroscopy
+    from qubox.programs.spectroscopy import resonator_spectroscopy
 """
 from .builders.spectroscopy import (
     readout_trace,

@@ -74,6 +74,12 @@ def main() -> None:
     if args.transport == "streamable-http":
         mcp.settings.host = args.host
         mcp.settings.port = args.port
+        if args.host != "127.0.0.1":
+            import logging
+            logging.getLogger("qubox_lab_mcp").warning(
+                "MCP HTTP server listening on %s:%d — ensure this is a trusted network.",
+                args.host, args.port,
+            )
         mcp.run(transport="streamable-http")
         return
     mcp.run(transport="stdio")

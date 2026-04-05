@@ -1,9 +1,10 @@
 """
 Unified logging configuration for qubox and qm loggers.
 """
+from __future__ import annotations
+
 import sys
 import logging
-from typing import Union, Optional
 from contextlib import contextmanager
 from collections.abc import Iterable
 
@@ -12,7 +13,7 @@ QUBOX_LOGGER_NAME = "qubox"
 
 def configure_global_logging(
     *,
-    level: Union[int, str] = logging.INFO,
+    level: int | str = logging.INFO,
     fmt: str = "[%(levelname)s] %(asctime)s %(name)s: %(message)s",
     qm_user_config=None,
 ) -> None:
@@ -53,8 +54,9 @@ def get_logger(name: str) -> logging.Logger:
     Example:
         logger = get_logger(__name__)  # returns 'qubox.hardware.controller', etc.
     """
-    # Handle qubox_v2.* names by mapping them under the 'qubox' namespace
+    # Legacy compatibility (added 2025): map qubox_v2.* logger names to qubox.*
     # so they inherit the configured log level from configure_global_logging().
+    # Safe to remove once no external code references qubox_v2 logger names.
     if name.startswith("qubox_v2."):
         suffix = name[len("qubox_v2."):]
         return logging.getLogger(f"{QUBOX_LOGGER_NAME}.{suffix}")

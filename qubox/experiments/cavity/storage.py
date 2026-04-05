@@ -354,7 +354,7 @@ class NumSplittingSpectroscopy(ExperimentBase):
                 raise ValueError(
                     "state_prep is required for NumSplittingSpectroscopy. "
                     "Define an explicit preparation macro in your notebook and pass it via state_prep=. "
-                    "Temporary compatibility path: set allow_default_state_prep=True to use legacy no-op prep."
+                    "Compatibility path (added 2026-03): set allow_default_state_prep=True to use legacy no-op prep."
                 )
             from qm.qua import wait
             def state_prep():

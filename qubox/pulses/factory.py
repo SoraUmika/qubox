@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import warnings
 from typing import Any, Callable
 
 import numpy as np
@@ -153,12 +152,6 @@ def _handle_clear(params: dict) -> tuple[list[float], list[float]]:
 
 
 def _handle_arbitrary_blob(params: dict) -> tuple[list[float], list[float]]:
-    warnings.warn(
-        "arbitrary_blob pulse shape is a transitional format. "
-        "Convert to a declarative shape when possible.",
-        DeprecationWarning,
-        stacklevel=3,
-    )
     I_b64 = params.get("I_samples_b64", "")
     Q_b64 = params.get("Q_samples_b64", "")
     I_arr = np.frombuffer(base64.b64decode(I_b64), dtype=np.float64) if I_b64 else np.zeros(int(params.get("length", 16)))

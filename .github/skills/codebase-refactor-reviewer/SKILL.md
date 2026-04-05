@@ -8,101 +8,39 @@ argument-hint: "Describe the refactor or point to changed files/modules"
 
 ## Purpose
 
-Systematically review code refactors in the qubox codebase to ensure correctness, contract compliance, and architectural consistency. Produces a structured review report with risk assessment.
+Verify refactors preserve behavioral contracts. Focus: experiment lifecycle, calibration pipeline, hardware safety.
 
-## When to Use
+## Contract Checklist
 
-- Before merging any refactor branch
-- After restructuring module boundaries (e.g., moving code between experiments/, calibration/, core/)
-- When changing base classes (ExperimentRunner, CalibrationOrchestrator)
-- When modifying Pydantic models, frozen dataclasses, or persistence logic
-- When touching hardware abstraction or pulse pipeline code
+| Contract | Key Check |
+|----------|-----------|
+| FitResult.success | `analyze()` → `Output.fit.success` → quality gate → param extraction gated on success |
+| Patch transactionality | Pre-snapshot → mutate → rollback on failure; no partial application |
+| Experiment lifecycle | `__init__` → `run()` → `analyze()` order preserved; no silent state mutations |
+| ExperimentContext | Frozen after construction — no field assignment post-init |
+| Persistence | `split_output_for_persistence` for all Output serialization; no raw numpy to JSON |
+| Module boundaries | No circular imports, no cross-boundary private access |
+| QUA compilation | Same compiled output before/after; verify with `tools/validate_qua.py --quick` |
 
 ## Procedure
 
-### Step 1 — Scope the Change
+1. **Scope:** Identify all changed files. Classify: structural (moved/renamed), behavioral (logic), interface (signature), cosmetic.
+2. **Contract audit:** For each contract-bearing file, verify each contract above.
+3. **Dependency impact:** For changed public APIs, search all call sites for breakage. Check `__init__.py` re-exports.
+4. **Regression check:** Confirm existing tests still pass. If tests changed, verify strictly stronger.
+5. **AGENTS.md compliance:** Minimal change scope, no unrelated cleanup, docs updated if API changed.
 
-1. Identify all changed files (use git diff or file list provided by user)
-2. Classify each change: **structural** (moved/renamed), **behavioral** (logic change), **interface** (signature change), **cosmetic** (formatting only)
-3. Map changed files to [architecture modules](./references/module-map.md)
-
-### Step 2 — Contract Compliance Check
-
-For each changed file, verify these invariants:
-
-- [ ] **FitResult.success contract**: Any code touching `CalibrationResult` or fit analysis must propagate `quality["passed"] = False` on fit failure. Never silently pass stale params.
-- [ ] **ExperimentContext immutability**: No code assigns to fields of a frozen `ExperimentContext` after construction.
-- [ ] **Patch transactionality**: `CalibrationOrchestrator.apply_patch` must support rollback. No partial state mutations.
-- [ ] **Persistence policy**: `split_output_for_persistence` is used for all Output serialization; raw numpy arrays never written directly to JSON.
-- [ ] **Import hygiene**: Relative imports within package; no circular dependencies introduced.
-
-### Step 3 — Dependency Impact Analysis
-
-1. For each changed public API (class, function, constant), search for all call sites
-2. Flag any call site that now receives different types, different defaults, or missing arguments
-3. Check that `__init__.py` re-exports are updated if public names moved
-
-### Step 4 — Test Coverage Check
-
-1. List all test files relevant to changed modules (see [test mapping](./references/test-map.md))
-2. Verify existing tests still pass conceptually (flag tests that reference removed/renamed symbols)
-3. Identify untested paths introduced by the refactor
-4. Recommend specific test additions with expected inputs/outputs
-
-### Step 5 — Risk Assessment
-
-Classify overall risk:
+## Risk Assessment
 
 | Risk Level | Criteria |
 |------------|----------|
-| **LOW** | Cosmetic only; no behavioral change; all tests pass |
-| **MEDIUM** | Interface changes with updated call sites; new code paths with tests |
-| **HIGH** | Behavioral changes to calibration/experiment lifecycle; contract modifications; untested paths |
-| **CRITICAL** | Changes to persistence format; hardware control flow; patch application logic without rollback |
+| CRITICAL | Persistence format, hardware control flow, patch application without rollback |
+| HIGH | Calibration/experiment lifecycle behavioral changes, untested contract paths |
+| MEDIUM | Interface changes with updated call sites, new code paths with tests |
+| LOW | Cosmetic, imports, type annotations only |
 
-### Step 6 — Generate Report
+## Rules
 
-Produce a structured markdown report with these sections:
-
-```markdown
-## Refactor Review: [title]
-
-### Summary
-[1-2 sentence description of what changed and why]
-
-### Changed Files
-| File | Change Type | Risk |
-|------|-------------|------|
-
-### Contract Compliance
-[Checklist results from Step 2]
-
-### Breaking Changes
-[List any API breaks, with migration guidance]
-
-### Test Gaps
-[Untested paths, recommended additions]
-
-### Risk Assessment: [LOW/MEDIUM/HIGH/CRITICAL]
-[Justification]
-
-### Recommendations
-[Ordered list of actions before merge]
-```
-
-## Input Format
-
-Provide one of:
-- A list of changed files or a branch name to diff
-- A description of the refactor intent
-- A specific module or class to audit
-
-## Output Format
-
-Structured markdown report as shown in Step 6. Always includes risk level and actionable recommendations.
-
-## Resources
-
-- [Module Map](./references/module-map.md) — Architecture module boundaries
-- [Test Map](./references/test-map.md) — Module-to-test file mapping
-- [Contract Checklist](./references/contract-checklist.md) — Full invariant checklist
+- Never approve breaking a contract without explicit user approval
+- "Tests pass" is necessary but not sufficient — contracts are the primary check
+- Flag any silent behavior change even if tests pass

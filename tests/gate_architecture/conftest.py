@@ -471,12 +471,22 @@ def fake_session(tmp_path, gate_arch_modules):
         _calibration=calibration,
     )
 
+    hw = FakeHW()
+    runner_calls: list[dict[str, object]] = []
+
+    def _run_program(program, **kwargs):
+        runner_calls.append({"program": program, "kwargs": dict(kwargs)})
+        return hw.run_program(program, **kwargs)
+
     return SimpleNamespace(
         calibration=calibration,
         pulse_mgr=pulse_mgr,
-        hw=FakeHW(),
+        hw=hw,
         config_engine=FakeConfigEngine(pulse_mgr),
         bindings=None,
-        cluster_name="Cluster_1",
+        runner=SimpleNamespace(run_program=_run_program),
+        runner_calls=runner_calls,
+        cluster_name="Cluster_2",
+        simulation_mode=False,
         context_snapshot=lambda: attr,
     )

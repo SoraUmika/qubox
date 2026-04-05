@@ -65,15 +65,7 @@ class CircuitRunner:
         return QuantumCircuit(name=circuit.name, gates=circuit.gates, metadata=md)
 
     def compile(self, circuit: QuantumCircuit, *, sweep: SweepSpec | None = None) -> CircuitBuildResult:
-        """Legacy name-dispatch compiler. Prefer ``CircuitCompiler.compile()`` for new code."""
-        import warnings as _w
-
-        _w.warn(
-            "CircuitRunner.compile() is a legacy name-dispatch path with 5 hardcoded circuits. "
-            "Use CircuitCompiler(session).compile(circuit) for generic gate-lowering compilation.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        """Name-dispatch compatibility compiler for the remaining legacy circuit helpers."""
         circuit = self._apply_gate_tuning(circuit)
         name = circuit.name.lower().strip()
         if name == "power_rabi":

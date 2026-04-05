@@ -19,11 +19,25 @@ import sys
 import json
 import time
 import traceback
+import warnings
+from contextlib import contextmanager
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+
+warnings.filterwarnings(
+    "ignore",
+    message="Passing field metadata as keyword arguments is deprecated.*",
+    category=DeprecationWarning,
+    module=r"(marshmallow\.fields|qm\.program\._qua_config_schema)",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r"'version' is deprecated since \"1\.2\.2\" and will be removed in \"2\.0\.0\".*",
+    category=DeprecationWarning,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -52,6 +66,22 @@ class ValidationResult:
     has_analog_output: bool = False
     has_digital_output: bool = False
     qua_script_lines: int = 0
+
+
+@contextmanager
+def _suppress_known_qm_warnings():
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Passing field metadata as keyword arguments is deprecated.*",
+            category=DeprecationWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=r"'version' is deprecated since \"1\.2\.2\" and will be removed in \"2\.0\.0\".*",
+            category=DeprecationWarning,
+        )
+        yield
 
 
 def _event_duration_ns(event: dict[str, Any]) -> int:
@@ -369,9 +399,10 @@ def simulate_program(session, program, duration_ns: int = SIM_DURATION_NS):
     from qm.exceptions import QMSimulationError
 
     t0 = time.time()
-    cfg = session.config_engine.build_qm_config()
-    sim_config = SimulationConfig(duration=max(1, int(duration_ns) // 4))
-    job = session.runner._qmm.simulate(cfg, program, sim_config)
+    with _suppress_known_qm_warnings():
+        cfg = session.config_engine.build_qm_config()
+        sim_config = SimulationConfig(duration=max(1, int(duration_ns) // 4))
+        job = session.runner._qmm.simulate(cfg, program, sim_config)
 
     pull_delays_s = (0.0, 0.25, 0.75)
     last_error: QMSimulationError | None = None
@@ -619,7 +650,11 @@ def build_iq_blobs(session):
 def build_all_xy(session):
     from qubox.experiments import AllXY
     exp = AllXY(session)
+
+    # Structural trust validation only needs representative points from the
+    # ground / superposition / excited groups, not the full 21-sequence sweep.
     build = exp.build_program(
+        gate_indices=[0, 5, 17],
         n_avg=1,
         qb_therm_clks=DEFAULT_QB_THERM,
     )

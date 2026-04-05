@@ -1,10 +1,10 @@
-"""qubox_v2.programs.time_domain
-================================
+"""qubox.programs.time_domain
+===============================
 Time-domain QUA program factories (Rabi, T1, T2, chevrons, etc.).
 
 Imports time-domain functions from ``builders`` sub-modules::
 
-    from qubox_v2.programs.time_domain import temporal_rabi, T1_relaxation
+    from qubox.programs.time_domain import temporal_rabi, T1_relaxation
 """
 from .builders.time_domain import (
     temporal_rabi,

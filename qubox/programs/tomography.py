@@ -1,10 +1,10 @@
-"""qubox_v2.programs.tomography
-================================
+"""qubox.programs.tomography
+==============================
 Tomography QUA program factories.
 
 Imports tomography functions from ``builders`` sub-modules::
 
-    from qubox_v2.programs.tomography import qubit_state_tomography
+    from qubox.programs.tomography import qubit_state_tomography
 """
 from .builders.tomography import (
     qubit_state_tomography,

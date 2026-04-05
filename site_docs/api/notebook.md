@@ -104,12 +104,25 @@ session = require_shared_session()
 
 ## Notebook Workflow Runtime
 
-`qubox.notebook.workflow` provides notebook-aware wrappers around `qubox.workflow`:
+`qubox.notebook.workflow` re-exports portable primitives from `qubox.workflow`
+and adds shared-session notebook helpers:
 
 ```python
 from qubox.notebook.workflow import (
-    nb_save_checkpoint,          # Save with shared session context
-    nb_fit_gate,                 # Fit gate with notebook display
-    nb_preview_patch,            # Rich display of proposed changes
+    # Re-exported from qubox.workflow
+    save_stage_checkpoint,
+    load_stage_checkpoint,
+    fit_quality_gate,
+    preview_or_apply_patch_ops,
+    ensure_primitive_rotations,
+
+    # Notebook-specific helpers
+    open_notebook_stage,            # Open a numbered-notebook stage
+    build_notebook_workflow_config,  # Build notebook workflow config
+    NotebookWorkflowConfig,         # Frozen config dataclass
+    NotebookStageContext,            # Context from open_notebook_stage
 )
 ```
+
+!!! note
+    For non-notebook usage, import directly from `qubox.workflow`.

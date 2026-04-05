@@ -8,117 +8,47 @@ description: >
   new measurement type to qubox.
 ---
 
-# Experiment Design Skill
+# Experiment Design
 
-## When to Use
-
-- Creating a new experiment class (spectroscopy, time-domain, readout calibration, etc.)
-- Defining a new pulse sequence or protocol
-- Extending `ExperimentLibrary` with a new template
-- Adding support for a new cQED measurement type
-- Adapting an existing experiment to new hardware parameters
-
-## How to Use
-
-### Step 1 — Read References
-
-Before writing any code:
-
-- `standard_experiments.md` — reference protocols; understand the established baseline
-- `API_REFERENCE.md` — public experiment API (Session, ExperimentLibrary, template API)
-- `qubox/legacy/experiments/` — existing experiment classes to follow as patterns
-- `qubox/experiments/templates/` — modern template-based experiment definitions
-- `qubox/experiments/workflows/` — higher-level workflow compositions
-- A relevant existing experiment (e.g., `qubox/legacy/experiments/time_domain/` for T1/T2)
-
-### Step 2 — Understand the Pipeline
-
-Every experiment in qubox follows this pipeline:
+## Pipeline
 
 ```
-ExperimentDefinition (qubox.experiments.templates)
-    │
-    ▼
-QUA program builder (qubox.programs.*)
-    │
-    ▼
-Compiled QUA program
-    │
-    ▼
-Execution on OPX+ via QM API
-    │
-    ▼
-Raw results → Analysis (qubox_tools)
-    │
-    ▼
-ExperimentResult / CalibrationResult
+ExperimentDefinition → QUA program builder → Compiled QUA → OPX+ execution → Raw results → Analysis → ExperimentResult
 ```
 
-Understand where your new experiment fits in this pipeline before writing code.
+## Before Writing Code
 
-### Step 3 — Follow Existing Patterns
+Read: `standard_experiments.md`, `API_REFERENCE.md`, and the most similar existing experiment in `qubox/legacy/experiments/`.
 
-#### For a new experiment class (legacy-style):
+## Implementation Paths
 
-1. Find the most similar existing experiment in `qubox/legacy/experiments/`.
-2. Inherit from the same base class (e.g., `ExperimentRunner`).
-3. Implement: `build_plan()`, `run()`, `analyze()`.
-4. Follow the same `__init__` signature convention (session as first arg).
-5. Register it in `qubox/legacy/experiments/__init__.py`.
+**Legacy-style** (class in `qubox/legacy/experiments/`):
+1. Inherit from same base as nearest experiment (e.g., `ExperimentRunner`)
+2. Implement `build_plan()`, `run()`, `analyze()` — session as first `__init__` arg
+3. Register in `qubox/legacy/experiments/__init__.py`
 
-#### For a new template (modern-style):
+**Modern template** (in `qubox/experiments/templates/library.py`):
+1. Add method → `session.exp.<category>.<name>()` naming
+2. Add `LegacyExperimentAdapter` in `qubox/backends/qm/runtime.py` `_load_adapters()`
 
-1. Add a method to the appropriate section of `qubox/experiments/templates/library.py`.
-2. Follow the `session.exp.<category>.<name>()` naming convention.
-3. Add a `LegacyExperimentAdapter` entry in `qubox/backends/qm/runtime.py` `_load_adapters()`.
+## Pulse Sequence Design
 
-### Step 4 — Define the Pulse Sequence
+- QUA primitives: `play()`, `wait()`, `measure()`, `align()`
+- Structure: state prep → experiment body → measurement
+- Identify: sweep params (freq, amp, duration, phase) + measurement type (IQ raw, state disc, averaged)
 
-- Define the sequence in terms of QUA primitives: `play()`, `wait()`, `measure()`, `align()`.
-- Document the sequence structure: state prep → experiment body → measurement.
-- Identify sweep parameters (frequency, amplitude, duration, phase).
-- Identify measurement type (IQ raw, state discrimination, averaged).
+## Validation
 
-### Step 5 — Validate
+Use **qua-validation** skill: compile → simulate on hosted server → verify sequence matches intent → standard experiments still pass. A new experiment without simulator check is incomplete.
 
-Use the **qua-validation** skill (`.github/skills/qua-validation/SKILL.md`) to:
+## Documentation
 
-1. Compile the QUA program
-2. Simulate on the hosted server
-3. Verify pulse sequence matches intent
-4. Check standard experiments still pass
+Update: `API_REFERENCE.md`, `docs/CHANGELOG.md`, notebook if user-facing, `limitations/` if applicable.
 
-### Step 6 — Document
-
-- Add the new experiment to `API_REFERENCE.md`.
-- Add a changelog entry to `docs/CHANGELOG.md`.
-- Add or update a notebook example if this is a user-facing experiment.
-- If the experiment has known hardware limitations: document in `limitations/qua_related_limitations.md`.
-
-## Reference Files
-
-| File | Purpose |
-| --- | --- |
-| `standard_experiments.md` | Baseline protocols to use as design reference |
-| `API_REFERENCE.md` | Public experiment API |
-| `qubox/legacy/experiments/` | Existing experiment classes (follow these patterns) |
-| `qubox/experiments/templates/library.py` | Modern template definitions |
-| `qubox/backends/qm/runtime.py` | Adapter registration (`_load_adapters`) |
-| `qubox/legacy/programs/` | QUA program builders |
-
-## Rules
-
-- Follow the existing class hierarchy. Do not create a parallel hierarchy.
-- Preserve backward compatibility. Do not change existing experiment interfaces.
-- Validate through the simulator before declaring done. See qua-validation skill.
-- Do not add unrelated infrastructure changes in the same task as a new experiment.
-- Document every new experiment in `API_REFERENCE.md`.
-- A new experiment without a passing simulator check is incomplete work.
-
-## Experiment Categories (existing)
+## Existing Categories
 
 | Category | Location |
-| --- | --- |
+|----------|----------|
 | Spectroscopy | `qubox/legacy/experiments/spectroscopy/` |
 | Time-domain (Rabi, T1, T2) | `qubox/legacy/experiments/time_domain/` |
 | Readout calibration | `qubox/legacy/experiments/calibration/readout/` |
@@ -126,3 +56,9 @@ Use the **qua-validation** skill (`.github/skills/qua-validation/SKILL.md`) to:
 | Cavity / Fock / storage | `qubox/legacy/experiments/cavity/` |
 | Tomography | `qubox/legacy/experiments/tomography/` |
 | SPA | `qubox/legacy/experiments/spa/` |
+
+## Rules
+
+- Follow existing hierarchy — no parallel hierarchies
+- Preserve backward compatibility
+- No unrelated infrastructure changes in same task

@@ -1,8 +1,8 @@
 """Calibration analysis algorithms — backward-compatibility re-exports.
 
 Canonical implementations have moved to
-``qubox_v2.analysis.calibration_algorithms``.  This module re-exports
-everything so existing ``from qubox_v2.calibration.algorithms import …``
+``qubox_tools.fitting.calibration``.  This module re-exports
+everything so existing ``from qubox.calibration.algorithms import …``
 statements continue to work.
 """
 from __future__ import annotations

@@ -1,30 +1,33 @@
-# qubox_v2 API Reference
+# qubox Internal API Reference
 
-This document is a concise API quick-reference for common workflows.
-The full canonical reference is maintained in the root `README.md`.
+> Historical compatibility note. This package-local file exists only to catch
+> older links. The canonical public API reference is [API_REFERENCE.md](../../API_REFERENCE.md).
+
+This document is a concise compatibility quick-reference for common workflows.
+When details here and the root-level docs diverge, the root docs are authoritative.
 
 ## Canonical sections
 
-- Core architecture and lifecycle: `README.md` → sections 3.x
-- Calibration orchestration: `README.md` → section 13
-- Binding-driven API: `README.md` → section 24
-- Build-first experiment API (`ProgramBuildResult`): `README.md` → section 26
+- Public API and package architecture: `API_REFERENCE.md`
+- Architecture map: `site_docs/architecture/package-map.md`
+- Runtime execution flow: `site_docs/architecture/execution-flow.md`
+- Calibration/orchestration policies: `AGENTS.md`
 
 ## Core result types
 
-### `RunResult` (`qubox_v2.hardware.program_runner`)
+### `RunResult` (`qubox.hardware.program_runner`)
 
 - Fields: `mode`, `output`, `sim_samples`, `metadata`
 - `mode` is an `ExecMode` enum (`HARDWARE` / `SIMULATE`)
 - `output` is dict-like (`Output`) and is the source for downstream analysis
 
-### `AnalysisResult` (`qubox_v2.experiments.result`)
+### `AnalysisResult` (`qubox.experiments.result`)
 
 - Fields: `data`, `fit`, `fits`, `metrics`, `source`, `metadata`
 - Construct via `AnalysisResult.from_run(...)`
 - `analyze()` should be idempotent and side-effect free by default
 
-### `ProgramBuildResult` (`qubox_v2.experiments.result`)
+### `ProgramBuildResult` (`qubox.experiments.result`)
 
 - Build-time provenance container returned by `build_program()` / `_build_impl()`
 - Includes compiled program inputs, processors, resolved frequencies, sweep axes,
@@ -74,5 +77,5 @@ Do not perform ad-hoc calibration writes inside experiment `run()` paths.
 
 ## Compatibility note
 
-This file remains at `qubox_v2/docs/API_REFERENCE.md` to preserve legacy links.
-When details here and `README.md` diverge, `README.md` is authoritative.
+This file remains in `qubox/docs/` to preserve older internal links.
+When details here and the root-level canonical docs diverge, the root docs are authoritative.

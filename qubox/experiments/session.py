@@ -1,6 +1,6 @@
-"""qubox_v2.experiments.session
-================================
-SessionManager: wires together all qubox services for an experiment session.
+"""qubox.experiments.session
+===========================
+SessionManager: wires together the qubox runtime services for an experiment session.
 
 Replaces the "god-object" wiring role of the legacy ``cQED_Experiment`` class
 while staying thinner — it owns the infrastructure components and lets
@@ -8,10 +8,10 @@ individual experiment classes handle the physics.
 
 Usage::
 
-    from qubox_v2.experiments.session import SessionManager
+    from qubox.experiments.session import SessionManager
 
-    with SessionManager("./cooldown_2025", qop_ip="10.0.0.1") as session:
-        from qubox_v2.experiments.spectroscopy import QubitSpectroscopy
+    with SessionManager(sample_id="sampleA", cooldown_id="cd_2025_01", qop_ip="10.0.0.1") as session:
+        from qubox.experiments.spectroscopy import QubitSpectroscopy
         spec = QubitSpectroscopy(session)
         result = spec.run(pulse="x180", freq_start=6.13e9, ...)
 """
@@ -35,6 +35,7 @@ from ..pulses.pulse_registry import PulseRegistry
 from ..devices.device_manager import DeviceManager
 from ..calibration.store import CalibrationStore
 from ..core.device_metadata import DeviceMetadata
+from ..core.utils import resolve_qop_host
 from qubox_tools.data.containers import Output
 from ..core.persistence import split_output_for_persistence
 from ..calibration.orchestrator import CalibrationOrchestrator
@@ -55,7 +56,9 @@ class SessionManager:
         Optional registry base path hint. In strict mode, session location is
         always resolved from ``sample_id`` + ``cooldown_id``.
     qop_ip : str | None
-        OPX+ IP / hostname.  Resolved from hardware JSON if *None*.
+    OPX+ IP / hostname. If omitted, ``hardware.json`` must persist a
+    ``qop_ip`` entry in ``hardware_extras``. qubox will not fall back to
+    ``localhost``.
     cluster_name : str | None
         QM cluster identifier.
     load_devices : bool | list[str]
@@ -154,7 +157,12 @@ class SessionManager:
 
         # --- 2. QM connection ---
         from qm import QuantumMachinesManager
-        host = qop_ip or self.config_engine.hardware_extras.get("qop_ip", "localhost")
+        host = resolve_qop_host(qop_ip, self.config_engine.hardware_extras)
+        if host is None:
+            raise ConfigError(
+                "QOP host is required. Pass qop_ip explicitly or persist qop_ip in hardware.json; "
+                "qubox will not fall back to localhost."
+            )
         cal_db = str(oct_cal_path) if oct_cal_path else str(self.experiment_path)
         self._qmm = QuantumMachinesManager(
             host=host,
@@ -222,6 +230,7 @@ class SessionManager:
         self.orchestrator = CalibrationOrchestrator(self)
         self.calibration_orchestrator = self.orchestrator
         self._opened = False
+        self._last_close_report: dict[str, Any] | None = None
 
         _logger.info("SessionManager ready.")
 
@@ -1324,30 +1333,43 @@ class SessionManager:
     # ------------------------------------------------------------------
     def close(self) -> None:
         """Release hardware and device connections."""
-        try:
-            self.hardware.close()
-        except Exception as e:
-            _logger.warning("Error closing hardware: %s", e, exc_info=True)
-        for name, handle in self.devices.handles.items():
+        report: dict[str, Any] = {"steps": [], "errors": []}
+
+        def _run_step(step: str, action: Any) -> None:
             try:
-                handle.disconnect()
-            except Exception as e:
-                _logger.warning("Error disconnecting device '%s': %s", name, e, exc_info=True)
+                action()
+            except Exception as exc:
+                report["steps"].append({"step": step, "ok": False, "error": str(exc)})
+                report["errors"].append(step)
+                _logger.warning("Error %s: %s", step, exc, exc_info=True)
+            else:
+                report["steps"].append({"step": step, "ok": True})
+
         try:
-            self.save_pulses()
-        except Exception as e:
-            _logger.warning("Error saving pulses: %s", e, exc_info=True)
-        try:
-            self.save_runtime_settings()
-        except Exception as e:
-            _logger.warning("Error saving runtime settings: %s", e, exc_info=True)
-        self.calibration.save()
-        try:
-            self.persist_measure_config()
-        except Exception as e:
-            _logger.warning("Error saving measureConfig.json on close: %s", e, exc_info=True)
-        self._opened = False
-        _logger.info("SessionManager closed.")
+            hardware = getattr(self, "hardware", None)
+            if hardware is not None:
+                _run_step("closing hardware", hardware.close)
+
+            handles = getattr(getattr(self, "devices", None), "handles", {}) or {}
+            for name, handle in handles.items():
+                disconnect = getattr(handle, "disconnect", None)
+                if callable(disconnect):
+                    _run_step(f"disconnecting device '{name}'", disconnect)
+
+            _run_step("saving pulses", self.save_pulses)
+            _run_step("saving runtime settings", self.save_runtime_settings)
+            _run_step("saving calibration", self.calibration.save)
+
+            persist_measure_config = getattr(self, "persist_measure_config", None)
+            if callable(persist_measure_config):
+                _run_step("saving measureConfig.json on close", persist_measure_config)
+        finally:
+            self._opened = False
+            self._last_close_report = report
+            if report["errors"]:
+                _logger.info("SessionManager closed with %d teardown warning(s).", len(report["errors"]))
+            else:
+                _logger.info("SessionManager closed.")
 
     def __enter__(self) -> "SessionManager":
         return self.open()

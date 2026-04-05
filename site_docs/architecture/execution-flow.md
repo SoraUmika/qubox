@@ -42,13 +42,15 @@ session = Session.open(
 )
 ```
 
-`Session.open()` performs:
+`Session.open(..., connect=True)` performs:
 
-1. Loads `CalibrationStore` from `samples/<sample_id>/cooldown/<cooldown_id>/calibration.json`
-2. Loads `HardwareConfig` from `samples/<sample_id>/config/hardware.json`
-3. Connects to OPX+ via `QuantumMachinesManager`
-4. Initializes Octave (LO configuration, mixer calibration)
-5. Creates `ExperimentLibrary` and `OperationLibrary`
+1. Resolves the sample/cooldown context and filesystem paths from the sample registry.
+2. Loads `HardwareConfig` from `samples/<sample_id>/config/hardware.json`.
+3. Requires a QOP host either from the explicit `qop_ip` argument or from persisted `hardware.json` extras.
+4. Creates `QuantumMachinesManager`, `HardwareController`, `ProgramRunner`, and the session libraries.
+5. Calls `SessionManager.open()`.
+6. In simulation mode, skips `hardware.open_qm()`, keeps RF outputs off, and populates runtime elements from the generated config only.
+7. In hardware mode, opens the `QuantumMachine`, loads measurement config, validates runtime elements, and logs the RF summary.
 
 ### 2. Template Resolution
 

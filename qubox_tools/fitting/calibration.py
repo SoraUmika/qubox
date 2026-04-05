@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from scipy.optimize import minimize, least_squares
+from scipy.optimize import OptimizeWarning, least_squares, minimize
 
 from .cqed import (
     chi_ramsey_model,
@@ -229,9 +229,17 @@ def fit_number_splitting(
     chi_guess = float(np.mean(np.diff(freqs))) if len(freqs) > 1 else 0.0
     p0 = [base_fq_guess, chi_guess, 0.0, 0.0]
 
-    popt, pcov = generalized_fit(
-        ns, freqs, number_split_frequency_model, p0,
-    )
+    with warnings.catch_warnings():
+        # This fit can be structurally valid with sparse reference points even
+        # when SciPy cannot estimate covariance reliably.
+        warnings.filterwarnings(
+            "ignore",
+            message="Covariance of the parameters could not be estimated",
+            category=OptimizeWarning,
+        )
+        popt, pcov = generalized_fit(
+            ns, freqs, number_split_frequency_model, p0,
+        )
 
     if popt is not None:
         return {

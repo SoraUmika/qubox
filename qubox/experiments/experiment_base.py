@@ -1,9 +1,9 @@
-"""qubox_v2.experiments.experiment_base
-======================================
+"""qubox.experiments.experiment_base
+=====================================
 Base class for modular experiment types.
 
 Each experiment class wraps one or more QUA program factories from
-``qubox_v2.programs.api`` and provides a consistent interface
+``qubox.programs`` and provides a consistent interface
 for building, running, and post-processing results.
 
 Experiment classes are lightweight — they hold a reference to the
@@ -13,7 +13,7 @@ calibration storage.
 
 Usage::
 
-    from qubox_v2.experiments.spectroscopy import ResonatorSpectroscopy
+    from qubox.experiments.spectroscopy import ResonatorSpectroscopy
 
     exp = cQED_Experiment(...)
     spec = ResonatorSpectroscopy(exp)

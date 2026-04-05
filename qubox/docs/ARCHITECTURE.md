@@ -1,34 +1,37 @@
-# qubox_v2 Architecture
+# qubox Internal Architecture Note
 
-This document is a compact architecture index for day-to-day development.
-The full canonical architecture guide is maintained in root `README.md`.
+> Historical compatibility note. This package-local file exists only to catch
+> older links. The canonical architecture docs are [site_docs/architecture/package-map.md](../../site_docs/architecture/package-map.md)
+> and [site_docs/architecture/execution-flow.md](../../site_docs/architecture/execution-flow.md).
+
+This document is a compact compatibility index for day-to-day development.
+When details here and the root-level docs diverge, the root docs are authoritative.
 
 ## Canonical sections
 
-- System architecture and layering: `README.md` section 2
-- Core API and lifecycle contracts: `README.md` section 3
-- Calibration lifecycle/orchestration: `README.md` section 13
-- Binding-driven API model: `README.md` section 24
-- Program build/provenance model: `README.md` section 26
+- Package architecture and public surfaces: `API_REFERENCE.md`
+- Architecture map: `site_docs/architecture/package-map.md`
+- Runtime execution flow: `site_docs/architecture/execution-flow.md`
+- Agent and validation policy: `AGENTS.md`
 
 ## Layer model (high level)
 
-1. **Core models/config** (`qubox_v2.core`)  
+1. **Core models/config** (`qubox.core`)  
 	Context identity, schema validation, immutable-ish state snapshots.
 
-2. **Hardware/runtime** (`qubox_v2.hardware`, `qubox_v2.devices`)  
+2. **Hardware/runtime** (`qubox.hardware`, `qubox.devices`)  
 	Program execution (`ProgramRunner`), instrument/device integration.
 
-3. **Programs/macros** (`qubox_v2.programs`)  
+3. **Programs/macros** (`qubox.programs`)  
 	QUA builders, macro-based measurement, circuit compilation facade.
 
-4. **Experiments** (`qubox_v2.experiments`)  
+4. **Experiments** (`qubox.experiments`)  
 	Build/run/analyze/plot contract over domain workflows.
 
-5. **Calibration orchestration** (`qubox_v2.calibration`)  
+5. **Calibration orchestration** (`qubox.calibration`)  
 	Artifact-driven patch lifecycle and controlled persistence.
 
-6. **Analysis/tools** (`qubox_v2.analysis`, `qubox_v2.tools`)  
+6. **Analysis/tools** (`qubox_tools`, `qubox.tools`)  
 	Fitting, metrics, post-processing, plotting support.
 
 ## Stable execution contract

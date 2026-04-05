@@ -10,7 +10,7 @@ from .circuit_ir import QuantumCircuit
 
 _logger = get_logger(__name__)
 
-SAFE_OPX_CLUSTER = "Cluster_1"
+DEFAULT_OPX_CLUSTER = "Cluster_2"
 
 
 @dataclass(frozen=True)
@@ -53,20 +53,29 @@ def _resolve_qop_host(session: Any) -> str | None:
     return None
 
 
+def _resolve_runner(session: Any) -> Any:
+    runner = getattr(session, "runner", None)
+    if runner is not None:
+        return runner
+    session_manager = getattr(session, "session_manager", None)
+    if session_manager is not None:
+        return getattr(session_manager, "runner", None)
+    return None
+
+
 def run_compiled_circuit(
     session: Any,
     circuit: QuantumCircuit,
     *,
-    cluster: str = SAFE_OPX_CLUSTER,
+    cluster: str = DEFAULT_OPX_CLUSTER,
     run_on_opx: bool = False,
     n_shots: int | None = None,
     execution_kwargs: dict[str, Any] | None = None,
 ) -> CompiledCircuitExecution:
     requested_cluster = str(cluster).strip()
-    if requested_cluster != SAFE_OPX_CLUSTER:
+    if not requested_cluster:
         raise ValueError(
-            f"Refusing OPX execution for cluster={requested_cluster!r}. "
-            f"Only {SAFE_OPX_CLUSTER!r} is allowed."
+            "Refusing OPX execution because the requested cluster is empty."
         )
 
     compiler = CircuitCompiler(session)
@@ -101,16 +110,22 @@ def run_compiled_circuit(
     if not cluster_candidates:
         raise RuntimeError(
             "Refusing hardware execution because the session cluster is ambiguous. "
-            "Expose session.cluster_name and ensure it is Cluster_1."
+            f"Expose session.cluster_name and ensure it is {requested_cluster}."
         )
     if len(cluster_candidates) > 1:
         raise RuntimeError(
             f"Refusing hardware execution because the session exposes multiple cluster names: {cluster_candidates!r}."
         )
-    if cluster_candidates[0] != SAFE_OPX_CLUSTER:
+    if cluster_candidates[0] != requested_cluster:
         raise RuntimeError(
             f"Refusing hardware execution because the session is bound to {cluster_candidates[0]!r}, "
-            f"not {SAFE_OPX_CLUSTER!r}."
+            f"not {requested_cluster!r}."
+        )
+
+    if bool(getattr(session, "simulation_mode", False)):
+        raise RuntimeError(
+            "Refusing hardware execution because the session is in simulation mode. "
+            "Open the session with simulation_mode=False first."
         )
 
     hardware = getattr(session, "hw", getattr(session, "hardware", getattr(session, "quaProgMngr", None)))
@@ -129,9 +144,15 @@ def run_compiled_circuit(
         for element, freq in sorted((build.resolved_frequencies or {}).items()):
             set_freq(element, float(freq))
 
-    run_program = getattr(hardware, "run_program", None)
+    runner = _resolve_runner(session)
+    if runner is not None and callable(getattr(runner, "run_program", None)):
+        run_program = runner.run_program
+    else:
+        run_program = getattr(hardware, "run_program", None)
     if not callable(run_program):
-        raise RuntimeError("Session hardware controller does not expose run_program().")
+        raise RuntimeError(
+            "Session does not expose a callable run_program() on either runner or hardware controller."
+        )
 
     result = run_program(
         build.program,

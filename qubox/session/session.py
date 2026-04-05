@@ -22,6 +22,7 @@ class Session:
 
     def __init__(self, session_manager):
         self._session_manager = session_manager
+        self._closed = False
         self.sweep = SweepFactory()
         self.acquire = AcquisitionFactory()
         from ..experiments import ExperimentLibrary, WorkflowLibrary
@@ -87,6 +88,7 @@ class Session:
 
     @property
     def backend(self):
+        self._check_open()
         if self._backend is None:
             from ..backends.qm import QMRuntime
 
@@ -96,53 +98,67 @@ class Session:
     @property
     def hardware(self):
         """``HardwareController`` — element LO/IF/gain, QM instance."""
+        self._check_open()
         return self._session_manager.hardware
 
     @property
     def config_engine(self):
         """``ConfigEngine`` — load / save / build QM config dicts."""
+        self._check_open()
         return self._session_manager.config_engine
 
     @property
     def calibration(self):
         """``CalibrationStore`` — frequency, coherence, discrimination data."""
+        self._check_open()
         return self._session_manager.calibration
 
     @property
     def pulse_mgr(self):
         """``PulseOperationManager`` — pulse operation registry."""
+        self._check_open()
         return self._session_manager.pulse_mgr
 
     @property
     def runner(self):
         """``ProgramRunner`` — execute / simulate QUA programs."""
+        self._check_open()
         return self._session_manager.runner
 
     @property
     def devices(self):
         """``DeviceManager`` — external device lifecycle."""
+        self._check_open()
         return self._session_manager.devices
 
     @property
     def orchestrator(self):
         """``CalibrationOrchestrator`` — experiment → calibration pipeline."""
+        self._check_open()
         return self._session_manager.orchestrator
 
     @property
     def simulation_mode(self) -> bool:
         """True if this session was opened in simulation mode (no RF outputs)."""
+        self._check_open()
         return self._session_manager.simulation_mode
 
     # ------------------------------------------------------------------
     # Session lifecycle
     # ------------------------------------------------------------------
 
+    def _check_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("Session is closed. Create a new session with Session.open().")
+
     def connect(self) -> "Session":
+        self._check_open()
         self._session_manager.open()
         return self
 
     def close(self) -> None:
         self._session_manager.close()
+        self._closed = True
 
     # ------------------------------------------------------------------
     # Sequence / circuit builders

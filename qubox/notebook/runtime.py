@@ -67,7 +67,16 @@ def save_notebook_session_bootstrap(
 
 def load_notebook_session_bootstrap(path: str | Path) -> NotebookSessionBootstrap:
     """Load a bootstrap record from disk."""
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    bootstrap_path = Path(path)
+    try:
+        payload = json.loads(bootstrap_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed notebook session bootstrap JSON at {bootstrap_path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"Notebook session bootstrap {bootstrap_path} must contain a JSON object, "
+            f"got {type(payload).__name__}"
+        )
     return NotebookSessionBootstrap(**payload)
 
 
@@ -259,14 +268,18 @@ def close_shared_session(*, session_key: str | None = None) -> None:
 
 def resolve_active_mixer_targets(session: Session, *, include_skipped: bool = False) -> dict[str, Any]:
     """Return a dict of active mixer elements and their LO/IF/RF frequencies."""
-    resolved = session.hardware.get_active_mixer_elements(include_skipped=True)
+    hardware = getattr(session, "hardware", getattr(session, "hw", None))
+    if hardware is None:
+        raise AttributeError("Session must expose either 'hardware' or legacy 'hw' for mixer resolution.")
+
+    resolved = hardware.get_active_mixer_elements(include_skipped=True)
     active_elements = list(resolved.get("active", []))
     skipped_elements = list(resolved.get("skipped", []))
 
     active_targets = []
     for element in active_elements:
-        lo_hz = float(session.hardware.get_element_lo(element))
-        if_hz = float(session.hardware.get_element_if(element))
+        lo_hz = float(hardware.get_element_lo(element))
+        if_hz = float(hardware.get_element_if(element))
         active_targets.append(
             {
                 "element": element,

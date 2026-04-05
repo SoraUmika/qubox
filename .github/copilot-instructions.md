@@ -1,89 +1,41 @@
 # qubox — GitHub Copilot Instructions
 
-## Project Overview
-
-qubox is a Python cQED experiment framework targeting Quantum Machines hardware (OPX+ + Octave,
-QUA API v1.2.6). It compiles high-level experiment definitions into QUA programs and runs them
-on real quantum hardware or the QM simulator. **Physical correctness is non-negotiable.**
-
 **Read `AGENTS.md` before making any change.** It is the master policy document.
 
-## Python
+## Environment
 
-- **Required:** Python 3.12.10 via the workspace `.venv` or a global 3.12.10 interpreter (fallback: 3.11.8 on ECE-SHANKAR-07 only)
-- **Forbidden:** all other Python versions
-- Style: PEP 8, ruff linter, 120-char line length
-- `from __future__ import annotations` in every module
-- Pydantic v2 for data models; frozen dataclasses for identity objects
+- **Python 3.12.10** required (`.venv` or global); all others forbidden
+- QM API 1.2.6, OPX+ + Octave, server `10.157.36.68` / `Cluster_2`
+- Style: PEP 8, ruff, 120-char lines, `from __future__ import annotations`
+- Pydantic v2 for models; frozen dataclasses for identity objects
 - Imports: stdlib → third-party → local
 
-If a lab dependency or notebook flow works in the known-good Python 3.11.8 install but fails in 3.12.x, inspect the package name, version, and import location from `E:\Program Files\Python311\python.exe` before changing qubox code. Use that environment as the backup reference for mirroring missing packages into the active 3.12.x environment.
+## QUA Validation
 
-## QUA Validation Rule
+Compile (<1 min) → simulate on hosted server → verify pulses/timing/control flow.
+Shortcuts: `n_avg=1`, shorten waits. Mismatches → report, never silently accept.
+Unfixable → `limitations/qua_related_limitations.md`.
 
-> **The compiled QUA program is the source of truth, not the written code.**
+## Docs & Compatibility
 
-Every QUA-touching change must be validated:
-
-1. Compile (must finish in < 1 minute)
-2. Simulate on hosted server: `host="10.157.36.68"`, `cluster_name="Cluster_2"`
-3. Verify: pulse ordering, timing, control flow, measurements
-4. Mismatches → report explicitly; never silently accept
-
-Shortcuts for validation: `n_avg=1`, shorten idle periods, simulate minimum duration.
-Unresolvable mismatches → document in `limitations/qua_related_limitations.md`.
-
-## Standard Experiments
-
-`standard_experiments.md` defines trust gates. If a change touches pulse-sequence generation,
-compilation, scheduling, or QUA translation: verify relevant standard experiments still pass.
-Failure = do not ship without explanation and user approval.
-
-## Documentation Sync
-
-These updates happen **in the same task** as the code change — not later:
-
-- `API_REFERENCE.md` — any public API change
-- `docs/CHANGELOG.md` — all notable changes (append-only)
-- Affected notebooks — if usage pattern changes
-
-A code change that breaks a notebook without acknowledgment is incomplete work.
-
-## Backward Compatibility
-
-- Do not rename or remove public APIs without explicit user approval.
-- Breaking changes require `API_REFERENCE.md` update + `docs/CHANGELOG.md` entry + notebook fixes.
+- Same-task updates: `API_REFERENCE.md`, `docs/CHANGELOG.md`, affected notebooks
+- No public API removal without approval
+- `standard_experiments.md` = trust gates for QUA changes
 
 ## Architecture
 
-```text
-qubox/              Main package — public API, experiments, calibration, hardware, QUA programs
-qubox/notebook/     Notebook-facing import surface (~65 essentials + ~45 advanced symbols)
-qubox/backends/qm/  QM runtime adapter and lowering path
-qubox/control/      ControlProgram IR and realization helpers
-qubox_tools/        Analysis toolkit — fitting, plotting, algorithms, optimization
-qubox_lab_mcp/      Lab MCP server
-tools/              Developer & agent utilities (validation, demos, logging)
+```
+qubox/              Main package — experiments, calibration, hardware, QUA programs
+qubox/notebook/     Notebook import surface
+qubox_tools/        Analysis — fitting, plotting, algorithms
+tools/              Developer utilities (validation, logging)
 notebooks/          28 sequential experiment notebooks
-tests/              Pytest test suite
-docs/               CHANGELOG, architecture docs, design reviews
-samples/            Sample & cooldown data directories
-past_prompt/        Prompt logs (append-only)
-limitations/        Known QUA/hardware limitations
+tests/              Pytest suite
 ```
 
-## Legacy Reference Codebase
+## Rules
 
-The legacy codebase at `C:\Users\jl82323\Box\Shyam Shankar Quantum Circuits Group\Users\Users_JianJun\JJL_Experiments`
-is the behavioral ground truth for experiment migration. Refer to `post_cavity_experiment_legacy.ipynb`
-to understand how experiments are defined and run. Experiments there have been validated on real
-hardware and usually produce the correct behavior. The goal is to incrementally migrate experiments
-from legacy to qubox — one at a time — while preserving behavior. See `AGENTS.md §14` for full details.
-
-## Key Rules
-
-- Do not import from `qubox_v2_legacy` or `qubox.legacy` — those packages do not exist. Use `qubox`, `qubox.notebook`, or concrete `qubox.*` modules instead.
-- Do not assume QM API compatibility beyond version 1.2.6.
-- Do not scatter temp scripts outside `tools/`.
-- Log every completed task to `past_prompt/YYYY-MM-DD_HH-MM-SS_<task>.md`.
-- Make the smallest correct change. No unrelated cleanup.
+- Import from `qubox`, `qubox.notebook`, or concrete `qubox.*` — never `qubox_v2_legacy`/`qubox.legacy`
+- No temp scripts outside `tools/`; log tasks to `past_prompt/`
+- Smallest correct change; no unrelated cleanup
+- Legacy ref (read-only): `C:\Users\jl82323\Box\...\JJL_Experiments` — see `AGENTS.md §14`

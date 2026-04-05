@@ -104,7 +104,15 @@ def load_legacy_reference(path: str | Path | None) -> dict[str, Any]:
     reference_path = Path(path)
     if not reference_path.exists():
         return {}
-    return json.loads(reference_path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(reference_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed legacy reference JSON at {reference_path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"Legacy reference {reference_path} must contain a JSON object, got {type(payload).__name__}"
+        )
+    return payload
 
 
 def save_stage_checkpoint(
@@ -163,7 +171,15 @@ def load_stage_checkpoint(
     )
     if not checkpoint_path.exists():
         return None
-    return json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed stage checkpoint JSON at {checkpoint_path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"Stage checkpoint {checkpoint_path} must contain a JSON object, got {type(payload).__name__}"
+        )
+    return payload
 
 
 __all__ = [

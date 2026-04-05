@@ -23,9 +23,14 @@ A comprehensive map of every subpackage in the qubox ecosystem.
 
 | Module | Purpose |
 |--------|---------|
-| `session.py` | `Session` — primary user entry point, wraps legacy `SessionManager` |
-| `context.py` | `ExperimentContext`, `compute_wiring_rev()` |
-| `state.py` | `SessionState` — immutable runtime snapshot |
+| `session.py` | `Session` — primary user entry point, wraps the infrastructure `SessionManager` |
+
+Related context and state models live under `qubox.core`:
+
+| Module | Purpose |
+|--------|---------|
+| `experiment_context.py` | `ExperimentContext`, `compute_wiring_rev()` |
+| `session_state.py` | `SessionState` — immutable runtime snapshot |
 
 ### Sequence IR (`qubox.sequence`)
 
@@ -144,7 +149,6 @@ Portable workflow primitives (no notebook dependency):
 numerical cQED simulation (`qubox.simulation`) were removed from `qubox`.
 The older gate-model, fidelity, noise, and gate-sequence helpers were also
 removed from `qubox.gates`; only the runtime hardware gate layer remains.
-`qubox/gui/` and `qubox/migration/` are empty directory stubs with no code.
 
 Demo scripts and the optional GUI runner live under top-level `tools/`.
 

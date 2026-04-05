@@ -2,12 +2,17 @@
 
 Superconducting Parametric Amplifier (SPA) optimization experiments.
 
+!!! note "Standalone experiment class"
+    SPA experiments are not yet exposed through `session.exp`. Use the
+    `SPAFluxOptimization` class directly from `qubox.experiments.spa`.
+
 ## Flux Sweep
 
 Sweep the flux bias to find the SPA operating point.
 
 ```python
-result = session.exp.spa.flux_sweep(
+from qubox.experiments.spa import SPAFluxOptimization
+result = SPAFluxOptimization(session=session, flux_min=-0.5, flux_max=0.5,
     flux_min=-0.5, flux_max=0.5, n_points=101,
     n_avg=500
 )

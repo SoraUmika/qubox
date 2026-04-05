@@ -23,6 +23,10 @@ Thumbs.db
 tmpclaude-*-cwd
 nul
 tmpclaude-*-cwd
+test_output.txt
+qubox.egg-info/
+site/
+tools/simulation_validation_report.json
 
 seq_1_device/
 devices/

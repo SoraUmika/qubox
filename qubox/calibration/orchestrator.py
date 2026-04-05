@@ -15,6 +15,7 @@ Or the convenience wrapper::
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from dataclasses import dataclass, field
@@ -30,6 +31,16 @@ if TYPE_CHECKING:
     from ..core.protocols import SessionProtocol
 
 _logger = logging.getLogger(__name__)
+
+_SUPPORTED_PATCH_OPS = {
+    "SetCalibration",
+    "SetPulseParam",
+    "SetMeasureWeights",
+    "PersistMeasureConfig",
+    "SetMeasureDiscrimination",
+    "SetMeasureQuality",
+    "TriggerPulseRecompile",
+}
 
 
 @dataclass
@@ -162,33 +173,31 @@ class CalibrationOrchestrator:
             {"op": u.op, "payload": u.payload} for u in patch.updates
         ]
 
+        self._validate_patch(patch)
+
         if dry_run:
             return {"dry_run": True, "n_updates": len(patch.updates), "preview": preview, "sync_ok": True}
 
         # Snapshot for rollback
         snapshot = self.session.calibration.create_in_memory_snapshot()
-        try:
-            self._apply_updates(patch)
-        except Exception as exc:
-            _logger.error(
-                "Patch apply failed mid-way — rolling back CalibrationStore. Error: %s", exc, exc_info=True,
-            )
-            self.session.calibration.restore_in_memory_snapshot(snapshot)
-            raise RuntimeError(f"Transactional patch apply failed and was rolled back: {exc}") from exc
-
-        self.session.calibration.save()
-        self.session.save_pulses()
-
         sync_ok = True
         try:
+            self._apply_updates(patch)
             bindings = getattr(self.session, "bindings", None)
             if bindings is not None:
                 ro_el = getattr(self.session.context_snapshot(), "ro_el", None)
                 lookup_keys = (ro_el,) if ro_el is not None else ()
                 bindings.readout.sync_from_calibration(self.session.calibration, lookup_keys=lookup_keys)
+            self.session.calibration.save()
+            self.session.save_pulses()
         except Exception as exc:
-            _logger.warning("ReadoutBinding sync_from_calibration failed: %s", exc)
-            sync_ok = False
+            _logger.error(
+                "Patch apply failed mid-way — rolling back CalibrationStore. Error: %s", exc, exc_info=True,
+            )
+            self.session.calibration.restore_in_memory_snapshot(snapshot)
+            with contextlib.suppress(Exception):
+                self.session.calibration.save()
+            raise RuntimeError(f"Transactional patch apply failed and was rolled back: {exc}") from exc
 
         tag = getattr(patch, "reason", None) or f"patch_{len(self._applied_patches)}"
         self._applied_patches.append(tag)
@@ -289,6 +298,25 @@ class CalibrationOrchestrator:
     # ------------------------------------------------------------------
     # Internal: apply individual update ops
     # ------------------------------------------------------------------
+    def _validate_patch(self, patch: Patch) -> None:
+        for index, update in enumerate(patch.updates, start=1):
+            op = str(update.op)
+            payload = dict(update.payload or {})
+            if op not in _SUPPORTED_PATCH_OPS:
+                raise ValueError(f"Unsupported patch op at index {index}: {op!r}")
+            if op == "SetCalibration" and "path" not in payload:
+                raise ValueError(f"SetCalibration patch op at index {index} is missing 'path'.")
+            if op == "SetPulseParam" and ({"pulse_name", "field"} - set(payload)):
+                raise ValueError(
+                    f"SetPulseParam patch op at index {index} requires 'pulse_name' and 'field'."
+                )
+            if op == "SetMeasureWeights" and "weights" not in payload:
+                raise ValueError(f"SetMeasureWeights patch op at index {index} is missing 'weights'.")
+            if op == "PersistMeasureConfig" and not callable(getattr(self.session, "persist_measure_config", None)):
+                raise RuntimeError("PersistMeasureConfig requires session.persist_measure_config().")
+            if op == "TriggerPulseRecompile" and not callable(getattr(self.session, "burn_pulses", None)):
+                raise RuntimeError("TriggerPulseRecompile requires session.burn_pulses().")
+
     def _apply_updates(self, patch: Patch) -> None:
         for update in patch.updates:
             op = update.op
@@ -315,6 +343,9 @@ class CalibrationOrchestrator:
             elif op == "TriggerPulseRecompile":
                 include_volatile = bool(payload.get("include_volatile", True))
                 self.session.burn_pulses(include_volatile=include_volatile)
+
+            else:
+                raise ValueError(f"Unsupported patch op: {op!r}")
 
     def _apply_measure_weights(self, payload: dict[str, Any]) -> None:
         element = str(payload.get("element", getattr(self.session.context_snapshot(), "ro_el", "rr")))

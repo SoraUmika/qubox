@@ -1,5 +1,5 @@
-"""qubox_v2.experiments.base
-===========================
+"""qubox.experiments.base
+========================
 Generic, reusable base class for qubox experiments.
 
 ``ExperimentRunner`` distils the *infrastructure* plumbing that every
@@ -30,11 +30,12 @@ from ..core.errors import ConfigError, ConnectionError
 from ..core.logging import get_logger, temporarily_set_levels
 from ..hardware.config_engine import ConfigEngine
 from ..hardware.controller import HardwareController
-from ..hardware.program_runner import ExecMode, ProgramRunner, RunResult
+from ..hardware.program_runner import ExecMode, ProgramRunner, RunResult, coerce_exec_mode
 from ..hardware.queue_manager import QueueManager
 from ..pulses.manager import PulseOperationManager
 from ..devices.device_manager import DeviceManager
 from ..core.device_metadata import DeviceMetadata
+from ..core.utils import resolve_qop_host
 from qubox_tools.data.containers import Output
 from qubox_tools.algorithms.post_selection import PostSelectionConfig
 from ..core.persistence import split_output_for_persistence
@@ -51,8 +52,9 @@ class ExperimentRunner:
         Root directory for this experiment.  Config, data, and
         calibration artefacts are stored under it.
     qop_ip : str | None
-        OPX+ IP / hostname.  If *None*, ``ConfigEngine`` resolves from
-        the hardware JSON.
+        OPX+ IP / hostname. If omitted, ``hardware.json`` must persist a
+        ``qop_ip`` entry in ``hardware_extras``. qubox will not fall back to
+        ``localhost``.
     cluster_name : str | None
         QM cluster identifier.
     load_devices : bool | list[str]
@@ -88,7 +90,12 @@ class ExperimentRunner:
 
         # ---- 2. Hardware controller (connection) ----
         from qm import QuantumMachinesManager
-        host = qop_ip or self.config_engine.hardware_extras.get("qop_ip", "localhost")
+        host = resolve_qop_host(qop_ip, self.config_engine.hardware_extras)
+        if host is None:
+            raise ConfigError(
+                "QOP host is required. Pass qop_ip explicitly or persist qop_ip in hardware.json; "
+                "qubox will not fall back to localhost."
+            )
         cal_db = str(oct_cal_path) if oct_cal_path else str(self.experiment_path)
         self._qmm = QuantumMachinesManager(
             host=host,
@@ -179,8 +186,16 @@ class ExperimentRunner:
     # Run helpers
     # ------------------------------------------------------------------
     def run(self, program, *, mode: ExecMode = ExecMode.HARDWARE, **kw: Any) -> RunResult:
-        """Run a QUA program.  Delegates to ``ProgramRunner``."""
-        return self.runner.run_program(program, mode=mode, **kw)
+        """Run a QUA program in hardware mode.
+
+        ``simulate()`` is the explicit simulation entry point. Rejecting
+        non-hardware modes here avoids silently forwarding ignored mode
+        arguments into ``ProgramRunner.run_program()``.
+        """
+        resolved_mode = coerce_exec_mode(mode)
+        if resolved_mode is not ExecMode.HARDWARE:
+            raise ValueError("ExperimentRunner.run() is hardware-only; use simulate() for simulation mode.")
+        return self.runner.run_program(program, **kw)
 
     def simulate(self, program, duration: int = 10_000, **kw: Any):
         """Simulate a QUA program.  Delegates to ``ProgramRunner``."""

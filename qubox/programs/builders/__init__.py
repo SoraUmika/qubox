@@ -1,5 +1,5 @@
-"""qubox_v2.programs.builders
-==============================
+"""qubox.programs.builders
+============================
 QUA program factory functions, organized by domain.
 
 Each sub-module contains program builders migrated from the original

@@ -10,6 +10,7 @@ from qubox.calibration import CalibrationProposal
 from qubox.control import ControlDuration, PulseInstruction
 from qubox import notebook
 from qubox.data import ExecutionRequest
+import qubox.workflow as workflow
 
 
 class DummyCalibration:
@@ -215,3 +216,9 @@ def test_notebook_surface_is_lazy():
     assert "save_stage_checkpoint" in notebook.__all__
     assert "preview_or_apply_patch_ops" in notebook.__all__
     assert "ensure_primitive_rotations" in notebook.__all__
+
+
+def test_workflow_surface_exports_portable_helpers():
+    assert "build_workflow_config" in workflow.__all__
+    assert "load_legacy_reference" in workflow.__all__
+    assert "preview_or_apply_patch_ops" in workflow.__all__

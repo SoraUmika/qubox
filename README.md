@@ -33,6 +33,9 @@ import qubox_tools as qt
 popt, _ = qt.generalized_fit(x, y, qt.fitting.models.gaussian_model, p0=[...])
 ```
 
+`qop_ip` must be provided explicitly or persisted in `hardware.json`; the
+runtime no longer falls back to `localhost` during session bootstrap.
+
 ## Import Surfaces
 
 | Surface | Audience | Contents |

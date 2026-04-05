@@ -8,7 +8,7 @@ optionally generates ``devices.json`` (external instruments).
 
 Usage::
 
-    from qubox_v2.core.hardware_definition import HardwareDefinition
+    from qubox.core.hardware_definition import HardwareDefinition
 
     hw = HardwareDefinition(controller="con1", octave="oct1")
     hw.add_readout("resonator", rf_out=1, rf_in=1, lo_frequency=8.8e9, ...)
@@ -585,7 +585,8 @@ class HardwareDefinition:
         if merge_existing and p.exists():
             try:
                 existing = json.loads(p.read_text(encoding="utf-8-sig"))
-            except Exception:
+            except (json.JSONDecodeError, OSError) as exc:
+                _logger.warning("Could not read existing %s for merge: %s", p, exc)
                 existing = {}
             if isinstance(existing, dict):
                 existing.update(seed)
@@ -618,7 +619,8 @@ class HardwareDefinition:
         if merge_existing and p.exists():
             try:
                 existing = json.loads(p.read_text(encoding="utf-8-sig"))
-            except Exception:
+            except (json.JSONDecodeError, OSError) as exc:
+                _logger.warning("Could not read existing %s for merge: %s", p, exc)
                 existing = {}
             if isinstance(existing, dict):
                 existing.update(devices)

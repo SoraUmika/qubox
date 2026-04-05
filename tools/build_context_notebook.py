@@ -1935,16 +1935,18 @@ print()
 
 # Collect calibration state machines
 all_sms = []
-for name in ["sm_rabi", "sm_drag", "sm_readout"]:
+_sm_registry = {"sm_rabi": locals().get("sm_rabi"), "sm_drag": locals().get("sm_drag"), "sm_readout": locals().get("sm_readout")}
+for name, sm_obj in _sm_registry.items():
+    if sm_obj is None:
+        continue
     try:
-        sm_obj = eval(name)
         info = sm_obj.summary()
         all_sms.append(info)
         state_str = info["state"]
         committed = state_str == "committed"
         print(f"  {info['experiment']:20s}  {state_str:20s}  "
               f"{'COMMITTED' if committed else 'not committed'}")
-    except NameError:
+    except (AttributeError, KeyError):
         pass
 
 # Waveform regression

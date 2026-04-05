@@ -330,30 +330,30 @@ def test_display_plot_groups_protocol_block(fake_session, gate_arch_modules):
     assert len(fig.axes[0].patches) >= len(circuit.gates) + len(circuit.blocks)
 
 
-def test_cluster1_runner_dry_run_is_default(fake_session, gate_arch_modules):
+def test_cluster2_runner_dry_run_is_default(fake_session, gate_arch_modules):
     circuit = gate_arch_modules.circuit_protocols.RamseyProtocol(tau_clks=8, n_shots=2).build()
     execution = gate_arch_modules.circuit_execution.run_compiled_circuit(fake_session, circuit)
 
     assert execution.dry_run is True
-    assert execution.cluster_name == "Cluster_1"
+    assert execution.cluster_name == "Cluster_2"
     assert execution.run_result is None
     assert fake_session.hw.run_calls == []
     assert execution.diagram_text == circuit.to_diagram_text()
 
 
-def test_cluster1_runner_rejects_any_other_cluster(fake_session, gate_arch_modules):
+def test_cluster2_runner_rejects_mismatched_hardware_cluster(fake_session, gate_arch_modules):
     circuit = gate_arch_modules.circuit_protocols.RamseyProtocol(tau_clks=8, n_shots=2).build()
-    with pytest.raises(ValueError, match="Only 'Cluster_1' is allowed"):
+    with pytest.raises(RuntimeError, match="not 'Cluster_1'"):
         gate_arch_modules.circuit_execution.run_compiled_circuit(
             fake_session,
             circuit,
-            cluster="Cluster_2",
+            cluster="Cluster_1",
             run_on_opx=True,
         )
     assert fake_session.hw.run_calls == []
 
 
-def test_cluster1_runner_requires_unambiguous_cluster_for_hardware_run(fake_session, gate_arch_modules):
+def test_cluster2_runner_requires_unambiguous_cluster_for_hardware_run(fake_session, gate_arch_modules):
     circuit = gate_arch_modules.circuit_protocols.RamseyProtocol(tau_clks=8, n_shots=2).build()
     ambiguous = SimpleNamespace(**vars(fake_session))
     del ambiguous.cluster_name
@@ -365,7 +365,7 @@ def test_cluster1_runner_requires_unambiguous_cluster_for_hardware_run(fake_sess
         )
 
 
-def test_cluster1_runner_executes_only_when_explicit(fake_session, gate_arch_modules):
+def test_cluster2_runner_executes_only_when_explicit(fake_session, gate_arch_modules):
     circuit = gate_arch_modules.circuit_protocols.RamseyProtocol(tau_clks=8, n_shots=2).build()
     execution = gate_arch_modules.circuit_execution.run_compiled_circuit(
         fake_session,
@@ -376,8 +376,21 @@ def test_cluster1_runner_executes_only_when_explicit(fake_session, gate_arch_mod
 
     assert execution.dry_run is False
     assert execution.run_result is not None
+    assert len(fake_session.runner_calls) == 1
     assert len(fake_session.hw.run_calls) == 1
     assert fake_session.hw.run_calls[0]["kwargs"]["print_report"] is False
+
+
+def test_cluster2_runner_rejects_hardware_execution_in_simulation_mode(fake_session, gate_arch_modules):
+    circuit = gate_arch_modules.circuit_protocols.RamseyProtocol(tau_clks=8, n_shots=2).build()
+    fake_session.simulation_mode = True
+
+    with pytest.raises(RuntimeError, match="simulation mode"):
+        gate_arch_modules.circuit_execution.run_compiled_circuit(
+            fake_session,
+            circuit,
+            run_on_opx=True,
+        )
 
 
 def test_ramsey_circuit_text_matches_golden(gate_arch_modules):

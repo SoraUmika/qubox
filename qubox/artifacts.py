@@ -149,8 +149,7 @@ def save_config_snapshot(
     Parameters
     ----------
     session
-        An active session (legacy or qubox Session with ``__getattr__``
-        forwarding to the legacy session).
+        An active session exposing the standard qubox session surface.
     tag : str
         Optional label included in the filename.
     dest_dir : Path, optional

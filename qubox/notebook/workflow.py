@@ -5,9 +5,9 @@ for Jupyter notebook environments.  Core logic (checkpoints, fit gates, patch
 preview, pulse seeding) lives in ``qubox.workflow`` and is reusable from
 scripts and CI without a notebook kernel.
 
-.. deprecated::
-    Direct imports from ``qubox.notebook.workflow`` are still supported but
-    new code should prefer ``qubox.workflow`` for portable primitives.
+.. note::
+    This module re-exports portable primitives from ``qubox.workflow``.
+    For non-notebook usage, import directly from ``qubox.workflow``.
 """
 
 from __future__ import annotations

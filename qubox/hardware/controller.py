@@ -10,11 +10,12 @@ import contextlib
 import datetime
 import json
 import logging
+import socket
 import threading
 import warnings
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Union
+from typing import Any, Callable, Iterable, Literal
 
 import numpy as np
 from grpclib.exceptions import StreamTerminatedError
@@ -27,9 +28,10 @@ from ..core.utils import get_nested, key_like, numeric_keys_to_ints, require, wi
 from .config_engine import ConfigEngine, QM_TOPLEVEL_WHITELIST
 
 _logger = logging.getLogger(__name__)
+_QM_REACHABILITY_TIMEOUT_S = 2.0
 
 # String → OctaveLOSource mapping
-LO_SOURCE_MAP: Dict[str, OctaveLOSource] = {
+LO_SOURCE_MAP: dict[str, OctaveLOSource] = {
     "internal": OctaveLOSource.Internal,
     "lo1": OctaveLOSource.LO1,
     "lo2": OctaveLOSource.LO2,
@@ -53,15 +55,15 @@ class HardwareController:
         qmm: QuantumMachinesManager,
         config_engine: ConfigEngine,
         *,
-        default_output_mode: Optional[RFOutputMode] = RFOutputMode.on,
+        default_output_mode: RFOutputMode | None = RFOutputMode.on,
     ):
         self._qmm = qmm
         self.config = config_engine
-        self.qm: Optional[QuantumMachine] = None
+        self.qm: QuantumMachine | None = None
         self._lock = threading.RLock()
 
         # Element tracking: {name: {"LO": float, "IF": float, "gain": float}}
-        self.elements: Dict[str, Dict[str, float]] = {}
+        self.elements: dict[str, dict[str, float]] = {}
         self._default_output_mode = default_output_mode
 
         # External device manager (optional, set via set_device_manager)
@@ -73,12 +75,38 @@ class HardwareController:
         self._last_auto_calibration: dict[str, Any] | None = None
 
     # ─── Connection lifecycle ─────────────────────────────────────
-    def open_qm(self, config_dict: Optional[dict] = None, *, close_other_machines: bool = True) -> None:
+    def _get_qmm_endpoint(self) -> tuple[str | None, int | None]:
+        """Return the resolved QM manager endpoint if available."""
+        server_details = getattr(self._qmm, "_server_details", None)
+        if server_details is not None:
+            connection_details = getattr(server_details, "connection_details", None)
+            host = getattr(connection_details, "host", None) or getattr(server_details, "host", None)
+            port = getattr(connection_details, "port", None) or getattr(server_details, "port", None)
+            return host, int(port) if port is not None else None
+        return None, getattr(self._qmm, "_port", None)
+
+    def _ensure_qmm_endpoint_reachable(self, timeout: float = _QM_REACHABILITY_TIMEOUT_S) -> None:
+        """Fail fast when the configured QM endpoint cannot be reached."""
+        host, port = self._get_qmm_endpoint()
+        if not host or port is None:
+            _logger.warning("Skipping QM endpoint reachability preflight; endpoint details are unavailable.")
+            return
+
+        try:
+            with socket.create_connection((host, port), timeout=float(timeout)):
+                return
+        except OSError as exc:
+            raise ConnectionError(
+                f"QM endpoint {host}:{port} is unreachable before open_qm: {exc}"
+            ) from exc
+
+    def open_qm(self, config_dict: dict | None = None, *, close_other_machines: bool = True) -> None:
         """Open a QM instance with the given or auto-built config."""
         with self._lock:
             if self.qm is not None:
                 _logger.warning("open_qm() called while QM already open; closing existing instance first.")
                 self.close()
+            self._ensure_qmm_endpoint_reachable()
             cfg = config_dict or self.config.build_qm_config()
             cfg_qm = {k: v for k, v in numeric_keys_to_ints(cfg).items() if k in QM_TOPLEVEL_WHITELIST}
             try:
@@ -95,8 +123,10 @@ class HardwareController:
     def close(self) -> None:
         """Close all elements and QMs."""
         for element in list(self.elements.keys()):
-            with contextlib.suppress(Exception):
+            try:
                 self.set_octave_output(element, RFOutputMode.off)
+            except Exception:
+                _logger.warning("Failed to disable Octave output for element %r during close", element)
         self._qmm.close_all_qms()
         self.qm = None
         _logger.info("All QMs closed; controller reset.")
@@ -110,15 +140,15 @@ class HardwareController:
                 self.config.save_hardware()
 
     # ─── Element table ────────────────────────────────────────────
-    def _build_element_table(self) -> Dict[str, Dict]:
+    def _build_element_table(self) -> dict[str, dict]:
         require(self.qm is not None, "QM not initialized", ConfigError)
         cfg = self.qm.get_config()
         return self._parse_element_table(cfg)
 
-    def _parse_element_table(self, cfg: dict) -> Dict[str, Dict]:
+    def _parse_element_table(self, cfg: dict) -> dict[str, dict]:
         """Parse element LO/IF data from a QM config dict."""
         octaves = cfg.get("octaves") or {}
-        elems: Dict[str, Dict] = {}
+        elems: dict[str, dict] = {}
         for el, info in (cfg.get("elements") or {}).items():
             if el.startswith("__"):
                 continue
@@ -319,7 +349,7 @@ class HardwareController:
         _logger.info("Set LO source for element '%s' to %s", el, lo_port.name)
 
     # ─── Live hardware commands ───────────────────────────────────
-    def init_config(self, output_mode: Optional[RFOutputMode] = None) -> None:
+    def init_config(self, output_mode: RFOutputMode | None = None) -> None:
         """Initialize all elements: configure LO sources and output modes."""
         self._require_qm()
         mode = output_mode if output_mode is not None else self._default_output_mode
@@ -355,8 +385,8 @@ class HardwareController:
         el: str,
         powers_dbm: Iterable[float],
         *,
-        target_LO: Optional[float] = None,
-        target_IF: Optional[float] = None,
+        target_LO: float | None = None,
+        target_IF: float | None = None,
         sa_device_name: str = "sa124b",
         mixer_cal_config: Any = None,
         settle_s: float = 0.05,
@@ -462,13 +492,13 @@ class HardwareController:
         self.elements[el]["gain"] = gain
         _logger.info("Set gain for '%s' to %.1f dB", el, gain)
 
-    def get_element_lo(self, el: Union[str, Iterable[str]]) -> Union[float, list[float]]:
+    def get_element_lo(self, el: str | Iterable[str]) -> float | list[float]:
         if isinstance(el, (list, tuple)):
             return [self.elements[e]["LO"] for e in el]
         self._check_el(el)
         return self.elements[el]["LO"]
 
-    def get_element_if(self, el: Union[str, Iterable[str]]) -> Union[float, list[float]]:
+    def get_element_if(self, el: str | Iterable[str]) -> float | list[float]:
         if isinstance(el, (list, tuple)):
             return [self.elements[e]["IF"] for e in el]
         self._check_el(el)
@@ -477,12 +507,12 @@ class HardwareController:
     def calculate_el_if_fq(
         self,
         el: str,
-        freq: Union[float, Iterable[float], np.ndarray],
-        lo_freq: Optional[float] = None,
+        freq: float | Iterable[float, np.ndarray],
+        lo_freq: float | None = None,
         *,
         max_if_hz: float = 500e6,
         as_int: bool = False,
-    ) -> Union[float, np.ndarray]:
+    ) -> float | np.ndarray:
         self._check_el(el)
         lo = self.elements[el]["LO"] if lo_freq is None else lo_freq
         if lo is None:
@@ -505,9 +535,9 @@ class HardwareController:
     # ─── Calibration ──────────────────────────────────────────────
     def calibrate_element(
         self,
-        el: Optional[Union[str, Iterable[str]]] = None,
-        target_LO: Optional[Union[float, list[float]]] = None,
-        target_IF: Optional[Union[float, list[float]]] = None,
+        el: str | Iterable[str] | None = None,
+        target_LO: float | list[float] | None = None,
+        target_IF: float | list[float] | None = None,
         save_to_db: bool = True,
         output_mode: RFOutputMode = RFOutputMode.on,
         *,
@@ -583,9 +613,9 @@ class HardwareController:
     # ── Auto calibration (original implementation) ────────────
     def _calibrate_auto(
         self,
-        el: Optional[Union[str, Iterable[str]]],
-        target_LO: Optional[Union[float, list[float]]],
-        target_IF: Optional[Union[float, list[float]]],
+        el: str | Iterable[str] | None,
+        target_LO: float | list[float] | None,
+        target_IF: float | list[float] | None,
         save_to_db: bool,
         output_mode: RFOutputMode,
         *,
@@ -707,10 +737,12 @@ class HardwareController:
                 except RuntimeWarning as exc:
                     warning_msgs = [str(exc)]
                     warning_indicates_failure = True
-                    with contextlib.suppress(Exception):
+                    try:
                         running_job = self.qm.get_running_job()
                         if running_job is not None:
                             running_job.halt()
+                    except Exception:
+                        _logger.warning("Failed to halt running job after calibration RuntimeWarning")
 
             if not warning_msgs:
                 warning_msgs = [str(w.message) for w in caught_warnings if issubclass(w.category, RuntimeWarning)]
@@ -887,9 +919,9 @@ class HardwareController:
     def _manual_calibrate_elements(
         self,
         calibrator,
-        el: Optional[Union[str, Iterable[str]]],
-        target_LO: Optional[Union[float, list[float]]],
-        target_IF: Optional[Union[float, list[float]]],
+        el: str | Iterable[str] | None,
+        target_LO: float | list[float] | None,
+        target_IF: float | list[float] | None,
         save_to_db: bool,
         output_mode: RFOutputMode,
         method: str,
@@ -966,7 +998,7 @@ class HardwareController:
     def list_open_qms(self) -> list[str]:
         return list(self._qmm.list_open_quantum_machines())
 
-    def attach_to_open_qm(self, qm_id: Optional[str] = None) -> str:
+    def attach_to_open_qm(self, qm_id: str | None = None) -> str:
         qms = self.list_open_qms()
         require(len(qms) > 0, "No open QMs found.", ConnectionError)
         if qm_id is None:

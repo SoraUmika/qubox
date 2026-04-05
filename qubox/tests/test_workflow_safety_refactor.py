@@ -45,20 +45,11 @@ def _load_module(rel_path: str, name: str):
 
 
 def _load_as_submodule(rel_path: str, dotted_name: str):
-    """Load a .py file as a submodule of the qubox_v2 fake package tree.
-
-    This sets ``__package__`` so that relative imports resolve via the
-    stubs previously injected into ``sys.modules``.
-    """
+    """Load a .py file as a submodule of the qubox_v2 fake package tree."""
     if dotted_name in sys.modules:
         return sys.modules[dotted_name]
-    spec = importlib.util.spec_from_file_location(
-        dotted_name,
-        _ROOT / rel_path,
-        submodule_search_locations=[],
-    )
+    spec = importlib.util.spec_from_file_location(dotted_name, _ROOT / rel_path)
     mod = importlib.util.module_from_spec(spec)
-    mod.__package__ = dotted_name.rsplit(".", 1)[0]
     sys.modules[dotted_name] = mod
     spec.loader.exec_module(mod)
     return mod

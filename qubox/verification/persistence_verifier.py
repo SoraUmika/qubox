@@ -61,7 +61,7 @@ def scan_json(root: Path) -> dict[str, Any]:
 
 
 def _npz_policy_projection(path: Path) -> dict[str, Any]:
-    with np.load(path, allow_pickle=True) as zf:
+    with np.load(path, allow_pickle=False) as zf:
         data = {k: zf[k] for k in zf.files}
 
     arrays, _, dropped = split_output_for_persistence(data)

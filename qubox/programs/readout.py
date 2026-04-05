@@ -1,10 +1,10 @@
-"""qubox_v2.programs.readout
-============================
+"""qubox.programs.readout
+=========================
 Readout-specific QUA program factories (IQ blobs, traces, butterfly, etc.).
 
 Imports readout functions from ``builders`` sub-modules::
 
-    from qubox_v2.programs.readout import iq_blobs, readout_butterfly_measurement
+    from qubox.programs.readout import iq_blobs, readout_butterfly_measurement
 """
 from .builders.readout import (
     iq_blobs,

@@ -1,5 +1,5 @@
-"""qubox_v2.core.artifacts
-===========================
+"""qubox.core.artifacts
+======================
 Experiment artifact persistence — config snapshots, calibration summaries,
 and run metadata.
 
@@ -8,7 +8,7 @@ before an experiment run, and for collecting post-run summaries.
 
 Usage::
 
-    from qubox_v2.core.artifacts import save_config_snapshot, save_run_summary
+    from qubox.core.artifacts import save_config_snapshot, save_run_summary
 
     # Before experiment
     save_config_snapshot(session, tag="pre_T1")
@@ -27,9 +27,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .persistence import sanitize_mapping_for_json
+from .protocols import SessionProtocol
 
 if TYPE_CHECKING:
-    from ..experiments.session import SessionManager
     from ..hardware.program_runner import RunResult
 
 _logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ def _json_serialiser(obj: Any) -> Any:
 
 
 def save_config_snapshot(
-    session: "SessionManager",
+    session: SessionProtocol,
     *,
     tag: str = "",
     dest_dir: Path | str | None = None,
@@ -70,8 +70,8 @@ def save_config_snapshot(
 
     Parameters
     ----------
-    session : SessionManager
-        An active session.
+    session : SessionProtocol
+        An active session exposing the standard qubox session surface.
     tag : str
         Optional label to include in the filename.
     dest_dir : Path, optional
@@ -162,7 +162,7 @@ def save_config_snapshot(
 
 
 def save_run_summary(
-    session: "SessionManager",
+    session: SessionProtocol,
     result: "RunResult | None" = None,
     *,
     tag: str = "",
@@ -173,7 +173,7 @@ def save_run_summary(
 
     Parameters
     ----------
-    session : SessionManager
+    session : SessionProtocol
         An active session (used for path resolution).
     result : RunResult, optional
         The experiment run result.  If provided, metadata is extracted.

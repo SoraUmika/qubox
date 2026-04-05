@@ -1,5 +1,5 @@
-"""qubox_v2.experiments.result
-==============================
+"""qubox.experiments.result
+============================
 Unified result containers for experiment runs, analysis, and simulation.
 
 ``RunResult`` already exists in ``hardware.program_runner`` and is
@@ -14,8 +14,8 @@ provenance chain.
 
 Usage::
 
-    from qubox_v2.experiments.result import RunResult, AnalysisResult
-    from qubox_v2.experiments.result import ProgramBuildResult, SimulationResult
+    from qubox.experiments.result import RunResult, AnalysisResult
+    from qubox.experiments.result import ProgramBuildResult, SimulationResult
 
     result: RunResult = experiment.run(...)
     analysis = AnalysisResult.from_run(result, fit_params={...})

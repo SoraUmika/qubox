@@ -1,10 +1,10 @@
-"""qubox_v2.programs.cavity
-============================
+"""qubox.programs.cavity
+=========================
 Cavity / storage-mode QUA program factories.
 
 Imports cavity-related functions from ``builders`` sub-modules::
 
-    from qubox_v2.programs.cavity import storage_chi_ramsey
+    from qubox.programs.cavity import storage_chi_ramsey
 """
 from .builders.cavity import (
     storage_wigner_tomography,

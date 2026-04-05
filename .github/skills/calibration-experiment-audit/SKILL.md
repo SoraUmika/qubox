@@ -8,126 +8,42 @@ argument-hint: "Name the experiment or calibration flow to audit"
 
 ## Purpose
 
-Trace and verify the full lifecycle of experiments and calibration flows in qubox — from experiment construction through data acquisition, analysis, fit evaluation, patch building, and state application. Detects silent failures, contract violations, and data flow gaps.
-
-## When to Use
-
-- Auditing a specific experiment class (e.g., Rabi, Ramsey, readout calibration)
-- Verifying the CalibrationOrchestrator pipeline for a new experiment type
-- Debugging why calibration results seem stale or incorrect
-- Checking that a new experiment subclass correctly implements the base contract
-- Reviewing cQED parameter propagation from fit → patch → session state
+Trace the full lifecycle from experiment construction → data acquisition → analysis → fit evaluation → patch building → state application. Detect silent failures, contract violations, and data flow gaps.
 
 ## Procedure
 
-### Step 1 — Identify the Experiment
+### 1. Identify the Experiment
 
-1. Locate the experiment class file in `qubox/legacy/experiments/`
-2. Read its class definition, `__init__`, `run()`, and `analyze()` methods
-3. Identify which base class it inherits from (`ExperimentRunner`, `cQED_Experiment`, etc.)
-4. Map its dependencies: which hardware elements, pulse operations, and analysis tools it uses
+Locate the class in `qubox/legacy/experiments/`. Read `__init__`, `run()`, `analyze()`. Map base class and dependencies (hardware elements, pulse ops, analysis tools).
 
-### Step 2 — Trace the Data Flow
-
-Follow data through the full pipeline:
+### 2. Trace the Data Flow
 
 ```
-ExperimentRunner.__init__()
-    → ConfigBuilder builds QUA config
-    → PulseOperationManager registers pulses
-    → HardwareController connects
-    
-experiment.run(**kwargs)
-    → ProgramRunner executes QUA program
-    → Returns RunResult with raw data
-    
-CalibrationOrchestrator.run_experiment(exp)
-    → Wraps run() result as Artifact
-    
-CalibrationOrchestrator.analyze(exp, artifact)
-    → exp.analyze(pseudo_result) → Output with fit, metrics, metadata
-    → Evaluates FitResult.success
-    → Builds CalibrationResult with quality dict
-    
-CalibrationOrchestrator.build_patch(result)
-    → Applies patch_rules to CalibrationResult.params
-    → Returns Patch object
-    
-CalibrationOrchestrator.apply_patch(patch)
-    → Captures pre-patch snapshot
-    → Mutates session state
-    → Rollback on failure
+ExperimentRunner.__init__() → ConfigBuilder → PulseOperationManager → HardwareController
+experiment.run() → ProgramRunner → RunResult
+CalibrationOrchestrator.run_experiment() → Artifact
+CalibrationOrchestrator.analyze() → Output with fit/metrics → FitResult.success evaluation → CalibrationResult
+CalibrationOrchestrator.build_patch() → patch_rules → Patch
+CalibrationOrchestrator.apply_patch() → pre-patch snapshot → mutate → rollback on failure
 ```
 
-For each stage, verify:
-- [ ] Data types match expected signatures
-- [ ] Error conditions are handled (not silently swallowed)
-- [ ] Metadata flows through (calibration_kind, artifact_id)
+At each stage verify: types match signatures, errors are handled (not swallowed), metadata flows through.
 
-### Step 3 — FitResult Contract Audit
+### 3. FitResult Contract
 
-Check the experiment's `analyze()` method:
+- `analyze()` produces `Output` with `.fit` attribute
+- `fit.success is False` → `quality["passed"] = False`
+- Fit params extracted only after success check
+- `r_squared` compared against 0.5 threshold
 
-1. Does it produce an `Output` with a `.fit` attribute?
-2. If `fit.success is False`, does the downstream code set `quality["passed"] = False`?
-3. Are fit parameters (e.g., frequency, T1, T2) extracted only after success check?
-4. Is `r_squared` computed and compared against the 0.5 threshold?
+### 4. Patch Rule Validation
 
-Reference: [Contract Checklist](./references/audit-checklist.md)
+Find matching rules in `calibration/patch_rules.py` → `default_patch_rules()`. Verify: transforms are correct, units/scaling/naming match session state keys, target path exists.
 
-### Step 4 — Patch Rule Validation
+### 5. Cross-Experiment Consistency
 
-For the experiment's calibration kind:
+For related experiments (e.g., resonator → qubit spectroscopy → Rabi): verify dependency chain respected, upstream results consumed (not re-derived), parameter naming consistent.
 
-1. Find the matching rules in `calibration/patch_rules.py` → `default_patch_rules()`
-2. Verify each rule transforms `CalibrationResult.params` correctly
-3. Check units, scaling, and naming conventions match session state keys
-4. Confirm that the patch target path in session state exists
+## Output
 
-### Step 5 — Cross-Experiment Consistency
-
-If auditing multiple related experiments (e.g., resonator spectroscopy → qubit spectroscopy → Rabi):
-
-1. Verify the calibration dependency chain is respected
-2. Check that upstream calibration results are consumed (not re-derived)
-3. Confirm parameter naming is consistent across the chain
-
-### Step 6 — Generate Audit Report
-
-```markdown
-## Experiment Audit: [ExperimentClassName]
-
-### Lifecycle Trace
-[Data flow diagram with ✓/✗ at each stage]
-
-### FitResult Contract
-- success propagation: [PASS/FAIL]
-- r_squared threshold: [PASS/FAIL/N/A]
-- stale parameter risk: [NONE/LOW/HIGH]
-
-### Patch Rules
-| Param | Rule | Target Key | Status |
-|-------|------|------------|--------|
-
-### Data Flow Issues
-[List of gaps, type mismatches, or silent failures]
-
-### Recommendations
-[Ordered fixes]
-```
-
-## Input Format
-
-Provide one of:
-- An experiment class name (e.g., `Rabi`, `ReadoutCalibration`)
-- A calibration flow description
-- A specific failure symptom to diagnose
-
-## Output Format
-
-Structured markdown audit report as shown in Step 6.
-
-## Resources
-
-- [Audit Checklist](./references/audit-checklist.md) — Per-experiment verification items
-- [Parameter Flow Map](./references/parameter-flow.md) — cQED parameter dependencies
+Structured audit report: lifecycle trace with ✓/✗, FitResult contract status, patch rule table, data flow issues, recommendations.

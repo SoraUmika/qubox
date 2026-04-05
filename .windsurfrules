@@ -14,7 +14,7 @@ correctness is never optional.
 
 ## Python
 
-- Version: **3.12.13** (fallback: 3.11.8 on ECE-SHANKAR-07 only)
+- Version: **3.12.10** (fallback: 3.11.8 on ECE-SHANKAR-07 only)
 - Forbidden: any other Python version unless user explicitly authorizes
 - Style: PEP 8, type hints on all public functions, docstrings on all public classes/methods
 - Linter: ruff, 120-char line length
@@ -57,10 +57,10 @@ correctness is never optional.
 - Do not introduce new abstractions without justification from repeated structure.
 - Extend existing patterns before creating new ones.
 
-## Legacy Code
+## Import Surfaces
 
-- `qubox_v2_legacy` is deprecated. All legacy code now lives in `qubox/legacy/`.
-- Do not add new imports from `qubox_v2_legacy` — use `qubox.legacy.*` instead.
+- `qubox_v2_legacy` and `qubox.legacy` do not exist — never import from them.
+- The canonical import surfaces are `qubox`, `qubox.notebook`, and `qubox.notebook.advanced`.
 - The notebook import surface is `qubox.notebook`.
 
 ## Prompt Logging
@@ -78,7 +78,7 @@ correctness is never optional.
 - Do not use Python versions outside 3.12.x / 3.11.x.
 - Do not skip docs updates when user-visible behavior changes.
 - Do not scatter temp scripts or utilities outside `tools/`.
-- Do not import directly from `qubox_v2_legacy`.
+- Do not import from `qubox_v2_legacy` or `qubox.legacy` — those packages do not exist.
 - Do not introduce new abstractions without justification.
 
 ## Hosted Server Config

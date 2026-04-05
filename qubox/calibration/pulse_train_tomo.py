@@ -2,7 +2,7 @@
 
 QUA-dependent functions (``make_state_prep``, ``run_pulse_train_tomography``)
 live here.  Pure analysis functions have moved to
-``qubox_v2.analysis.pulse_train_models`` and are re-exported below for
+``qubox_tools.fitting.pulse_train`` and are re-exported below for
 backward compatibility.
 """
 from __future__ import annotations

@@ -141,7 +141,10 @@ class HardwareConfig(BaseModel):
     # --- I/O helpers ---
     @classmethod
     def from_json(cls, path: str | Path) -> HardwareConfig:
-        raw = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+        try:
+            raw = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Malformed JSON at {path}: {e}") from e
         return cls.model_validate(raw)
 
     @classmethod

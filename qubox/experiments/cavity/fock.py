@@ -68,7 +68,7 @@ class FockResolvedSpectroscopy(ExperimentBase):
                 raise ValueError(
                     "state_prep is required for FockResolvedSpectroscopy. "
                     "Provide an explicit notebook-defined preparation macro via state_prep=. "
-                    "Temporary compatibility path: set allow_default_state_prep=True to use legacy no-op prep."
+                    "Compatibility path (added 2026-03): set allow_default_state_prep=True to use legacy no-op prep."
                 )
             from qm.qua import wait
             def state_prep():
@@ -244,7 +244,7 @@ class FockResolvedT1(ExperimentBase):
             raise RuntimeError(
                 f"Missing displacement pulses on element {attr.st_el!r}: {missing}. "
                 f"Register them first via:\n"
-                f"  from qubox_v2.tools.generators import ensure_displacement_ops\n"
+                f"  from qubox.tools.generators import ensure_displacement_ops\n"
                 f"  ensure_displacement_ops(session.pulse_mgr, element={attr.st_el!r}, n_max={len(fock_fqs)})\n"
                 f"  session.burn_pulses()"
             )
@@ -455,7 +455,7 @@ class FockResolvedRamsey(ExperimentBase):
             raise RuntimeError(
                 f"Missing displacement pulses on element {attr.st_el!r}: {missing}. "
                 f"Register them first via:\n"
-                f"  from qubox_v2.tools.generators import ensure_displacement_ops\n"
+                f"  from qubox.tools.generators import ensure_displacement_ops\n"
                 f"  ensure_displacement_ops(session.pulse_mgr, element={attr.st_el!r}, n_max={len(fock_fqs)})\n"
                 f"  session.burn_pulses()"
             )
@@ -669,7 +669,7 @@ class FockResolvedPowerRabi(ExperimentBase):
             raise RuntimeError(
                 f"Missing displacement pulses on element {attr.st_el!r}: {missing}. "
                 f"Register them first via:\n"
-                f"  from qubox_v2.tools.generators import ensure_displacement_ops\n"
+                f"  from qubox.tools.generators import ensure_displacement_ops\n"
                 f"  ensure_displacement_ops(session.pulse_mgr, element={attr.st_el!r}, n_max={len(fock_fqs)})\n"
                 f"  session.burn_pulses()"
             )

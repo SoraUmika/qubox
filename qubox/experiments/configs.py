@@ -11,7 +11,7 @@ Benefits:
 
 Example::
 
-    from qubox_v2.experiments.configs import PowerRabiConfig
+    from qubox.experiments.configs import PowerRabiConfig
 
     cfg = PowerRabiConfig(max_gain=0.4, n_avg=2000)
     result = rabi.run(cfg, drive=qb, readout=ro)

@@ -149,6 +149,7 @@ class QueueManager:
         quiet: bool = True,
         desc: str = "Running queued...",
         sleep_s: float = 0.05,
+        allow_partial_results: bool = False,
         **proc_kwargs,
     ) -> list[RunResult]:
         """Run queued jobs sequentially with a single global progress bar."""
@@ -206,25 +207,44 @@ class QueueManager:
                         time.sleep(float(sleep_s))
 
                 try:
-                    out = self.runner._collect_output_from_job(job, print_report=print_report)
+                    out = self.runner._collect_output_from_job(
+                        job,
+                        print_report=print_report,
+                        allow_partial_results=allow_partial_results,
+                    )
                 finally:
                     if auto_job_halt:
                         with contextlib.suppress(Exception):
                             job.halt()
 
+                processor_errors: list[str] = []
                 if procs:
                     for proc in procs:
                         try:
                             out = proc(out, **proc_kwargs)
                         except Exception as e:
+                            processor_errors.append(
+                                f"processor={getattr(proc, '__name__', repr(proc))}: {e}"
+                            )
                             _logger.error("Processor %s failed: %s", getattr(proc, "__name__", repr(proc)), e)
+
+                if processor_errors and not allow_partial_results:
+                    preview = "; ".join(processor_errors[:3])
+                    if len(processor_errors) > 3:
+                        preview = f"{preview}; ... ({len(processor_errors)} total)"
+                    raise JobError(f"Queued post-processing failed: {preview}")
 
                 bar.n = offset + int(n_total)
                 bar.refresh()
 
+                metadata = {"n_total": int(n_total), "queued": True}
+                if processor_errors:
+                    metadata["processor_errors"] = list(processor_errors)
+                if allow_partial_results:
+                    metadata["allow_partial_results"] = True
                 results.append(RunResult(
                     mode=ExecMode.HARDWARE, output=out, sim_samples=None,
-                    metadata={"n_total": int(n_total), "queued": True},
+                    metadata=metadata,
                 ))
                 offset += int(n_total)
 
@@ -250,6 +270,7 @@ class QueueManager:
         print_report: bool = False,
         auto_job_halt: bool = True,
         sleep_s: float = 0.05,
+        allow_partial_results: bool = False,
         **proc_kwargs,
     ) -> list[RunResult]:
         """Submit many programs then run them sequentially with two progress bars."""
@@ -261,7 +282,9 @@ class QueueManager:
             pendings, n_totals=n_totals, processors=processors,
             progress_handle=progress_handle, show_total_progress=show_total_progress,
             print_report=print_report, auto_job_halt=auto_job_halt,
-            quiet=quiet, desc=run_desc, sleep_s=sleep_s, **proc_kwargs,
+            quiet=quiet, desc=run_desc, sleep_s=sleep_s,
+            allow_partial_results=allow_partial_results,
+            **proc_kwargs,
         )
 
     # ─── Logging ──────────────────────────────────────────────────

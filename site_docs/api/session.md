@@ -71,10 +71,11 @@ analysis = exp.analyze(result)
 |----------|--------|----------|
 | `session.exp.qubit` | Qubit experiments | `spectroscopy`, `power_rabi`, `t1`, `t2_ramsey` |
 | `session.exp.resonator` | Resonator experiments | `spectroscopy`, `power_chevron` |
-| `session.exp.calibration` | Calibration | `iq_blob`, `allxy`, `drag_calibration`, `rb` |
-| `session.exp.cavity` | Cavity / storage | `storage_spectroscopy`, `chi_ramsey`, `fock_resolved` |
-| `session.exp.tomography` | Tomography | `state_tomography`, `wigner` |
-| `session.exp.spa` | SPA optimization | `flux_sweep`, `pump_optimization` |
+| `session.exp.readout` | Readout experiments | `trace`, `iq_blobs`, `butterfly` |
+| `session.exp.calibration` | Calibration | `all_xy`, `drag`, `rb` |
+| `session.exp.storage` | Cavity / storage | `spectroscopy`, `chi_ramsey`, `fock_resolved` |
+| `session.exp.tomography` | Tomography | `qubit_state`, `wigner` |
+| `session.exp.reset` | Active reset | `active` |
 
 ## Session Lifecycle
 

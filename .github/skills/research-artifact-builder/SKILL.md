@@ -6,114 +6,30 @@ argument-hint: "Describe the artifact to generate (e.g., 'API docs for calibrati
 
 # Research Artifact Builder
 
-## Purpose
+## Artifact Types
 
-Generate structured documentation artifacts from the qubox codebase — README updates, API docs, changelogs, architecture docs, experiment reports, and LaTeX-ready research writeups. Ensures documentation stays synchronized with code changes.
-
-## When to Use
-
-- After completing a refactor or feature addition
-- When preparing experiment results for publication or group meeting
-- When updating API_REFERENCE.md or ARCHITECTURE.md after code changes
-- When generating CHANGELOG.md entries for a release
-- When creating Overleaf-ready LaTeX sections from experiment data
-- When building a test case report from pytest output
+| Artifact | Source | Target | Template |
+|----------|--------|--------|----------|
+| API docs | Source code signatures + docstrings | `API_REFERENCE.md` | [api-entry.md](./assets/api-entry.md) |
+| Module summary | Module structure + public API | README or `docs/` | [module-summary.md](./assets/module-summary.md) |
+| CHANGELOG | Git diff / change description | `docs/CHANGELOG.md` (append-only) | [changelog-entry.md](./assets/changelog-entry.md) |
+| LaTeX writeup | Experiment class + fit results + plots | Overleaf-ready `.tex` | [experiment-writeup.tex](./assets/experiment-writeup.tex) |
+| Test report | Pytest output | Structured summary | — |
 
 ## Procedure
 
-### For README / API Documentation Updates
+1. **Identify scope:** Which modules changed, what artifact(s) needed.
+2. **Extract:** Read source → signatures, types, docstrings, fit results as applicable.
+3. **Generate:** Use the appropriate template. For CHANGELOG: follow [Keep a Changelog](https://keepachangelog.com/) format (Added/Changed/Fixed/Deprecated/Security).
+4. **Validate:** All documented names exist in code, types match, cross-references valid.
 
-#### Step 1 — Identify Changes
-1. Determine which modules changed (from git diff or user description)
-2. Read the current documentation files that need updating
-3. Read the source code of changed modules to extract new/modified APIs
+## LaTeX Specifics
 
-#### Step 2 — Extract API Signatures
-For each changed public class/function:
-1. Read the source file
-2. Extract: name, parameters (with types), return type, docstring
-3. Note any breaking changes vs. previous documentation
+Structure: Introduction → Methods (QUA program, pulse sequence) → Results (fit params ± uncertainties, plots) → Discussion.
+Use `siunitx` for units, figure placeholders with captions, parameter tables.
 
-#### Step 3 — Generate Documentation
-Use the appropriate template from [templates](./assets/):
+## Rules
 
-- **API entry**: [api-entry.md](./assets/api-entry.md)
-- **Module summary**: [module-summary.md](./assets/module-summary.md)
-- **CHANGELOG entry**: [changelog-entry.md](./assets/changelog-entry.md)
-
-#### Step 4 — Validate
-1. Verify all public names in documentation exist in code
-2. Verify parameter types match source
-3. Ensure cross-references (links to other docs) are valid
-
----
-
-### For LaTeX / Overleaf Research Writeups
-
-#### Step 1 — Gather Data
-1. Identify the experiment(s) to document
-2. Read experiment class source for methodology
-3. Collect fit results, parameters, plots from analysis output
-4. Read any existing notebook analysis
-
-#### Step 2 — Structure the Writeup
-Follow the [LaTeX template](./assets/experiment-writeup.tex):
-
-1. **Introduction**: Experiment purpose, system parameters
-2. **Methods**: QUA program structure, pulse sequence, measurement protocol
-3. **Results**: Fit parameters with uncertainties, plots, comparison to theory
-4. **Discussion**: Quality assessment, limitations, next steps
-
-#### Step 3 — Generate LaTeX
-Produce compilable LaTeX using the template. Include:
-- Proper SI units via `siunitx`
-- Figure placeholders with captions
-- Table of fit parameters with uncertainties
-- References to qubox module/class names
-
----
-
-### For CHANGELOG Entries
-
-#### Step 1 — Classify Changes
-Categorize each change as:
-- **Added**: New features, modules, experiments
-- **Changed**: Modified behavior, API changes
-- **Fixed**: Bug fixes, contract violations resolved
-- **Deprecated**: Features marked for removal
-- **Security**: Vulnerability fixes
-
-#### Step 2 — Write Entry
-Follow [Keep a Changelog](https://keepachangelog.com/) format:
-```markdown
-## [version] - YYYY-MM-DD
-
-### Added
-- Description of new feature (#issue)
-
-### Fixed
-- Description of bug fix (#issue)
-```
-
-Append to `docs/CHANGELOG.md` (append-only policy).
-
-## Input Format
-
-Provide one of:
-- A description of what changed and what documentation to update
-- An experiment name and results to document
-- A version number for CHANGELOG generation
-
-## Output Format
-
-Depends on artifact type:
-- **Markdown**: Ready to paste into target `.md` file
-- **LaTeX**: Compilable `.tex` content with `\section{}` structure
-- **CHANGELOG**: Formatted entry to append to `docs/CHANGELOG.md`
-
-## Resources
-
-- [API Entry Template](./assets/api-entry.md)
-- [Module Summary Template](./assets/module-summary.md)
-- [CHANGELOG Entry Template](./assets/changelog-entry.md)
-- [LaTeX Experiment Writeup Template](./assets/experiment-writeup.tex)
+- CHANGELOG is append-only
+- Verify all public names in docs exist in code
+- LaTeX must be compilable standalone

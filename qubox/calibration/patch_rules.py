@@ -10,11 +10,14 @@ translates experiment analysis output into a concrete set of
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from .contracts import CalibrationResult, Patch
 from .transitions import resolve_pulse_name
+
+_logger = logging.getLogger(__name__)
 
 
 def _clone_payload(payload: Any) -> Any:
@@ -309,7 +312,7 @@ def default_patch_rules(session: Any) -> dict[str, list[Any]]:
         ctx_snap = getattr(session, "context_snapshot", None)
         ctx = ctx_snap() if callable(ctx_snap) else getattr(session, "attributes", None)
     except Exception:
-        pass
+        _logger.debug("Could not resolve session context for patch rule defaults", exc_info=True)
     ro_el = getattr(ctx, "ro_el", "rr") if ctx else "rr"
     disc_rule = DiscriminationRule(element=ro_el)
     quality_rule = ReadoutQualityRule(element=ro_el)

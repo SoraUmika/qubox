@@ -15,7 +15,7 @@ BEFORE EVERY TASK
 
 PYTHON VERSION
 --------------
-- Required: 3.12.13
+- Required: 3.12.10
 - Fallback: 3.11.8 — only on ECE-SHANKAR-07 (hardware access machine)
 - Forbidden: all other versions unless user explicitly authorizes
 - Style: PEP 8, ruff linter, 120-char line length
@@ -57,10 +57,10 @@ CHANGE SCOPE
 - Do not introduce new abstractions without justification from repeated structure.
 - Extend existing patterns before creating new ones.
 
-LEGACY CODE
------------
-- qubox_v2_legacy is deprecated. All legacy code now lives in qubox/legacy/.
-- Do not add new imports from qubox_v2_legacy. Use qubox.legacy.* instead.
+IMPORT SURFACES
+---------------
+- qubox_v2_legacy and qubox.legacy do not exist — never import from them.
+- The canonical import surfaces are qubox, qubox.notebook, and qubox.notebook.advanced.
 - The notebook import surface is qubox.notebook.
 
 PROMPT LOGGING
@@ -78,6 +78,6 @@ WHAT NOT TO DO
 - Do not use Python versions outside 3.12.x or 3.11.x.
 - Do not skip docs updates when user-visible behavior changes.
 - Do not scatter temp scripts or utilities outside tools/.
-- Do not import directly from qubox_v2_legacy.
+- Do not import from qubox_v2_legacy or qubox.legacy — those packages do not exist.
 - Do not introduce new abstractions without justification.
 - Do not overwrite prior prompt logs.

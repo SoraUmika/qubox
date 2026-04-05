@@ -32,6 +32,15 @@ def _load_module(rel_path: str, name: str):
     return mod
 
 
+def _load_dotted_module(rel_path: str, dotted_name: str):
+    """Load a Python file under a dotted module name so relative imports resolve cleanly."""
+    spec = importlib.util.spec_from_file_location(dotted_name, _ROOT / rel_path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[dotted_name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _get_models():
     mod_name = "_qubox_test_models"
     if mod_name in sys.modules:
@@ -79,16 +88,8 @@ def _get_patch_rules():
     sys.modules["qubox_v2"] = qubox_v2_pkg
 
     # Load as submodule of the fake package so relative imports resolve
-    spec = importlib.util.spec_from_file_location(
-        "qubox_v2.calibration.patch_rules",
-        _ROOT / "calibration/patch_rules.py",
-        submodule_search_locations=[],
-    )
-    mod = importlib.util.module_from_spec(spec)
-    mod.__package__ = "qubox_v2.calibration"
-    sys.modules["qubox_v2.calibration.patch_rules"] = mod
+    mod = _load_dotted_module("calibration/patch_rules.py", "qubox_v2.calibration.patch_rules")
     sys.modules[mod_name] = mod
-    spec.loader.exec_module(mod)
     return mod
 
 
@@ -111,10 +112,31 @@ def _get_orchestrator():
     persistence_stub.sanitize_mapping_for_json = lambda d: (dict(d), [])
     sys.modules["qubox_v2.core.persistence_policy"] = persistence_stub
 
+    qubox_pkg = sys.modules.get("qubox") or types.ModuleType("qubox")
+    qubox_pkg.__path__ = [str(_ROOT)]
+    sys.modules["qubox"] = qubox_pkg
+
+    cal_pkg = sys.modules.get("qubox.calibration") or types.ModuleType("qubox.calibration")
+    cal_pkg.__path__ = [str(_ROOT / "calibration")]
+    sys.modules["qubox.calibration"] = cal_pkg
+
+    core_pkg = sys.modules.get("qubox.core") or types.ModuleType("qubox.core")
+    core_pkg.__path__ = [str(_ROOT / "core")]
+    sys.modules["qubox.core"] = core_pkg
+
+    core_persistence_stub = types.ModuleType("qubox.core.persistence")
+    core_persistence_stub.split_output_for_persistence = lambda d: ({}, {}, [])
+    core_persistence_stub.sanitize_mapping_for_json = lambda d: (dict(d), [])
+    sys.modules["qubox.core.persistence"] = core_persistence_stub
+
     sys.modules["qubox_v2.calibration.contracts"] = contracts
     sys.modules["qubox_v2.calibration.patch_rules"] = patch_rules
+    sys.modules["qubox.calibration.contracts"] = contracts
+    sys.modules["qubox.calibration.patch_rules"] = patch_rules
 
-    return _load_module("calibration/orchestrator.py", mod_name)
+    mod = _load_dotted_module("calibration/orchestrator.py", "qubox.calibration.orchestrator")
+    sys.modules[mod_name] = mod
+    return mod
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +341,18 @@ def test_orchestrator_applies_when_passed():
     assert False in apply_calls, (
         "apply_patch(dry_run=False) must be called when calibration_result.passed=True"
     )
+
+
+def test_orchestrator_dry_run_rejects_unknown_patch_ops():
+    """Dry-run preview must fail fast when a patch contains an unknown op."""
+    orchestrator_mod = _get_orchestrator()
+    contracts = _get_contracts()
+
+    orch = orchestrator_mod.CalibrationOrchestrator(object(), patch_rules={})
+    patch = contracts.Patch(reason="bad_patch").add("TotallyUnknownOp", value=1)
+
+    with pytest.raises(ValueError, match="Unsupported patch op"):
+        orch.apply_patch(patch, dry_run=True)
 
 
 def test_calibration_result_passed_property_false():

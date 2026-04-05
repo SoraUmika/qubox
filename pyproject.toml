@@ -35,3 +35,7 @@ target-version = "py312"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore:Passing field metadata as keyword arguments is deprecated.*:DeprecationWarning:marshmallow\\.fields",
+    "ignore:Passing field metadata as keyword arguments is deprecated.*:DeprecationWarning:qm\\.program\\._qua_config_schema",
+]

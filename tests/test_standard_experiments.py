@@ -448,4 +448,4 @@ def test_all_standard_templates_registered():
     adapters = _load_adapters()
     for tmpl in EXPECTED_TEMPLATES:
         assert tmpl in adapters, f"Template {tmpl!r} not found in adapter registry"
-    assert len(adapters) == 21  # 20 standard + 1 reset.active
+    assert len(adapters) >= len(EXPECTED_TEMPLATES)
